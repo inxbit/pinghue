@@ -1,7 +1,6 @@
 # typed: false
 # frozen_string_literal: true
 
-# Copy this file to inxbit/homebrew-tap/Formula/pinghue.rb on every release.
 # Resource blocks are sourced from the published PyPI sdist closure.
 
 class Pinghue < Formula
