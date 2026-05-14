@@ -57,13 +57,19 @@ Plain pip also works inside a virtual environment:
 python -m pip install pinghue
 ```
 
+Homebrew is available through the `inxbit/tap` tap:
+
+```sh
+brew install inxbit/tap/pinghue
+```
+
+The tap repository is `inxbit/homebrew-tap`; Homebrew exposes it as `inxbit/tap`.
+
 Install the current development tree:
 
 ```sh
 python -m pip install -e ".[dev]"
 ```
-
-Homebrew support is planned through `inxbit/tap` after the first PyPI sdist is published.
 
 ## Quick Start
 
@@ -243,13 +249,13 @@ See `pinghue-threat-model.md`, `security-best-practices-report.md`, and `SECURIT
 
 ## Release Channels
 
-Planned release path for `0.1.0`:
+Published release channels:
 
 1. GitHub repository: `inxbit/pinghue`
 2. GitHub Actions CI on Linux and macOS
 3. GitHub Release with sdist and wheel artifacts
 4. PyPI trusted publishing through a protected `pypi` environment
-5. Homebrew formula generation after the PyPI sdist exists
+5. Homebrew tap: `inxbit/tap` from `inxbit/homebrew-tap`
 
 The release workflow is tag-driven:
 
