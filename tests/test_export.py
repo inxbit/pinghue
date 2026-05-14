@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import jsonschema
@@ -25,7 +25,7 @@ def build_target() -> TargetRun:
         error=None,
         samples=[
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
                 latency_ms=9.2,
                 status=SampleStatus.OK,
                 error=None,
@@ -36,8 +36,8 @@ def build_target() -> TargetRun:
 
 def test_build_output_document_matches_schema() -> None:
     document = build_output_document(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -61,8 +61,8 @@ def test_write_output_json_can_omit_samples(tmp_path: Path) -> None:
 
     write_output_json(
         output_path,
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
