@@ -24,7 +24,6 @@ The ruleset requires:
 - no force pushes
 - no branch deletion
 - stale review dismissal
-- code owner review
 - review thread resolution
 - CI status checks
 
