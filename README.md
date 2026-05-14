@@ -39,7 +39,7 @@ This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; b
 
 ## Install
 
-Recommended isolated installs:
+Recommended isolated installs from PyPI:
 
 ```sh
 uv tool install pinghue
@@ -65,11 +65,17 @@ brew install inxbit/tap/pinghue
 
 The tap repository is `inxbit/homebrew-tap`; Homebrew exposes it as `inxbit/tap`.
 
-Install the current development tree:
+For contributors, install from a local clone in editable mode:
 
 ```sh
+git clone https://github.com/inxbit/pinghue.git
+cd pinghue
+python -m venv .venv
+. .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
+
+The `dev` extra installs the local package plus the test, type-checking, linting, build, and schema-validation tools used by the repository.
 
 ## Quick Start
 
@@ -267,15 +273,14 @@ git push origin v0.1.0
 ## Development
 
 ```sh
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install -e ".[dev]"
 pytest
 ruff check .
 mypy src
 python -m build
 twine check dist/*
 ```
+
+Run the development commands from a clone installed with `python -m pip install -e ".[dev]"`.
 
 ## License
 
