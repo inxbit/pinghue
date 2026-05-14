@@ -23,7 +23,6 @@ The ruleset requires:
 - linear history
 - no force pushes
 - no branch deletion
-- one approving review
 - stale review dismissal
 - code owner review
 - review thread resolution
