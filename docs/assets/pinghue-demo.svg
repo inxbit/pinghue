@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
+  <title id="title">animated pinghue terminal demo</title>
+  <desc id="desc">Animated terminal output showing pinghue monitoring healthy, intermittent, and down hosts.</desc>
+  <style>
+    .mono { font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+    .muted { fill: #8ea0b8; }
+    .text { fill: #e6edf3; }
+    .green { fill: #7ee787; }
+    .amber { fill: #f2cc60; }
+    .red { fill: #ff7b72; }
+    .blue { fill: #58a6ff; }
+  </style>
+  <rect width="1200" height="330" rx="12" fill="#101418"/>
+  <rect x="28" y="28" width="1144" height="274" rx="10" fill="#151b22" stroke="#2a313a"/>
+  <rect x="28" y="28" width="1144" height="34" rx="10" fill="#1b2630"/>
+  <circle cx="50" cy="45" r="5" fill="#8ea0b8"/>
+  <text class="mono text" x="600" y="50" text-anchor="middle" font-size="15" font-weight="700">PingHUE v0.1.0</text>
+  <text class="mono amber" x="1140" y="50" text-anchor="end" font-size="15">probe cycle</text>
+
+  <g class="mono" font-size="16">
+    <text x="48" y="88" class="muted" font-weight="700">host</text>
+    <text x="252" y="88" class="muted" font-weight="700">address</text>
+    <text x="392" y="88" class="muted" font-weight="700">state</text>
+    <text x="536" y="88" class="muted" font-weight="700">last</text>
+    <text x="632" y="88" class="muted" font-weight="700">avg</text>
+    <text x="722" y="88" class="muted" font-weight="700">jitter</text>
+    <text x="842" y="88" class="red" font-weight="700">loss</text>
+    <text x="942" y="88" class="muted" font-weight="700">history</text>
+
+    <g>
+      <animate attributeName="opacity" values="1;1;0.96;1" dur="3s" repeatCount="indefinite"/>
+      <text x="48" y="122" class="blue" font-weight="700">1.1.1.1</text>
+      <text x="252" y="122" class="green">1.1.1.1</text>
+      <text x="392" y="122" class="green" font-weight="700">healthy</text>
+      <text x="536" y="122" class="text">4.38</text>
+      <text x="632" y="122" class="text">5.49</text>
+      <text x="722" y="122" class="text">1.76</text>
+      <text x="842" y="122" class="text">0.00%</text>
+      <text x="942" y="122" class="green">▁▁▂▁▁▁▂▁▁▁▂▁▁▂▁</text>
+    </g>
+
+    <g>
+      <animate attributeName="opacity" values="0.75;1;1;0.82;1" dur="4s" repeatCount="indefinite"/>
+      <text x="48" y="158" class="blue" font-weight="700">db.internal</text>
+      <text x="252" y="158" class="green">10.42.3.17</text>
+      <text x="392" y="158" class="amber" font-weight="700">intermittent</text>
+      <text x="536" y="158" class="amber">312.00</text>
+      <text x="632" y="158" class="text">38.42</text>
+      <text x="722" y="158" class="amber">58.70</text>
+      <text x="842" y="158" class="red">7.22%</text>
+      <text x="942" y="158"><tspan class="green">▁▂</tspan><tspan class="red">·</tspan><tspan class="amber">▇</tspan><tspan class="green">▁▁▂</tspan><tspan class="red">·</tspan><tspan class="green">▁▁</tspan><tspan class="amber">▆</tspan></text>
+    </g>
+
+    <g>
+      <animate attributeName="opacity" values="1;0.86;1;1" dur="3.5s" repeatCount="indefinite"/>
+      <text x="48" y="194" class="blue" font-weight="700">api.edge</text>
+      <text x="252" y="194" class="green">203.0.113.10</text>
+      <text x="392" y="194" class="red" font-weight="700">down</text>
+      <text x="536" y="194" class="red">-</text>
+      <text x="632" y="194" class="text">-</text>
+      <text x="722" y="194" class="text">-</text>
+      <text x="842" y="194" class="red">100.00%</text>
+      <text x="942" y="194" class="red">···············</text>
+    </g>
+
+    <g>
+      <animate attributeName="opacity" values="0;0;1;1;0" dur="5s" repeatCount="indefinite"/>
+      <text x="48" y="238" class="muted">$ pinghue -f hosts.txt --duration 180 --output maintenance.json</text>
+      <text x="48" y="266" class="green">Ready: JSON summary written to maintenance.json</text>
+    </g>
+  </g>
+</svg>

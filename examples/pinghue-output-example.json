@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "pinghue_version": "0.1.0",
+  "run": {
+    "started_at": "2026-05-14T18:32:11.420Z",
+    "ended_at": "2026-05-14T18:35:11.890Z",
+    "host": "ops-laptop-04",
+    "exit_reason": "user_quit",
+    "probe": {
+      "mode": "icmp",
+      "port": null,
+      "interval_s": 1.0,
+      "timeout_s": 1.0,
+      "address_family": "auto"
+    }
+  },
+  "targets": [
+    {
+      "target": "1.1.1.1",
+      "resolved_address": "1.1.1.1",
+      "resolved_family": "ipv4",
+      "status": "healthy",
+      "error": null,
+      "stats": {
+        "sent": 180,
+        "received": 180,
+        "loss_pct": 0.0,
+        "min_ms": 7.8,
+        "avg_ms": 9.4,
+        "max_ms": 18.2,
+        "jitter_ms": 1.1
+      },
+      "samples": [
+        {
+          "timestamp": "2026-05-14T18:32:11.420Z",
+          "latency_ms": 9.2,
+          "status": "ok",
+          "error": null
+        }
+      ]
+    }
+  ]
+}

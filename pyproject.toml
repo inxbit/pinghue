@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinghue"
+version = "0.1.0"
+description = "Colored, concurrent ICMP/TCP ping monitor for the terminal"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "inxbit" }]
+keywords = ["ping", "icmp", "tcp", "monitoring", "tui", "network"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Monitoring",
+  "Topic :: System :: Networking :: Monitoring",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "icmplib>=3.0.4,<4",
+  "textual~=8.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "jsonschema>=4.22",
+  "mypy>=1.10",
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+  "twine>=5.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/inxbit/pinghue"
+Repository = "https://github.com/inxbit/pinghue"
+Issues = "https://github.com/inxbit/pinghue/issues"
+Changelog = "https://github.com/inxbit/pinghue/blob/main/CHANGELOG.md"
+Security = "https://github.com/inxbit/pinghue/security"
+
+[project.scripts]
+pinghue = "pinghue.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pinghue = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ARG", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["pinghue"]
+strict = true

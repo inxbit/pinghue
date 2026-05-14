@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/inxbit/pinghue/schemas/output-v1.schema.json",
+  "title": "pinghue output v1",
+  "description": "Output document produced by pinghue --output PATH. One file per run. Breaking changes increment schema_version.",
+  "type": "object",
+  "required": ["schema_version", "pinghue_version", "run", "targets"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Major schema version. Consumers must check this value."
+    },
+    "pinghue_version": {
+      "type": "string"
+    },
+    "run": {
+      "$ref": "#/$defs/run"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/target"
+      }
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "required": ["started_at", "ended_at", "host", "exit_reason", "probe"],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "host": {
+          "type": "string"
+        },
+        "exit_reason": {
+          "type": "string",
+          "enum": ["user_quit", "interrupted", "deadline", "completed", "error"]
+        },
+        "probe": {
+          "$ref": "#/$defs/probe_config"
+        }
+      }
+    },
+    "probe_config": {
+      "type": "object",
+      "required": ["mode", "port", "interval_s", "timeout_s", "address_family"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["icmp", "tcp"]
+        },
+        "port": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "interval_s": {
+          "type": "number",
+          "minimum": 0.1
+        },
+        "timeout_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "address_family": {
+          "type": "string",
+          "enum": ["auto", "ipv4", "ipv6"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "tcp"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "icmp"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "required": ["target", "resolved_address", "resolved_family", "status", "error", "stats", "samples"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "resolved_address": {
+          "type": ["string", "null"]
+        },
+        "resolved_family": {
+          "type": ["string", "null"],
+          "enum": ["ipv4", "ipv6", null]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "intermittent", "down", "dns_failure", "permission_denied", "error"]
+        },
+        "error": {
+          "type": ["string", "null"]
+        },
+        "stats": {
+          "$ref": "#/$defs/stats"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sample"
+          }
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["sent", "received", "loss_pct", "min_ms", "avg_ms", "max_ms", "jitter_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "sent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "received": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "loss_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "min_ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "avg_ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "max_ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "jitter_ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "required": ["timestamp", "latency_ms", "status", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "latency_ms": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "timeout", "unreachable", "refused", "error"]
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}
