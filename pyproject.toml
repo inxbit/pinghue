@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinghue"
-version = "0.1.0"
+version = "0.2.0"
 description = "Colored, concurrent ICMP/TCP ping monitor for the terminal"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: System :: Monitoring",
   "Topic :: System :: Networking :: Monitoring",
   "Topic :: Utilities",
@@ -36,6 +37,7 @@ dev = [
   "build>=1.2",
   "jsonschema>=4.22",
   "mypy>=1.10",
+  "pip-audit>=2.9,<3",
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "ruff>=0.5",

@@ -91,10 +91,13 @@ def _read_ping_group_range() -> tuple[int, int, str] | None:
     return start, end, raw
 
 
-def _dns_probe() -> tuple[str | None, float | None, str | None]:
+DEFAULT_DNS_PROBE_NAME = "example.com"
+
+
+def _dns_probe(resolve_name: str) -> tuple[str | None, float | None, str | None]:
     start = time.perf_counter()
     try:
-        infos = socket.getaddrinfo("example.com", None, socket.AF_INET, socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(resolve_name, None, socket.AF_INET, socket.SOCK_STREAM)
     except OSError as exc:
         return None, None, str(exc)
 
@@ -139,23 +142,25 @@ def _write_root_warning(lines: list[str], *, use_color: bool) -> None:
                 "ICMP will work, but this is not recommended."
             ),
             "        Prefer one of:",
-            '          sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"',
+            '          sudo sysctl -w net.ipv4.ping_group_range="<gid> <gid>"',
             '          sudo setcap cap_net_raw+ep "$(command -v pinghue)"',
             "",
         ]
     )
 
 
-def _write_linux_fix(lines: list[str]) -> None:
+def _write_linux_fix(lines: list[str], *, egid: int) -> None:
+    group_range = f"{egid} {egid}"
     lines.extend(
         [
             "",
             "          Pick one fix:",
             "",
             "          A) Allow your group (preferred, no setuid, no caps):",
-            '               sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"',
-            "               echo 'net.ipv4.ping_group_range=0 2147483647' \\",
+            f'               sudo sysctl -w net.ipv4.ping_group_range="{group_range}"',
+            f"               echo 'net.ipv4.ping_group_range={group_range}' \\",
             "                 | sudo tee /etc/sysctl.d/99-pinghue.conf",
+            "               # Use 0 2147483647 only if every local group should have ICMP.",
             "",
             "          B) Grant the binary CAP_NET_RAW (must redo after upgrades):",
             '               sudo setcap cap_net_raw+ep "$(command -v pinghue)"',
@@ -172,6 +177,7 @@ def run_check(
     stream: TextIO = sys.stdout,
     quiet: bool = False,
     use_color: bool | None = None,
+    resolve_name: str | None = None,
 ) -> int:
     """Run environment diagnostics and return a process exit code."""
     if use_color is None:
@@ -228,7 +234,7 @@ def run_check(
                     )
                     suffix = "  (empty range)" if empty else ""
                     lines.append(f'          Current value: "{raw}"{suffix}')
-            _write_linux_fix(lines)
+            _write_linux_fix(lines, egid=egid)
 
     lines.extend(
         [
@@ -238,17 +244,18 @@ def run_check(
         ]
     )
 
-    address, dns_ms, dns_error = _dns_probe()
+    dns_name = resolve_name or DEFAULT_DNS_PROBE_NAME
+    address, dns_ms, dns_error = _dns_probe(dns_name)
     lines.extend(["", "DNS"])
     if dns_error:
         lines.append(
             f'  {_status(WARN, use_color=use_color)}  '
-            f'getaddrinfo("example.com") failed: {dns_error}'
+            f'getaddrinfo("{dns_name}") failed: {dns_error}'
         )
     else:
         lines.append(
             f'  {_status(OK, use_color=use_color)}    '
-            f'getaddrinfo("example.com") → {address} ({dns_ms:.0f} ms)'
+            f'getaddrinfo("{dns_name}") → {address} ({dns_ms:.0f} ms)'
         )
 
     if icmp_ready and is_root:

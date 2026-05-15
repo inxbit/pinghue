@@ -6,10 +6,10 @@ include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
 include pinghue-threat-model.md
 include security-best-practices-report.md
+prune .github
+prune packaging
+prune scripts
 recursive-include schemas *.json
 recursive-include examples *.json
 recursive-include docs *.md *.svg
-recursive-include packaging *.rb
-recursive-include scripts *.sh
 recursive-include tests *.py
-recursive-include .github/workflows *.yml

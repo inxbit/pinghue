@@ -77,6 +77,7 @@ class TargetRun:
     target: str
     resolved_address: str | None = None
     resolved_family: AddressFamily | None = None
+    resolved_addresses: tuple[str, ...] = ()
     status: TargetStatus = TargetStatus.ERROR
     error: str | None = None
     samples: list[ProbeSample] = field(default_factory=list)
@@ -84,6 +85,33 @@ class TargetRun:
     @property
     def stats(self) -> SummaryStats:
         return summarize_samples(self.samples)
+
+    def apply_sample(
+        self,
+        sample: ProbeSample,
+        *,
+        fail_threshold: int,
+        jitter_threshold_ms: float,
+    ) -> None:
+        """Append a probe sample and refresh derived target state."""
+        self.samples.append(sample)
+        if (
+            sample.status == SampleStatus.ERROR
+            and sample.error
+            and "permission" in sample.error.lower()
+        ):
+            self.status = TargetStatus.PERMISSION_DENIED
+            self.error = sample.error
+            return
+
+        self.status = classify_samples(
+            self.samples,
+            fail_threshold=fail_threshold,
+            jitter_threshold_ms=jitter_threshold_ms,
+        )
+        self.error = (
+            sample.error if self.status in {TargetStatus.DOWN, TargetStatus.ERROR} else None
+        )
 
 
 def summarize_samples(samples: list[ProbeSample]) -> SummaryStats:

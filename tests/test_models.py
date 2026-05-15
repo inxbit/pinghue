@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pinghue.models import (
     ProbeSample,
     SampleStatus,
+    TargetRun,
     TargetStatus,
     classify_samples,
     summarize_samples,
@@ -63,3 +64,28 @@ def test_classify_samples_marks_intermitent_when_any_loss_without_down() -> None
     )
 
     assert status == TargetStatus.INTERMITTENT
+
+
+def test_target_run_apply_sample_keeps_permission_denied_invariant() -> None:
+    target = TargetRun("1.1.1.1")
+    denied = ProbeSample(
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        latency_ms=None,
+        status=SampleStatus.ERROR,
+        error="permission denied: socket",
+    )
+
+    target.apply_sample(denied, fail_threshold=3, jitter_threshold_ms=50.0)
+
+    assert target.samples == [denied]
+    assert target.status == TargetStatus.PERMISSION_DENIED
+    assert target.error == "permission denied: socket"
+
+
+def test_target_run_apply_sample_classifies_regular_samples() -> None:
+    target = TargetRun("1.1.1.1")
+
+    target.apply_sample(sample(SampleStatus.OK, 10.0), fail_threshold=3, jitter_threshold_ms=50.0)
+
+    assert target.status == TargetStatus.HEALTHY
+    assert target.error is None

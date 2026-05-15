@@ -21,7 +21,7 @@ This checklist is for maintainers publishing `pinghue`.
 pytest
 ruff check .
 mypy src
-python -m build
+SOURCE_DATE_EPOCH=0 python -m build --no-isolation
 twine check dist/*
 pinghue --version
 pinghue -p 1 127.0.0.1 -c 1 --no-tui
@@ -30,7 +30,6 @@ pinghue -p 1 127.0.0.1 -c 1 --no-tui
 ## Version Update
 
 - Update `pyproject.toml`.
-- Update `src/pinghue/__init__.py`.
 - Update `CHANGELOG.md`.
 - Update README version references if needed.
 
@@ -38,10 +37,10 @@ pinghue -p 1 127.0.0.1 -c 1 --no-tui
 
 ```sh
 git status --short
-git commit -S -m "release: prepare v0.1.0"
-git tag -s v0.1.0 -m "Release v0.1.0"
+git commit -S -m "release: prepare v0.2.0"
+git tag -s v0.2.0 -m "Release v0.2.0"
 git push origin main
-git push origin v0.1.0
+git push origin v0.2.0
 ```
 
 The tag push triggers `.github/workflows/publish.yml`.

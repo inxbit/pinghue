@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from pinghue.display import sanitize_display
 from pinghue.models import ProbeSample, SampleStatus, TargetRun
-from pinghue.runner import _print_sample
+from pinghue.runner import print_sample
 from pinghue.ui import target_row_cells
 
 
@@ -20,7 +20,7 @@ def test_no_tui_output_escapes_target_and_error_controls(capsys) -> None:
     )
     target = TargetRun("host\x1b[31m")
 
-    _print_sample(target, sample)
+    print_sample(target, sample)
 
     output = capsys.readouterr().out
     assert "\x1b" not in output

@@ -36,6 +36,9 @@ class ParsedArgs(argparse.Namespace):
     address_family: str
     check: bool
     quiet: bool
+    resolve_name: str | None
+    host_label: str
+    fail_on_down: bool
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,6 +73,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--concurrency", type=int, default=64, help="maximum concurrent probes")
     parser.add_argument("--jitter-threshold", type=float, default=50.0, metavar="MS")
     parser.add_argument("--fail-threshold", type=int, default=3, metavar="COUNT")
+    parser.add_argument(
+        "--fail-on-down",
+        action="store_true",
+        help="return a non-zero exit code when all targets finish down",
+    )
     parser.add_argument("--history-style", choices=HISTORY_STYLES, default="bar")
     parser.add_argument(
         "-n",
@@ -82,9 +90,20 @@ def _parser() -> argparse.ArgumentParser:
     family.add_argument("-6", "--ipv6", action="store_true", help="force IPv6")
     parser.add_argument("--check", action="store_true", help="run environment diagnostics and exit")
     parser.add_argument(
+        "--resolve-name",
+        metavar="HOST",
+        help="hostname used by --check for DNS diagnostics",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="suppress --check output and return only status",
+    )
+    parser.add_argument(
+        "--host-label",
+        default="local",
+        metavar="LABEL",
+        help="operator-controlled host label written to JSON output",
     )
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -114,6 +133,10 @@ def _address_family_from_literal(targets: list[str]) -> str:
 
     if families == {6}:
         return AddressFamily.IPV6.value
+    if families == {4}:
+        return AddressFamily.IPV4.value
+    if families == {4, 6}:
+        return AddressFamily.AUTO.value
     return AddressFamily.IPV4.value
 
 
@@ -143,7 +166,11 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     if args.fail_threshold <= 0:
         parser.error("fail-threshold must be greater than 0")
 
-    file_targets = parse_host_file(args.file) if args.file else []
+    try:
+        file_targets = parse_host_file(args.file) if args.file else []
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
     args.targets = dedupe_targets([*args.targets, *file_targets])
 
     if args.numeric:
@@ -165,7 +192,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     if args.check:
-        return run_check(quiet=args.quiet)
+        resolve_name = args.resolve_name or (args.targets[0] if args.targets else None)
+        return run_check(quiet=args.quiet, resolve_name=resolve_name)
 
     from pinghue.runner import run
 
