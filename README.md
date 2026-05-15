@@ -21,6 +21,10 @@ This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; b
   <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.svg" alt="animated pinghue terminal demo" width="920">
 </p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-screenshot.svg" alt="pinghue dense maintenance-window table with history bars and legend" width="920">
+</p>
+
 ## What This Is
 
 - A focused terminal monitor for maintenance windows, migrations, and quick reachability checks.
@@ -191,6 +195,23 @@ The fixed mapping keeps rows comparable:
 | `>1000ms` | `█` |
 
 Use `--history-style dots`, `--history-style sparkline`, or `--history-style none` when a terminal font or workflow needs a simpler display.
+
+## Slate + Signal Palette
+
+`pinghue` uses a low-glare Slate + Signal palette designed for long maintenance windows: dark structure, high-contrast text, and saturated status colors that make the affected metric stand out quickly.
+
+| Role | Hex | Used for |
+| --- | --- | --- |
+| Background | `#101418` | Terminal body and empty space. |
+| Panel | `#151b22` | Table surface and primary content areas. |
+| Header | `#1b2630` | Title bars and footer bands. |
+| Border | `#2a313a` | Table outlines and separators. |
+| Text | `#e6edf3` | Normal readable values. |
+| Muted | `#8ea0b8` | Labels, secondary text, and inactive chrome. |
+| Green | `#7ee787` | Healthy state, successful probes, and normal history bars. |
+| Amber | `#f2cc60` | Slow latency, high jitter, intermittent state, and TCP refused markers. |
+| Red | `#ff7b72` | Loss, down state, timeouts, and failed history markers. |
+| Selection Blue | `#58a6ff` | Focus accents and selected-row treatment. |
 
 ## Doctor
 
