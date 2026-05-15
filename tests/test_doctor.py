@@ -27,7 +27,7 @@ def test_doctor_linux_blocked_prints_fix_block(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(doctor.sys, "executable", "/usr/bin/python3.12")
     monkeypatch.setattr(doctor.socket, "socket", fail_socket)
     monkeypatch.setattr(doctor, "_read_ping_group_range", lambda: (1, 0, "1   0"))
-    monkeypatch.setattr(doctor, "_dns_probe", lambda: ("93.184.215.14", 8.0, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _: ("93.184.215.14", 8.0, None))
     output = io.StringIO()
 
     exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
@@ -36,7 +36,8 @@ def test_doctor_linux_blocked_prints_fix_block(monkeypatch: pytest.MonkeyPatch) 
     assert exit_code == 1
     assert "[fail]  Unprivileged ICMP sockets NOT available" in text
     assert 'Current value: "1   0"  (empty range)' in text
-    assert 'sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"' in text
+    assert 'sudo sysctl -w net.ipv4.ping_group_range="1000 1000"' in text
+    assert "Use 0 2147483647 only if every local group should have ICMP." in text
     assert "Not ready for ICMP. TCP mode works. See fixes above." in text
 
 
@@ -44,10 +45,47 @@ def test_doctor_quiet_suppresses_output(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
     monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda: (0.12, None))
-    monkeypatch.setattr(doctor, "_dns_probe", lambda: ("93.184.215.14", 1.0, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _: ("93.184.215.14", 1.0, None))
     output = io.StringIO()
 
     exit_code = doctor.run_check(stream=output, quiet=True, use_color=False)
 
     assert exit_code == 0
     assert output.getvalue() == ""
+
+
+def test_doctor_dns_probe_uses_configured_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_getaddrinfo(
+        host: str,
+        *_: object,
+    ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+        calls.append(host)
+        return [(0, 0, 0, "", ("10.0.0.10", 0))]
+
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", fake_getaddrinfo)
+
+    address, _, error = doctor._dns_probe("internal.example")
+
+    assert calls == ["internal.example"]
+    assert address == "10.0.0.10"
+    assert error is None
+
+
+def test_run_check_prints_configured_dns_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda: (0.12, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("10.0.0.10", 1.0, None))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(
+        stream=output,
+        quiet=False,
+        use_color=False,
+        resolve_name="internal.example",
+    )
+
+    assert exit_code == 0
+    assert 'getaddrinfo("internal.example")' in output.getvalue()

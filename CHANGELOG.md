@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 This project follows semantic versioning once it reaches `1.0.0`. Before `1.0.0`, CLI flags and JSON output may change; breaking JSON changes increment `schema_version`.
 
+## 0.2.0 - 2026-05-15
+
+- Hardened JSON export by sanitizing target, host, and error strings before writing reports.
+- Made JSON output writes atomic and preserved existing report files on write failures.
+- Added host-file guardrails for regular files, a 1 MiB size cap, and a 5,000-line cap.
+- Improved no-TUI interruption handling so interrupted runs can still write JSON evidence.
+- Fixed no-TUI probe cadence drift and parallelized target resolution.
+- Improved mixed IPv4/IPv6 `--numeric` handling and added DNS address failover.
+- Added `--host-label`, `--resolve-name`, and `--fail-on-down`.
+- Hardened release automation with artifact attestations, publish concurrency, dependency audit, Python 3.13 CI, and stricter repository ruleset templates.
+- Updated Homebrew packaging guidance and smoke testing.
+- Refreshed the threat model and security best-practices report.
+
 ## 0.1.0 - 2026-05-14
 
 - Initial public release candidate.

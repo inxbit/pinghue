@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `0.1.0`.
+Current version: `0.2.0`.
 
 This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; breaking JSON changes increment `schema_version`.
 
@@ -89,9 +89,11 @@ pinghue -f hosts.txt
 pinghue -p 443 example.com
 pinghue -p 1 127.0.0.1 -c 1 --no-tui
 pinghue --output maintenance.json 1.1.1.1 example.com
+pinghue --host-label maintenance-window --output maintenance.json 1.1.1.1
 ```
 
 Host files are plain text. Blank lines and lines starting with `#` are ignored.
+Host files must be regular files, at most 1 MiB, and at most 5,000 lines.
 
 ```text
 # edge and core checks
@@ -153,9 +155,12 @@ pinghue [OPTIONS] [TARGET ...]
 | `--concurrency N` | `64` | Maximum concurrent probes. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this standard deviation. |
 | `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
+| `--fail-on-down` | off | Return a non-zero exit code when all targets finish down. |
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
+| `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics. Defaults to the first target when provided. |
 | `--quiet` | off | With `--check`, suppress output and use only the exit code. |
+| `--host-label LABEL` | `local` | Operator-controlled host label written to JSON output. |
 | `-v, --version` | none | Print the installed version. |
 | `-h, --help` | none | Print help. |
 
@@ -227,13 +232,16 @@ Linux may block unprivileged ICMP sockets. TCP mode does not need special privil
 pinghue -p 443 example.com
 ```
 
-If `pinghue --check` reports that your GID is outside `net.ipv4.ping_group_range`, the preferred fix is:
+If `pinghue --check` reports that your GID is outside `net.ipv4.ping_group_range`, the preferred fix is to allow only your current group:
 
 ```sh
-sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
-echo 'net.ipv4.ping_group_range=0 2147483647' \
+gid="$(id -g)"
+sudo sysctl -w "net.ipv4.ping_group_range=${gid} ${gid}"
+echo "net.ipv4.ping_group_range=${gid} ${gid}" \
   | sudo tee /etc/sysctl.d/99-pinghue.conf
 ```
+
+The broader range `0 2147483647` also works, but enables unprivileged ICMP for every local group on the system.
 
 The capability alternative is available but must be re-applied after binary upgrades:
 
@@ -263,6 +271,8 @@ Every output document includes:
 - per-target stats
 - optional per-probe samples
 
+The `run.host` field defaults to `local` to avoid leaking workstation hostnames. Use `--host-label` when a report needs an operator-selected system or maintenance-window label.
+
 ## Security Model
 
 `pinghue` is a local CLI/TUI. It does not run a server, accept remote requests, store credentials, or require secrets. The security-sensitive areas are:
@@ -287,8 +297,8 @@ Published release channels:
 The release workflow is tag-driven:
 
 ```sh
-git tag -s v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -s v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
 ```
 
 ## Development
@@ -297,7 +307,8 @@ git push origin v0.1.0
 pytest
 ruff check .
 mypy src
-python -m build
+pip-audit
+SOURCE_DATE_EPOCH=0 python -m build --no-isolation
 twine check dist/*
 ```
 

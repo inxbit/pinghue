@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import ipaddress
 import socket
 import time
@@ -11,6 +12,17 @@ from datetime import datetime, timezone
 
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
+UNREACHABLE_ERRNOS = {
+    value
+    for value in (
+        getattr(errno, "EHOSTUNREACH", None),
+        getattr(errno, "ENETUNREACH", None),
+        getattr(errno, "EHOSTDOWN", None),
+        getattr(errno, "ENETDOWN", None),
+    )
+    if value is not None
+}
+
 
 @dataclass(frozen=True)
 class ResolvedTarget:
@@ -18,6 +30,7 @@ class ResolvedTarget:
     address: str | None
     family: AddressFamily | None
     error: str | None = None
+    addresses: tuple[str, ...] = ()
 
 
 def _socket_family(address_family: AddressFamily) -> int:
@@ -32,6 +45,11 @@ def _family_from_ip(address: str) -> AddressFamily:
     return AddressFamily.IPV6 if ipaddress.ip_address(address).version == 6 else AddressFamily.IPV4
 
 
+def family_from_ip(address: str) -> AddressFamily:
+    """Return pinghue's address family enum for an IP literal."""
+    return _family_from_ip(address)
+
+
 async def resolve_target(
     target: str,
     address_family: AddressFamily,
@@ -41,7 +59,7 @@ async def resolve_target(
     """Resolve a target to the address used for probing."""
     if numeric:
         try:
-            return ResolvedTarget(target, target, _family_from_ip(target))
+            return ResolvedTarget(target, target, _family_from_ip(target), addresses=(target,))
         except ValueError:
             return ResolvedTarget(target, None, None, "--numeric requires an IP literal")
 
@@ -53,7 +71,7 @@ async def resolve_target(
     if literal_family is not None:
         if address_family != AddressFamily.AUTO and literal_family != address_family:
             return ResolvedTarget(target, None, None, f"target is not {address_family.value}")
-        return ResolvedTarget(target, target, literal_family)
+        return ResolvedTarget(target, target, literal_family, addresses=(target,))
 
     loop = asyncio.get_running_loop()
     try:
@@ -72,8 +90,14 @@ async def resolve_target(
     if address_family == AddressFamily.AUTO:
         infos = sorted(infos, key=lambda item: 0 if item[0] == socket.AF_INET else 1)
 
+    addresses: list[str] = []
+    for info in infos:
+        address = info[4][0]
+        if address not in addresses:
+            addresses.append(address)
+
     family = AddressFamily.IPV4 if infos[0][0] == socket.AF_INET else AddressFamily.IPV6
-    return ResolvedTarget(target, infos[0][4][0], family)
+    return ResolvedTarget(target, addresses[0], family, addresses=tuple(addresses))
 
 
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:
@@ -99,7 +123,7 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
     except OSError as exc:
         status = (
             SampleStatus.UNREACHABLE
-            if exc.errno in {socket.EAI_NONAME, 64, 65, 101, 113}
+            if exc.errno in UNREACHABLE_ERRNOS
             else SampleStatus.ERROR
         )
         return ProbeSample(

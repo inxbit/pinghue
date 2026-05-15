@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "pinghue_version": "0.1.0",
+  "pinghue_version": "0.2.0",
   "run": {
     "started_at": "2026-05-14T18:32:11.420Z",
     "ended_at": "2026-05-14T18:35:11.890Z",
-    "host": "ops-laptop-04",
+    "host": "local",
     "exit_reason": "user_quit",
     "probe": {
       "mode": "icmp",

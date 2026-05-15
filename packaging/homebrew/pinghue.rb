@@ -3,17 +3,19 @@
 
 # Resource blocks are sourced from the published PyPI sdist closure.
 
+require "socket"
+
 class Pinghue < Formula
   include Language::Python::Virtualenv
 
   desc "Colored, concurrent ICMP/TCP ping monitor for the terminal"
   homepage "https://github.com/inxbit/pinghue"
-  url "https://files.pythonhosted.org/packages/f0/79/27f1ac6796564fa17423fd61f7ab1a84321120fe78eb5e8415431c187106/pinghue-0.1.0.tar.gz"
-  sha256 "0e9e0c4f52aa2306cf3df4594f257577d7492b1190ea0e381d72029bb616fd4a"
+  url "https://files.pythonhosted.org/packages/source/p/pinghue/pinghue-0.2.0.tar.gz"
+  sha256 "6b596a7edf5c534fef2110946b00b3da3c27de44df103073cc4049db3612aa5b"
   license "MIT"
   head "https://github.com/inxbit/pinghue.git", branch: "main"
 
-  depends_on "python@3.12"
+  depends_on "python@3.13"
 
   resource "icmplib" do
     url "https://files.pythonhosted.org/packages/6d/78/ca07444be85ec718d4a7617f43fdb5b4eaae40bc15a04a5c888b64f3e35f/icmplib-3.0.4.tar.gz"
@@ -80,10 +82,14 @@ class Pinghue < Formula
         ICMP mode on Linux needs one of:
 
           (A) Allow unprivileged ICMP for your group (recommended):
-                sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+                gid="$(id -g)"
+                sudo sysctl -w "net.ipv4.ping_group_range=${gid} ${gid}"
               Persist it:
-                echo 'net.ipv4.ping_group_range=0 2147483647' \\
+                echo "net.ipv4.ping_group_range=${gid} ${gid}" \\
                   | sudo tee /etc/sysctl.d/99-pinghue.conf
+
+              The broader range 0 2147483647 also works, but enables
+              unprivileged ICMP for every local group.
 
           (B) Grant the binary CAP_NET_RAW (must be re-applied after every
               upgrade; Homebrew cannot do this for you):
@@ -100,6 +106,21 @@ class Pinghue < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/pinghue --version")
     assert_match "pinghue", shell_output("#{bin}/pinghue --help")
-    system bin/"pinghue", "-p", "1", "127.0.0.1", "-c", "1", "--no-tui"
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.addr[1].to_s
+    pid = fork do
+      loop do
+        client = server.accept
+        client.close
+      end
+    end
+
+    begin
+      system bin/"pinghue", "-p", port, "127.0.0.1", "-c", "1", "--no-tui", "--fail-on-down"
+    ensure
+      Process.kill("TERM", pid)
+      Process.wait(pid)
+      server.close
+    end
   end
 end

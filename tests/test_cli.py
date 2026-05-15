@@ -33,3 +33,29 @@ def test_parse_args_numeric_sets_family_from_ip_literal() -> None:
 
     assert args.numeric is True
     assert args.address_family == "ipv6"
+
+
+def test_parse_args_numeric_uses_auto_family_for_mixed_ip_literals() -> None:
+    args = parse_args(["--numeric", "1.1.1.1", "2606:4700:4700::1111"])
+
+    assert args.numeric is True
+    assert args.address_family == "auto"
+
+
+def test_parse_args_accepts_check_dns_override() -> None:
+    args = parse_args(["--check", "--resolve-name", "internal.example"])
+
+    assert args.check is True
+    assert args.resolve_name == "internal.example"
+
+
+def test_parse_args_accepts_json_host_label() -> None:
+    args = parse_args(["--host-label", "maintenance-window", "1.1.1.1"])
+
+    assert args.host_label == "maintenance-window"
+
+
+def test_parse_args_accepts_fail_on_down() -> None:
+    args = parse_args(["--fail-on-down", "1.1.1.1"])
+
+    assert args.fail_on_down is True
