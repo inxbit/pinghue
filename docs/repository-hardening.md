@@ -27,6 +27,13 @@ The ruleset requires:
 - review thread resolution
 - CI status checks
 
+For a solo-maintainer repository, the checked-in template intentionally requires
+pull requests but sets required approving reviews to `0`. GitHub does not allow
+authors to approve their own pull requests, so a one-review requirement blocks
+all solo-maintainer releases. If the repository gains another maintainer with
+write access, raise `required_approving_review_count` in
+`.github/repo-settings/main-ruleset.json`.
+
 ## Release Tag Ruleset
 
 Apply `.github/repo-settings/release-tag-ruleset.json`.
