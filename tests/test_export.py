@@ -1,6 +1,8 @@
 import json
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import pytest
@@ -127,13 +129,23 @@ def test_write_output_json_preserves_existing_file_on_write_failure(
 ) -> None:
     output_path = tmp_path / "out.json"
     output_path.write_text("previous\n", encoding="utf-8")
-    original_write_text = Path.write_text
+    original_named_temp_file = tempfile.NamedTemporaryFile
 
-    def failing_write_text(self: Path, _data: str, *args: object, **kwargs: object) -> int:
-        original_write_text(self, "{", *args, **kwargs)
-        raise OSError("disk full")
+    def failing_named_temp_file(*args: Any, **kwargs: Any) -> Any:
+        handle = original_named_temp_file(*args, **kwargs)
+        original_write = handle.write
 
-    monkeypatch.setattr(Path, "write_text", failing_write_text)
+        def failing_write(_data: str) -> int:
+            original_write("{")
+            raise OSError("disk full")
+
+        handle.write = failing_write  # type: ignore[method-assign]
+        return handle
+
+    monkeypatch.setattr(
+        "pinghue.export.tempfile.NamedTemporaryFile",
+        failing_named_temp_file,
+    )
 
     with pytest.raises(OSError, match="disk full"):
         write_output_json(
@@ -154,4 +166,5 @@ def test_write_output_json_preserves_existing_file_on_write_failure(
         )
 
     assert output_path.read_text(encoding="utf-8") == "previous\n"
-    assert not output_path.with_suffix(".json.tmp").exists()
+    # Randomized temp names match `out.json.<random>.tmp`; no leftover.
+    assert list(tmp_path.glob(f"{output_path.name}.*.tmp")) == []

@@ -36,9 +36,9 @@ Previously relevant medium-risk classes are now controlled:
 
 | ID | Class | Status | Evidence |
 | --- | --- | --- | --- |
-| BP-001 | Terminal or downstream JSON control-character injection | Controlled | `sanitize_display` escapes C0/C1 controls in `src/pinghue/display.py:6`; no-TUI output uses it in `src/pinghue/runner.py:184`; TUI cells use it in `src/pinghue/ui.py:217`; JSON export uses it in `src/pinghue/export.py:24`. |
+| BP-001 | Terminal or downstream JSON control-character injection | Controlled | `sanitize_display` escapes C0/C1 controls in `src/pinghue/display.py:6`; no-TUI output uses it in `src/pinghue/runner.py:184`; TUI cells use it in `src/pinghue/ui.py:217`; JSON export uses it in `src/pinghue/export.py:25`. |
 | BP-002 | Release workflow supply-chain exposure | Controlled | Publish workflow pins actions, separates build and publish jobs, uses OIDC, and generates attestations in `.github/workflows/publish.yml:11` and `.github/workflows/publish.yml:38`. |
-| BP-003 | Evidence loss on interruption | Controlled | No-TUI mode installs SIGINT/SIGTERM handlers and records interrupted exits in `src/pinghue/runner.py:121` and `src/pinghue/runner.py:210`; JSON writes use temp-file replace in `src/pinghue/export.py:79`. |
+| BP-003 | Evidence loss or temp-path symlink redirection on JSON write | Controlled | No-TUI mode installs SIGINT/SIGTERM handlers and records interrupted exits in `src/pinghue/runner.py:121` and `src/pinghue/runner.py:210`; JSON writes use a randomized `NamedTemporaryFile` (O_EXCL, mode 0600) followed by atomic replace in `src/pinghue/export.py:92`. |
 
 ### Low and residual
 
@@ -46,18 +46,19 @@ Previously relevant medium-risk classes are now controlled:
 | --- | --- | --- | --- |
 | BP-004 | Operator-selected output path can overwrite an existing writable file. | Low, because the same local user supplies the path and no privilege boundary is crossed. | Keep documentation clear that `--output` writes the selected path; re-review if `pinghue` is ever wrapped by a privileged service. |
 | BP-005 | Host-file validation has a normal path/stat/read race. | Low, because the path is local operator-controlled and the tool is unprivileged. | If future packaging adds privilege, switch to descriptor-based open/stat/read handling. |
-| BP-006 | Hosted GitHub rulesets and PyPI environment state cannot be proven from local files. | Medium operational risk if not applied in the hosted repo. | Run `scripts/apply-github-hardening.sh inxbit/pinghue` and verify settings in GitHub before publishing. |
+| BP-006 | Hosted GitHub rulesets and PyPI environment state cannot be proven from local files. | Closed in hosted repo as of 2026-05-19: live GitHub API checks showed active `protect main` and `protect release tags` rulesets, a protected `pypi` environment, and a `v*.*.*` tag deployment policy. Re-verify after any repository migration or owner change. | Keep the script as the source of truth; re-run after migrations and audit ruleset diffs before each release. |
 
 ## Secure defaults observed
 
-- CLI range validation covers interval, timeout, port, count, duration, concurrency, and fail threshold in `src/pinghue/cli.py:143`.
-- `--numeric` requires IP literals and uses automatic family mode for mixed IPv4/IPv6 literals in `src/pinghue/cli.py:126`.
+- CLI range validation covers interval, timeout, port, count, duration, concurrency, and fail threshold in `src/pinghue/cli.py:151`.
+- `--numeric` requires IP literals and uses automatic family mode for mixed IPv4/IPv6 literals in `src/pinghue/cli.py:134`.
 - Host files must be regular files, are capped at 1 MiB, and abort above 5,000 lines in `src/pinghue/hostfile.py:9`.
 - DNS resolution uses OS resolver APIs without shell execution in `src/pinghue/probes.py:53`.
 - TCP probing uses `asyncio.open_connection` with timeout and closed writers in `src/pinghue/probes.py:103`.
 - ICMP probing uses `icmplib` unprivileged mode in `src/pinghue/probes.py:144`.
 - Probe concurrency is bounded through `asyncio.Semaphore` in `src/pinghue/runner.py:216`.
-- JSON host metadata defaults to the non-identifying `local` label through `--host-label` in `src/pinghue/cli.py:102`.
+- JSON host metadata defaults to the non-identifying `local` label through `--host-label` in `src/pinghue/cli.py:111`.
+- JSON output is written through a randomized `NamedTemporaryFile` (O_EXCL, mode 0600) in the destination directory and atomically replaced in `src/pinghue/export.py:92`.
 - Doctor guidance recommends group-specific `ping_group_range` before capability-based fallback in `src/pinghue/doctor.py:152`.
 - CI uses read-only repository permissions and non-persisted checkout credentials in `.github/workflows/ci.yml:9`.
 - Publish workflow uses pinned action SHAs, scoped publish permissions, artifact attestations, and release concurrency in `.github/workflows/publish.yml:11`.
@@ -87,6 +88,6 @@ Previously relevant medium-risk classes are now controlled:
 
 ## Recommended follow-up
 
-- Verify hosted GitHub branch rulesets, release-tag ruleset, and `pypi` environment approval after applying `.github/repo-settings`.
+- Re-verify hosted GitHub branch rulesets, release-tag ruleset, and `pypi` environment approval after repository migrations or manual settings changes.
 - Keep `pip-audit` and Dependabot visible before every release.
 - Re-open the file-handling threat model if `pinghue` is ever executed by a privileged wrapper, daemon, or scheduled service.

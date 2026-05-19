@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `0.2.0`.
+Current version: `0.2.1`.
 
 This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; breaking JSON changes increment `schema_version`.
 
@@ -152,7 +152,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. |
 | `--no-samples` | off | Omit per-probe samples from JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes. |
+| `--concurrency N` | `64` | Maximum concurrent probes; ICMP mode is also bounded by the asyncio default thread pool. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this standard deviation. |
 | `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
 | `--fail-on-down` | off | Return a non-zero exit code when all targets finish down. |
@@ -297,8 +297,8 @@ Published release channels:
 The release workflow is tag-driven:
 
 ```sh
-git tag -s v0.2.0 -m "Release v0.2.0"
-git push origin v0.2.0
+git tag -s vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
 ## Development

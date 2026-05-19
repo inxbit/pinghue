@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,11 +83,24 @@ def write_output_json(path: str | Path, **kwargs: Any) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document = build_output_document(**kwargs)
     output_text = json.dumps(document, indent=2, sort_keys=False) + "\n"
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
 
+    # Randomized temp name in the same directory prevents pre-placed-symlink
+    # attacks on a predictable temp path; NamedTemporaryFile uses O_EXCL
+    # and creates the file with mode 0600 on Unix.
+    tmp_path: Path | None = None
     try:
-        tmp_path.write_text(output_text, encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=output_path.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            tmp_file.write(output_text)
         tmp_path.replace(output_path)
     except Exception:
-        tmp_path.unlink(missing_ok=True)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
         raise
