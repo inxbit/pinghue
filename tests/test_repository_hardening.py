@@ -36,11 +36,14 @@ def test_dependency_audit_workflow_runs_pip_audit_weekly() -> None:
     assert "pip-audit" in workflow
 
 
-def test_main_ruleset_requires_review() -> None:
+def test_main_ruleset_requires_pull_request_flow() -> None:
     ruleset = json.loads(read(".github/repo-settings/main-ruleset.json"))
     pull_request = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
+    parameters = pull_request["parameters"]
 
-    assert pull_request["parameters"]["required_approving_review_count"] == 1
+    assert parameters["required_approving_review_count"] == 0
+    assert parameters["required_review_thread_resolution"] is True
+    assert parameters["allowed_merge_methods"] == ["squash", "rebase"]
 
 
 def test_ci_and_homebrew_cover_python_313() -> None:
