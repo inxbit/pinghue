@@ -70,7 +70,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="omit per-probe samples from JSON output",
     )
-    parser.add_argument("--concurrency", type=int, default=64, help="maximum concurrent probes")
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=64,
+        help=(
+            "maximum concurrent probes "
+            "(ICMP mode is also bounded by the asyncio default thread pool)"
+        ),
+    )
     parser.add_argument("--jitter-threshold", type=float, default=50.0, metavar="MS")
     parser.add_argument("--fail-threshold", type=int, default=3, metavar="COUNT")
     parser.add_argument(

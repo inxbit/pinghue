@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 This project follows semantic versioning once it reaches `1.0.0`. Before `1.0.0`, CLI flags and JSON output may change; breaking JSON changes increment `schema_version`.
 
+## 0.2.1 - 2026-05-19
+
+- Hardened JSON export writes against predictable temp-path symlink redirection by using randomized same-directory temporary files before atomic replace.
+- Documented the ICMP-mode interaction with the asyncio default thread pool in `--concurrency` help text and README.
+- Verified hosted GitHub branch, release-tag, and PyPI environment hardening after applying the repository ruleset templates.
+- Updated release documentation to clean generated artifacts before local package builds and avoid stale release-version commands.
+
 ## 0.2.0 - 2026-05-15
 
 - Hardened JSON export by sanitizing target, host, and error strings before writing reports.
