@@ -10,8 +10,8 @@ class Pinghue < Formula
 
   desc "Colored, concurrent ICMP/TCP ping monitor for the terminal"
   homepage "https://github.com/inxbit/pinghue"
-  url "https://files.pythonhosted.org/packages/93/f9/fbcfb879c5047bcc1a001b0fc32821f08c8b9e160654d0f1313f24e7a4f5/pinghue-0.3.0.tar.gz"
-  sha256 "28c43e4a094c89e798eb079ee746335e713905d9b165af0c5c0f18d7494f0e5b"
+  url "https://files.pythonhosted.org/packages/a4/56/2853b81cd35be8dccaab019a94535bd07c83a2cbf6ba1eedfa36415e730e/pinghue-1.0.0.tar.gz"
+  sha256 "a8aa3ba184c5783c492623b1a4441080e48c2bac7d8f2a3080329f002b0de2f8"
   license "MIT"
   head "https://github.com/inxbit/pinghue.git", branch: "main"
 
