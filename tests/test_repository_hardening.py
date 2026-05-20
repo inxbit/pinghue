@@ -115,9 +115,9 @@ def test_release_version_surfaces_match_package_version() -> None:
     demo = read("docs/assets/pinghue-demo.svg")
     screenshot = read("docs/assets/pinghue-screenshot.svg")
 
-    assert 'version = "1.0.0"' in pyproject
-    assert "Current version: `1.0.0`." in readme
-    assert example["pinghue_version"] == "1.0.0"
-    assert "v1.0.0" in hero
-    assert "v1.0.0" in demo
-    assert "v1.0.0" in screenshot
+    assert 'version = "1.0.1"' in pyproject
+    assert "Current version: `1.0.1`." in readme
+    assert example["pinghue_version"] == "1.0.1"
+    assert "v1.0.1" in hero
+    assert "v1.0.1" in demo
+    assert "v1.0.1" in screenshot

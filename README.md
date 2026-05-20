@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `1.0.0`.
+Current version: `1.0.1`.
 
 The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
