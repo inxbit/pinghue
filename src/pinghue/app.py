@@ -37,6 +37,7 @@ class PinghueTextualApp(App[None]):
     """Textual app that owns TUI state and probe tasks."""
 
     TITLE = f"PingHUE v{__version__}"
+    ENABLE_COMMAND_PALETTE = False
     CSS = """
     Screen {
         background: #101418;
@@ -78,6 +79,8 @@ class PinghueTextualApp(App[None]):
     }
     """
     BINDINGS = [
+        Binding("up", "cursor_up", show=False, priority=True),
+        Binding("down", "cursor_down", show=False, priority=True),
         Binding("q", "quit", "Quit"),
         Binding("a", "toggle_address", "Address"),
         Binding("r", "reset_selected", "Reset"),
@@ -273,6 +276,14 @@ class PinghueTextualApp(App[None]):
 
     def on_click(self) -> None:
         self._focus_target_table()
+
+    def action_cursor_up(self) -> None:
+        table = self._focus_target_table()
+        table.action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        table = self._focus_target_table()
+        table.action_cursor_down()
 
     def action_toggle_address(self) -> None:
         self.show_address = not self.show_address
