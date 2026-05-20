@@ -79,6 +79,9 @@ class SummaryStats:
 
 class _RunningSampleStats:
     def __init__(self) -> None:
+        self.clear()
+
+    def clear(self) -> None:
         self.sent = 0
         self.received = 0
         self.latency_mean = 0.0
@@ -102,9 +105,6 @@ class _RunningSampleStats:
         self.latency_max = (
             latency if self.latency_max is None else max(self.latency_max, latency)
         )
-
-    def clear(self) -> None:
-        self.__init__()
 
     def summary(self) -> SummaryStats:
         sent = self.sent
