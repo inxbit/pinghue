@@ -11,7 +11,7 @@ from typing import Any
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
-from pinghue.models import ProbeConfig, ProbeSample, TargetRun
+from pinghue.models import MAX_TARGET_SAMPLES, ProbeConfig, ProbeSample, TargetRun
 
 SCHEMA_VERSION = 1
 
@@ -65,6 +65,7 @@ def build_output_document(
             "ended_at": format_timestamp(ended_at),
             "host": sanitize_display(host),
             "exit_reason": exit_reason,
+            "samples_window": MAX_TARGET_SAMPLES,
             "probe": {
                 "mode": probe.mode.value,
                 "port": probe.port,

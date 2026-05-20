@@ -1,6 +1,6 @@
 import pytest
 
-from pinghue.cli import parse_args
+from pinghue.cli import CONCURRENCY_MAXIMUM, parse_args
 
 
 def test_parse_args_defaults_to_icmp_auto_family_and_tui() -> None:
@@ -75,3 +75,19 @@ def test_parse_args_accepts_explicit_failure_modes() -> None:
 def test_parse_args_rejects_multiple_failure_modes() -> None:
     with pytest.raises(SystemExit):
         parse_args(["--fail-on-any-down", "--fail-on-all-down", "1.1.1.1"])
+
+
+def test_parse_args_rejects_zero_concurrency() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--concurrency", "0", "1.1.1.1"])
+
+
+def test_parse_args_accepts_concurrency_at_maximum() -> None:
+    args = parse_args(["--concurrency", str(CONCURRENCY_MAXIMUM), "1.1.1.1"])
+
+    assert args.concurrency == CONCURRENCY_MAXIMUM
+
+
+def test_parse_args_rejects_concurrency_above_maximum() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--concurrency", str(CONCURRENCY_MAXIMUM + 1), "1.1.1.1"])

@@ -38,7 +38,7 @@ jobs:
       - name: Mypy
         run: mypy src
       - name: Tests
-        run: pytest
+        run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
       - name: Build
         run: python -m build
       - name: Check package

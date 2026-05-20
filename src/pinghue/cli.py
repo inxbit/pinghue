@@ -14,6 +14,7 @@ from pinghue.hostfile import parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 
 INTERVAL_MINIMUM = 0.1
+CONCURRENCY_MAXIMUM = 1024
 HISTORY_STYLES = ("bar", "dots", "sparkline", "none")
 
 
@@ -76,7 +77,11 @@ def _parser() -> argparse.ArgumentParser:
         "--concurrency",
         type=int,
         default=64,
-        help="maximum concurrent probes (ICMP uses a dedicated pool sized to this limit)",
+        help=(
+            "maximum concurrent probes, 1-"
+            f"{CONCURRENCY_MAXIMUM} "
+            "(ICMP uses a dedicated pool sized to this limit)"
+        ),
     )
     parser.add_argument("--jitter-threshold", type=float, default=50.0, metavar="MS")
     parser.add_argument("--fail-threshold", type=int, default=3, metavar="COUNT")
@@ -172,6 +177,9 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
 
     if args.concurrency <= 0:
         parser.error("concurrency must be greater than 0")
+
+    if args.concurrency > CONCURRENCY_MAXIMUM:
+        parser.error(f"concurrency must not exceed {CONCURRENCY_MAXIMUM}")
 
     if args.fail_threshold <= 0:
         parser.error("fail-threshold must be greater than 0")

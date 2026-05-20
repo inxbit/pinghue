@@ -13,9 +13,9 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `0.3.0`.
+Current version: `1.0.0`.
 
-This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; breaking JSON changes increment `schema_version`.
+The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.svg" alt="animated pinghue terminal demo" width="920">
@@ -40,6 +40,20 @@ This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; b
 - Not a privileged daemon.
 - Not a packet capture or traceroute tool.
 - Not a service that accepts remote network requests.
+
+## Supported Platforms
+
+The 1.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
+
+The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 1.0 support scope unless explicitly added later.
+
+## Stability Policy
+
+`pinghue` treats CLI flags and JSON exports as compatibility contracts. `schema_version: 1` is the JSON v1 contract: additive fields are non-breaking, but removing fields, changing field types, changing enum values, or changing required-field behavior requires a new schema version.
+
+CLI removals, flag renames, and incompatible behavior changes are deprecated for at least one minor release before removal. Deprecated flags continue to parse during that window and release notes identify the replacement. Patch releases do not intentionally break CLI or JSON consumers.
+
+Starting with `1.0.0`, release versions follow semantic versioning: patch releases are bug fixes, minor releases may add compatible behavior, and major releases are reserved for breaking CLI or JSON changes.
 
 ## Install
 
@@ -152,7 +166,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. |
 | `--no-samples` | off | Omit per-probe samples from JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes; ICMP mode uses a dedicated thread pool sized to this limit. |
+| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP mode uses a dedicated thread pool sized to this limit. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this standard deviation. |
 | `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
 | `--fail-on-any-down` | off | Return a non-zero exit code when any target finishes down. |
@@ -201,6 +215,10 @@ The fixed mapping keeps rows comparable:
 | `>1000ms` | `█` |
 
 Use `--history-style dots`, `--history-style sparkline`, or `--history-style none` when a terminal font or workflow needs a simpler display.
+
+## Host States
+
+`pinghue` classifies each host from the **whole run**, not just the most recent probes. `down` requires `--fail-threshold` consecutive failures; any packet loss, or jitter above `--jitter-threshold`, marks a host `intermittent`. Because loss and jitter are cumulative over the run, a host that blips once and then recovers stays `intermittent` (not `healthy`) until you reset it (`r` or `R` in the TUI). This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
 
 ## Slate + Signal Palette
 
@@ -266,11 +284,13 @@ Every output document includes:
 
 - `schema_version`
 - `pinghue_version`
-- run metadata
+- run metadata (including `samples_window`)
 - probe configuration
 - ordered target results
 - per-target stats
 - optional per-probe samples
+
+Per-target `stats` (sent, received, loss, latency, jitter) are computed over **every** probe in the run, so `stats.sent` reflects the whole run. The per-target `samples` array retains only the most recent `run.samples_window` probes (currently 1000). On long runs `stats.sent` therefore exceeds `len(samples)` — that is expected windowing, not a truncated file. When reconciling evidence, treat `samples` as the recent tail and `stats` as authoritative for the full run; `--no-samples` omits the array entirely.
 
 The `run.host` field defaults to `local` to avoid leaking workstation hostnames. Use `--host-label` when a report needs an operator-selected system or maintenance-window label.
 
@@ -306,6 +326,7 @@ git push origin vX.Y.Z
 
 ```sh
 pytest
+pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
 ruff check .
 mypy src
 pip-audit
@@ -313,7 +334,7 @@ SOURCE_DATE_EPOCH=0 python -m build --no-isolation
 twine check dist/*
 ```
 
-Run the development commands from a clone installed with `python -m pip install -e ".[dev]"`.
+Run the development commands from a clone installed with `python -m pip install -e ".[dev]"`. The `pytest --cov` line reports line and branch coverage; CI enforces a coverage floor.
 
 ## License
 
