@@ -38,6 +38,8 @@ class ParsedArgs(argparse.Namespace):
     quiet: bool
     resolve_name: str | None
     host_label: str
+    fail_on_any_down: bool
+    fail_on_all_down: bool
     fail_on_down: bool
 
 
@@ -74,17 +76,26 @@ def _parser() -> argparse.ArgumentParser:
         "--concurrency",
         type=int,
         default=64,
-        help=(
-            "maximum concurrent probes "
-            "(ICMP mode is also bounded by the asyncio default thread pool)"
-        ),
+        help="maximum concurrent probes (ICMP uses a dedicated pool sized to this limit)",
     )
     parser.add_argument("--jitter-threshold", type=float, default=50.0, metavar="MS")
     parser.add_argument("--fail-threshold", type=int, default=3, metavar="COUNT")
-    parser.add_argument(
-        "--fail-on-down",
+    failure_mode = parser.add_mutually_exclusive_group()
+    failure_mode.add_argument(
+        "--fail-on-any-down",
         action="store_true",
-        help="return a non-zero exit code when all targets finish down",
+        help="return a non-zero exit code when any target finishes down",
+    )
+    failure_mode.add_argument(
+        "--fail-on-all-down",
+        action="store_true",
+        help="return a non-zero exit code only when all targets finish down",
+    )
+    failure_mode.add_argument(
+        "--fail-on-down",
+        dest="fail_on_all_down",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--history-style", choices=HISTORY_STYLES, default="bar")
     parser.add_argument(
@@ -119,16 +130,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def dedupe_targets(targets: list[str]) -> list[str]:
     """Return targets in first-seen order without duplicates."""
-    seen: set[str] = set()
-    result: list[str] = []
-
-    for target in targets:
-        if target in seen:
-            continue
-        seen.add(target)
-        result.append(target)
-
-    return result
+    return list(dict.fromkeys(targets))
 
 
 def _address_family_from_literal(targets: list[str]) -> str:
@@ -192,6 +194,8 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
 
     if not args.check and not args.targets:
         parser.error("at least one target is required unless --check is used")
+
+    args.fail_on_down = args.fail_on_all_down
 
     return args
 

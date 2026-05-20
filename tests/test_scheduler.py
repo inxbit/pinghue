@@ -109,6 +109,68 @@ async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
     assert sleeps == [0.6]
 
 
+async def test_run_no_tui_yields_after_slow_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = TargetRun(
+        target="1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+    )
+    base = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+    times = iter(
+        [
+            base,
+            base,
+            base + timedelta(seconds=1.5),
+            base + timedelta(seconds=1.6),
+            base + timedelta(seconds=1.7),
+        ]
+    )
+    sleeps: list[float] = []
+
+    class FakeDateTime:
+        @classmethod
+        def now(cls, _tz: timezone) -> datetime:
+            return next(times)
+
+    async def fake_resolve_runs(_: object) -> list[TargetRun]:
+        return [target]
+
+    async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
+        return ProbeSample(
+            timestamp=base,
+            latency_ms=1.0,
+            status=SampleStatus.OK,
+        )
+
+    async def fake_wait_for_stop_event(_: asyncio.Event, delay: float) -> bool:
+        sleeps.append(delay)
+        return False
+
+    monkeypatch.setattr(runner, "datetime", FakeDateTime)
+    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    monkeypatch.setattr(runner, "probe_once", fake_probe_once)
+    monkeypatch.setattr(runner, "wait_for_stop_event", fake_wait_for_stop_event)
+
+    args = SimpleNamespace(
+        address_family=AddressFamily.AUTO.value,
+        concurrency=1,
+        count=2,
+        duration=None,
+        fail_threshold=3,
+        interval=1.0,
+        jitter_threshold=50.0,
+        port=None,
+        targets=["1.1.1.1"],
+        timeout=1.0,
+    )
+
+    await run_no_tui(args, ProbeMode.ICMP)
+
+    assert sleeps == [0.1]
+
+
 async def test_run_no_tui_returns_interrupted_on_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -145,6 +207,64 @@ async def test_run_no_tui_returns_interrupted_on_cancellation(
     assert targets == [target]
     assert exit_reason == "interrupted"
     assert ended_at >= started_at
+
+
+async def test_run_no_tui_uses_dedicated_icmp_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = TargetRun(
+        target="1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+    )
+    executors: list[object] = []
+    seen_executors: list[object] = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers: int) -> None:
+            self.max_workers = max_workers
+            self.shutdown_called = False
+            executors.append(self)
+
+        def shutdown(self, *, wait: bool = True, cancel_futures: bool = False) -> None:
+            self.shutdown_called = True
+            self.wait = wait
+            self.cancel_futures = cancel_futures
+
+    async def fake_resolve_runs(_: object) -> list[TargetRun]:
+        return [target]
+
+    async def fake_probe_once(*_: object, **kwargs: object) -> ProbeSample:
+        seen_executors.append(kwargs["executor"])
+        return ProbeSample(
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            latency_ms=1.0,
+            status=SampleStatus.OK,
+        )
+
+    monkeypatch.setattr(runner, "ThreadPoolExecutor", FakeExecutor, raising=False)
+    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    monkeypatch.setattr(runner, "probe_once", fake_probe_once)
+
+    args = SimpleNamespace(
+        address_family=AddressFamily.AUTO.value,
+        concurrency=5,
+        count=1,
+        duration=None,
+        fail_threshold=3,
+        interval=1.0,
+        jitter_threshold=50.0,
+        port=None,
+        targets=["1.1.1.1"],
+        timeout=1.0,
+    )
+
+    await run_no_tui(args, ProbeMode.ICMP)
+
+    assert len(executors) == 1
+    assert executors[0].max_workers == 5
+    assert seen_executors == [executors[0]]
+    assert executors[0].shutdown_called is True
 
 
 async def test_resolve_runs_resolves_targets_concurrently_and_preserves_order(
@@ -235,3 +355,42 @@ async def test_probe_once_fails_over_to_next_resolved_address(
     assert sample.status == SampleStatus.OK
     assert target.resolved_address == "192.0.2.2"
     assert target.status.name == "HEALTHY"
+
+
+async def test_probe_once_passes_executor_to_icmp_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = object()
+    target = TargetRun(
+        target="1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+    )
+    seen_executors: list[object] = []
+
+    async def fake_icmp_probe(*_: object, **kwargs: object) -> ProbeSample:
+        seen_executors.append(kwargs["executor"])
+        return ProbeSample(
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            latency_ms=2.0,
+            status=SampleStatus.OK,
+        )
+
+    monkeypatch.setattr(runner, "icmp_probe", fake_icmp_probe)
+    args = SimpleNamespace(
+        address_family=AddressFamily.IPV4.value,
+        fail_threshold=1,
+        jitter_threshold=50.0,
+        port=None,
+        timeout=1.0,
+    )
+
+    await runner.probe_once(
+        target,
+        args=args,
+        mode=ProbeMode.ICMP,
+        semaphore=asyncio.Semaphore(1),
+        executor=executor,
+    )
+
+    assert seen_executors == [executor]

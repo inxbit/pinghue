@@ -176,6 +176,20 @@ def test_compute_table_layout_keeps_metrics_fixed_and_resizes_history() -> None:
     assert hidden_address["history"] > narrow["history"]
 
 
+def test_compute_table_layout_uses_extra_wide_terminal_width() -> None:
+    targets = [
+        TargetRun("edge-gateway", resolved_address="67.219.1.10"),
+        TargetRun("core-router", resolved_address="94.242.10.1"),
+    ]
+
+    width = 180
+    layout = compute_table_layout(width=width, targets=targets, show_address=True)
+    used_width = sum(layout.values()) + len(COLUMN_KEYS) + 2
+
+    assert used_width == width
+    assert layout["history"] > 48
+
+
 def test_apply_column_widths_only_updates_changed_widths() -> None:
     class FakeColumn:
         def __init__(self, width: int) -> None:

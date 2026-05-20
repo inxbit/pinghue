@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 This project follows semantic versioning once it reaches `1.0.0`. Before `1.0.0`, CLI flags and JSON output may change; breaking JSON changes increment `schema_version`.
 
+## 0.3.0 - 2026-05-20
+
+- Added bounded target history with running packet and latency statistics to keep long TUI sessions responsive.
+- Moved TUI DNS resolution and manual probe bursts off the startup/action path so the interface remains responsive during slow network operations.
+- Added a dedicated ICMP thread pool sized by `--concurrency` to avoid default executor saturation at high probe counts.
+- Added explicit `--fail-on-any-down` and `--fail-on-all-down` exit modes while keeping `--fail-on-down` as a compatibility alias.
+- Improved host-file inline comment parsing, IPv6-capable DNS diagnostics, wide-terminal history layout, display sanitization, and special-device JSON output handling.
+
 ## 0.2.1 - 2026-05-19
 
 - Hardened JSON export writes against predictable temp-path symlink redirection by using randomized same-directory temporary files before atomic replace.

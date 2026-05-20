@@ -129,7 +129,7 @@
         },
         "status": {
           "type": "string",
-          "enum": ["healthy", "intermittent", "down", "dns_failure", "permission_denied", "error"]
+          "enum": ["resolving", "healthy", "intermittent", "down", "dns_failure", "permission_denied", "error"]
         },
         "error": {
           "type": ["string", "null"]

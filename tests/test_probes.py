@@ -5,6 +5,7 @@ import socket
 import icmplib
 import pytest
 
+import pinghue.probes as probes
 from pinghue.models import AddressFamily, SampleStatus
 from pinghue.probes import ResolvedTarget, icmp_probe, resolve_target, tcp_probe
 
@@ -105,10 +106,11 @@ async def test_resolve_target_preserves_all_getaddrinfo_addresses(
     assert resolved.family == AddressFamily.IPV4
 
 
-async def test_icmp_probe_runs_blocking_ping_in_thread(
+async def test_icmp_probe_runs_blocking_ping_in_supplied_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[object] = []
+    executor = object()
+    calls: list[tuple[object, object]] = []
 
     class FakeResult:
         is_alive = True
@@ -117,19 +119,29 @@ async def test_icmp_probe_runs_blocking_ping_in_thread(
     def fake_ping(*_: object, **__: object) -> FakeResult:
         return FakeResult()
 
-    async def fake_to_thread(function: object, *_: object, **__: object) -> object:
-        calls.append(function)
-        return fake_ping()
+    class FakeLoop:
+        def run_in_executor(
+            self,
+            supplied_executor: object,
+            function: object,
+        ) -> asyncio.Future[object]:
+            calls.append((supplied_executor, function))
+            future: asyncio.Future[object] = asyncio.Future()
+            future.set_result(function())
+            return future
 
     monkeypatch.setattr(icmplib, "ping", fake_ping)
-    monkeypatch.setattr(asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(probes, "_icmp_backend", None, raising=False)
+    monkeypatch.setattr(probes, "_icmp_import_error", None, raising=False)
 
     sample = await icmp_probe(
         "1.1.1.1",
         timeout_s=1.0,
         address_family=AddressFamily.IPV4,
+        executor=executor,
     )
 
-    assert calls == [fake_ping]
+    assert calls[0][0] is executor
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms == 4.2

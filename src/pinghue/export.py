@@ -80,9 +80,14 @@ def build_output_document(
 def write_output_json(path: str | Path, **kwargs: Any) -> None:
     """Write a JSON export document to disk."""
     output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     document = build_output_document(**kwargs)
     output_text = json.dumps(document, indent=2, sort_keys=False) + "\n"
+
+    if output_path.exists() and (output_path.is_char_device() or output_path.is_fifo()):
+        output_path.write_text(output_text, encoding="utf-8")
+        return
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Randomized temp name in the same directory prevents pre-placed-symlink
     # attacks on a predictable temp path; NamedTemporaryFile uses O_EXCL

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from pinghue.models import (
+    MAX_TARGET_SAMPLES,
     ProbeSample,
     SampleStatus,
     TargetRun,
@@ -89,3 +90,45 @@ def test_target_run_apply_sample_classifies_regular_samples() -> None:
 
     assert target.status == TargetStatus.HEALTHY
     assert target.error is None
+
+
+def test_target_run_caps_sample_history_and_keeps_lifetime_stats_current() -> None:
+    target = TargetRun("1.1.1.1")
+
+    for index in range(MAX_TARGET_SAMPLES + 5):
+        target.apply_sample(
+            ProbeSample(
+                timestamp=datetime(2026, 5, 14, 18, 32, index % 60, tzinfo=timezone.utc),
+                latency_ms=float(index),
+                status=SampleStatus.OK,
+            ),
+            fail_threshold=3,
+            jitter_threshold_ms=10_000.0,
+        )
+
+    assert len(target.samples) == MAX_TARGET_SAMPLES
+    assert target.samples[0].latency_ms == 5.0
+    assert target.stats.sent == MAX_TARGET_SAMPLES + 5
+    assert target.stats.received == MAX_TARGET_SAMPLES + 5
+    assert target.stats.min_ms == 0.0
+    assert target.stats.avg_ms == 502.0
+    assert target.stats.max_ms == 1004.0
+
+
+def test_target_sample_clear_resets_cached_statistics() -> None:
+    target = TargetRun(
+        "1.1.1.1",
+        samples=[
+            ProbeSample(
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+                latency_ms=10.0,
+                status=SampleStatus.OK,
+            )
+        ],
+    )
+
+    target.samples.clear()
+
+    assert target.stats.sent == 0
+    assert target.stats.received == 0
+    assert target.stats.avg_ms is None

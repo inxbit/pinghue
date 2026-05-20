@@ -8,7 +8,7 @@ from typing import Any
 from rich.text import Text
 
 from pinghue.display import sanitize_display
-from pinghue.history import history_symbol
+from pinghue.history import render_history, visible_history_samples
 from pinghue.models import ProbeSample, SampleStatus, TargetRun, TargetStatus
 
 GREEN = "#7ee787"
@@ -40,7 +40,6 @@ HIDDEN_ADDRESS_WIDTH = len("address")
 IPV4_ADDRESS_WIDTH = 15
 IPV6_ADDRESS_WIDTH = 39
 MIN_HISTORY_WIDTH = 6
-MAX_HISTORY_WIDTH = 48
 TABLE_CHROME_WIDTH = 2
 COLUMN_GAP_WIDTH = len(COLUMN_KEYS)
 FIXED_COLUMN_WIDTHS = {
@@ -134,7 +133,10 @@ def compact_loss(value: float) -> str:
 
 def format_state_cell(status: TargetStatus) -> Text:
     """Return a styled target-state cell."""
-    if status == TargetStatus.HEALTHY:
+    if status == TargetStatus.RESOLVING:
+        style = MUTED
+        label = "resolving"
+    elif status == TargetStatus.HEALTHY:
         style = GREEN
         label = "healthy"
     elif status == TargetStatus.INTERMITTENT:
@@ -178,12 +180,9 @@ def format_history_cell(
         return Text("")
 
     text = Text()
-    for sample in samples[-width:]:
-        if style == "dots":
-            glyph = "•" if sample.status == SampleStatus.OK else "·"
-        else:
-            glyph = history_symbol(sample)
-
+    visible = visible_history_samples(samples, width=width)
+    rendered = render_history(samples, width=width, style=style)
+    for glyph, sample in zip(rendered, visible, strict=True):
         text.append(glyph, style=_history_sample_style(sample, slow_latency_ms=slow_latency_ms))
 
     return text
@@ -319,7 +318,7 @@ def compute_table_layout(
             history_width += shift
 
     layout["host"] = host_width
-    layout["history"] = min(MAX_HISTORY_WIDTH, max(0, history_width))
+    layout["history"] = max(0, history_width)
     return {key: layout[key] for key in COLUMN_KEYS}
 
 

@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `0.2.1`.
+Current version: `0.3.0`.
 
 This is pre-1.0 software. CLI flags and JSON output may change before `1.0.0`; breaking JSON changes increment `schema_version`.
 
@@ -152,10 +152,11 @@ pinghue [OPTIONS] [TARGET ...]
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. |
 | `--no-samples` | off | Omit per-probe samples from JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes; ICMP mode is also bounded by the asyncio default thread pool. |
+| `--concurrency N` | `64` | Maximum concurrent probes; ICMP mode uses a dedicated thread pool sized to this limit. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this standard deviation. |
 | `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
-| `--fail-on-down` | off | Return a non-zero exit code when all targets finish down. |
+| `--fail-on-any-down` | off | Return a non-zero exit code when any target finishes down. |
+| `--fail-on-all-down` | off | Return a non-zero exit code only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
 | `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics. Defaults to the first target when provided. |

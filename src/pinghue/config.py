@@ -29,4 +29,6 @@ class RunConfig(Protocol):
     quiet: bool
     resolve_name: str | None
     host_label: str
+    fail_on_any_down: bool
+    fail_on_all_down: bool
     fail_on_down: bool

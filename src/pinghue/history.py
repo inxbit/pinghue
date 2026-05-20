@@ -30,12 +30,19 @@ def history_symbol(sample: ProbeSample) -> str:
     return "█"
 
 
+def visible_history_samples(samples: Sequence[ProbeSample], *, width: int) -> list[ProbeSample]:
+    """Return the visible tail of probe samples."""
+    if width <= 0:
+        return []
+    return list(samples)[-width:]
+
+
 def render_history(samples: Sequence[ProbeSample], *, width: int, style: str) -> str:
     """Render the visible tail of a target's probe history."""
     if style == "none" or width <= 0:
         return ""
 
-    visible = samples[-width:]
+    visible = visible_history_samples(samples, width=width)
 
     if style == "dots":
         return "".join("•" if sample.status == SampleStatus.OK else "·" for sample in visible)

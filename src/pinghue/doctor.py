@@ -97,13 +97,15 @@ DEFAULT_DNS_PROBE_NAME = "example.com"
 def _dns_probe(resolve_name: str) -> tuple[str | None, float | None, str | None]:
     start = time.perf_counter()
     try:
-        infos = socket.getaddrinfo(resolve_name, None, socket.AF_INET, socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(resolve_name, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except OSError as exc:
         return None, None, str(exc)
 
     elapsed_ms = float(round((time.perf_counter() - start) * 1000))
-    address = cast(str, infos[0][4][0])
-    return address, elapsed_ms, None
+    family, *_rest, sockaddr = infos[0]
+    address = cast(str, sockaddr[0])
+    protocol = "ipv6" if family == socket.AF_INET6 else "ipv4"
+    return f"{address} ({protocol})", elapsed_ms, None
 
 
 def _loopback_icmp_probe() -> tuple[float | None, str | None]:

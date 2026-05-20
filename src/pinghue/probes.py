@@ -7,8 +7,12 @@ import errno
 import ipaddress
 import socket
 import time
+from collections.abc import Callable
+from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
+from typing import Any
 
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
@@ -31,6 +35,49 @@ class ResolvedTarget:
     family: AddressFamily | None
     error: str | None = None
     addresses: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _IcmpBackend:
+    ping: Callable[..., Any]
+    timeout_error: type[BaseException]
+    permission_error: type[BaseException]
+    name_lookup_error: type[BaseException]
+    library_error: type[BaseException]
+
+
+_icmp_backend: _IcmpBackend | None = None
+_icmp_import_error: ImportError | None = None
+
+
+def _get_icmp_backend() -> _IcmpBackend:
+    global _icmp_backend, _icmp_import_error
+
+    if _icmp_backend is not None:
+        return _icmp_backend
+    if _icmp_import_error is not None:
+        raise _icmp_import_error
+
+    try:
+        from icmplib import ping  # type: ignore[import-untyped]
+        from icmplib.exceptions import (  # type: ignore[import-untyped]
+            ICMPLibError,
+            NameLookupError,
+            SocketPermissionError,
+            TimeoutExceeded,
+        )
+    except ImportError as exc:
+        _icmp_import_error = exc
+        raise
+
+    _icmp_backend = _IcmpBackend(
+        ping=ping,
+        timeout_error=TimeoutExceeded,
+        permission_error=SocketPermissionError,
+        name_lookup_error=NameLookupError,
+        library_error=ICMPLibError,
+    )
+    return _icmp_backend
 
 
 def _socket_family(address_family: AddressFamily) -> int:
@@ -146,17 +193,12 @@ async def icmp_probe(
     *,
     timeout_s: float,
     address_family: AddressFamily,
+    executor: Executor | None = None,
 ) -> ProbeSample:
     """Probe a target with icmplib."""
     timestamp = datetime.now(timezone.utc)
     try:
-        from icmplib import ping  # type: ignore[import-untyped]
-        from icmplib.exceptions import (  # type: ignore[import-untyped]
-            ICMPLibError,
-            NameLookupError,
-            SocketPermissionError,
-            TimeoutExceeded,
-        )
+        backend = _get_icmp_backend()
     except ImportError as exc:
         return ProbeSample(
             timestamp=timestamp,
@@ -171,39 +213,49 @@ async def icmp_probe(
     elif address_family == AddressFamily.IPV6:
         family = 6
 
+    loop = asyncio.get_running_loop()
     try:
-        result = await asyncio.to_thread(
-            ping,
-            address,
-            count=1,
-            interval=0,
-            timeout=timeout_s,
-            family=family,
-            privileged=False,
+        result: Any = await loop.run_in_executor(
+            executor,
+            partial(
+                backend.ping,
+                address,
+                count=1,
+                interval=0,
+                timeout=timeout_s,
+                family=family,
+                privileged=False,
+            ),
         )
-    except TimeoutExceeded:
-        return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
-    except SocketPermissionError as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.ERROR,
-            error=f"permission denied: {exc}",
-        )
-    except NameLookupError as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.ERROR,
-            error=str(exc),
-        )
-    except ICMPLibError as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.UNREACHABLE,
-            error=str(exc),
-        )
+    except Exception as exc:
+        if isinstance(exc, backend.timeout_error):
+            return ProbeSample(
+                timestamp=timestamp,
+                latency_ms=None,
+                status=SampleStatus.TIMEOUT,
+            )
+        if isinstance(exc, backend.permission_error):
+            return ProbeSample(
+                timestamp=timestamp,
+                latency_ms=None,
+                status=SampleStatus.ERROR,
+                error=f"permission denied: {exc}",
+            )
+        if isinstance(exc, backend.name_lookup_error):
+            return ProbeSample(
+                timestamp=timestamp,
+                latency_ms=None,
+                status=SampleStatus.ERROR,
+                error=str(exc),
+            )
+        if isinstance(exc, backend.library_error):
+            return ProbeSample(
+                timestamp=timestamp,
+                latency_ms=None,
+                status=SampleStatus.UNREACHABLE,
+                error=str(exc),
+            )
+        raise
 
     if not result.is_alive:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)

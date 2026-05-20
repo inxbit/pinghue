@@ -59,3 +59,19 @@ def test_parse_args_accepts_fail_on_down() -> None:
     args = parse_args(["--fail-on-down", "1.1.1.1"])
 
     assert args.fail_on_down is True
+    assert args.fail_on_all_down is True
+
+
+def test_parse_args_accepts_explicit_failure_modes() -> None:
+    any_down = parse_args(["--fail-on-any-down", "1.1.1.1"])
+    all_down = parse_args(["--fail-on-all-down", "1.1.1.1"])
+
+    assert any_down.fail_on_any_down is True
+    assert any_down.fail_on_all_down is False
+    assert all_down.fail_on_any_down is False
+    assert all_down.fail_on_all_down is True
+
+
+def test_parse_args_rejects_multiple_failure_modes() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--fail-on-any-down", "--fail-on-all-down", "1.1.1.1"])

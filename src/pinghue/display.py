@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
+CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
 
 def sanitize_display(value: str) -> str:
     """Escape terminal control characters before rendering operator-visible text."""
-    parts: list[str] = []
-    for character in value:
-        codepoint = ord(character)
-        if codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
-            parts.append(f"\\x{codepoint:02x}")
-        else:
-            parts.append(character)
-    return "".join(parts)
+    return CONTROL_CHARACTER_PATTERN.sub(
+        lambda match: f"\\x{ord(match.group(0)):02x}",
+        value,
+    )
