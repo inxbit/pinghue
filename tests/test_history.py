@@ -39,3 +39,13 @@ def test_render_history_uses_visible_width_from_tail() -> None:
 
     assert render_history(samples, width=3, style="bar") == "▃·▇"
     assert render_history(samples, width=3, style="none") == ""
+
+
+def test_render_history_accepts_bounded_sample_history() -> None:
+    from pinghue.models import SampleWindow
+
+    samples = SampleWindow(maxlen=3)
+    for index in range(5):
+        samples.append(make_sample(SampleStatus.OK, float(index + 1)))
+
+    assert render_history(samples, width=3, style="bar") == "▂▃▃"

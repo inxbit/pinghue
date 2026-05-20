@@ -9,6 +9,7 @@ from pinghue.ui import target_row_cells
 def test_sanitize_display_escapes_terminal_control_characters() -> None:
     assert sanitize_display("safe-host") == "safe-host"
     assert sanitize_display("bad\x1b[31mhost\nnext") == "bad\\x1b[31mhost\\x0anext"
+    assert sanitize_display("bad\x85host") == "bad\\x85host"
 
 
 def test_no_tui_output_escapes_target_and_error_controls(capsys) -> None:

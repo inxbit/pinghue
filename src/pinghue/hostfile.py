@@ -25,9 +25,9 @@ def parse_host_file(path: str | Path) -> list[str]:
                 f"host file has too many lines; maximum is {MAX_HOST_FILE_LINES}: {host_path}"
             )
 
-        value = line.strip()
+        value = line.split("#", 1)[0].strip()
 
-        if not value or value.startswith("#"):
+        if not value:
             continue
 
         targets.append(value)

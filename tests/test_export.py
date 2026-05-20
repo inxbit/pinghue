@@ -83,6 +83,25 @@ def test_write_output_json_can_omit_samples(tmp_path: Path) -> None:
     assert document["targets"][0]["samples"] == []
 
 
+def test_write_output_json_writes_special_device_directly() -> None:
+    write_output_json(
+        Path("/dev/null"),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        host="ops-laptop-04",
+        exit_reason="user_quit",
+        probe=ProbeConfig(
+            mode=ProbeMode.ICMP,
+            port=None,
+            interval_s=1.0,
+            timeout_s=1.0,
+            address_family=AddressFamily.AUTO,
+        ),
+        targets=[build_target()],
+        include_samples=False,
+    )
+
+
 def test_build_output_document_escapes_control_characters() -> None:
     target = TargetRun(
         target="host\x1b[31m",

@@ -59,17 +59,22 @@ def test_doctor_dns_probe_uses_configured_name(monkeypatch: pytest.MonkeyPatch) 
 
     def fake_getaddrinfo(
         host: str,
-        *_: object,
+        port: object,
+        family: int,
+        socket_type: int,
     ) -> list[tuple[int, int, int, str, tuple[str, int]]]:
+        assert port is None
+        assert family == doctor.socket.AF_UNSPEC
+        assert socket_type == doctor.socket.SOCK_STREAM
         calls.append(host)
-        return [(0, 0, 0, "", ("10.0.0.10", 0))]
+        return [(doctor.socket.AF_INET6, 0, 0, "", ("2001:db8::10", 0))]
 
     monkeypatch.setattr(doctor.socket, "getaddrinfo", fake_getaddrinfo)
 
     address, _, error = doctor._dns_probe("internal.example")
 
     assert calls == ["internal.example"]
-    assert address == "10.0.0.10"
+    assert address == "2001:db8::10 (ipv6)"
     assert error is None
 
 

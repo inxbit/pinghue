@@ -12,6 +12,8 @@ def build_args(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "address_family": AddressFamily.AUTO.value,
         "concurrency": 1,
+        "fail_on_all_down": False,
+        "fail_on_any_down": False,
         "fail_on_down": False,
         "fail_threshold": 3,
         "history_style": "bar",
@@ -72,12 +74,56 @@ async def test_run_fail_on_down_returns_nonzero_when_all_targets_down(
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
 
-    exit_code = await runner.run(build_args(fail_on_down=True), mode=ProbeMode.ICMP)
+    exit_code = await runner.run(build_args(fail_on_all_down=True), mode=ProbeMode.ICMP)
 
     assert exit_code == 2
 
 
 async def test_run_fail_on_down_returns_zero_when_any_target_is_usable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    targets = [
+        TargetRun("1.1.1.1", status=TargetStatus.DOWN),
+        TargetRun("8.8.8.8", status=TargetStatus.HEALTHY),
+    ]
+
+    async def fake_run_no_tui(
+        _: object,
+        __: ProbeMode,
+    ) -> tuple[list[TargetRun], str, datetime, datetime]:
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        return targets, "completed", timestamp, timestamp
+
+    monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
+
+    exit_code = await runner.run(build_args(fail_on_all_down=True), mode=ProbeMode.ICMP)
+
+    assert exit_code == 0
+
+
+async def test_run_fail_on_any_down_returns_nonzero_when_any_target_is_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    targets = [
+        TargetRun("1.1.1.1", status=TargetStatus.DOWN),
+        TargetRun("8.8.8.8", status=TargetStatus.HEALTHY),
+    ]
+
+    async def fake_run_no_tui(
+        _: object,
+        __: ProbeMode,
+    ) -> tuple[list[TargetRun], str, datetime, datetime]:
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        return targets, "completed", timestamp, timestamp
+
+    monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
+
+    exit_code = await runner.run(build_args(fail_on_any_down=True), mode=ProbeMode.ICMP)
+
+    assert exit_code == 2
+
+
+async def test_run_legacy_fail_on_down_matches_all_down_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     targets = [

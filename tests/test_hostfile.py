@@ -22,6 +22,19 @@ def test_parse_host_file_ignores_blank_lines_and_comments(tmp_path: Path) -> Non
     assert parse_host_file(path) == ["1.1.1.1", "example.com", "internal-db.corp"]
 
 
+def test_parse_host_file_strips_inline_comments(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_text(
+        """
+        1.1.1.1 # DNS resolver
+        my-server.internal   # staging
+        """,
+        encoding="utf-8",
+    )
+
+    assert parse_host_file(path) == ["1.1.1.1", "my-server.internal"]
+
+
 def test_parse_host_file_rejects_non_regular_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="regular file"):
         parse_host_file(tmp_path)

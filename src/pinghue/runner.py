@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import signal
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from pinghue.config import RunConfig
@@ -19,10 +20,11 @@ from pinghue.models import (
     TargetRun,
     TargetStatus,
 )
-from pinghue.probes import family_from_ip, icmp_probe, resolve_target, tcp_probe
+from pinghue.probes import ResolvedTarget, family_from_ip, icmp_probe, resolve_target, tcp_probe
 
 ProbeOnce = Callable[[], Awaitable[None]]
 StopSignalCleanup = Callable[[], None]
+MIN_OVERRUN_SLEEP = 0.1
 
 
 def probe_config(args: RunConfig, mode: ProbeMode) -> ProbeConfig:
@@ -35,38 +37,37 @@ def probe_config(args: RunConfig, mode: ProbeMode) -> ProbeConfig:
     )
 
 
-async def resolve_runs(args: RunConfig) -> list[TargetRun]:
-    family = AddressFamily(args.address_family)
-    resolved_targets = await asyncio.gather(
-        *(resolve_target(target, family, numeric=args.numeric) for target in args.targets)
+def target_run_from_resolution(resolved: ResolvedTarget) -> TargetRun:
+    if resolved.error:
+        return TargetRun(
+            target=resolved.target,
+            resolved_address=None,
+            resolved_family=None,
+            resolved_addresses=(),
+            status=TargetStatus.DNS_FAILURE,
+            error=resolved.error,
+        )
+
+    return TargetRun(
+        target=resolved.target,
+        resolved_address=resolved.address,
+        resolved_family=resolved.family,
+        resolved_addresses=resolved.addresses,
+        status=TargetStatus.DOWN,
+        error=None,
     )
-    runs: list[TargetRun] = []
 
-    for resolved in resolved_targets:
-        if resolved.error:
-            runs.append(
-                TargetRun(
-                    target=resolved.target,
-                    resolved_address=None,
-                    resolved_family=None,
-                    resolved_addresses=(),
-                    status=TargetStatus.DNS_FAILURE,
-                    error=resolved.error,
-                )
-            )
-        else:
-            runs.append(
-                TargetRun(
-                    target=resolved.target,
-                    resolved_address=resolved.address,
-                    resolved_family=resolved.family,
-                    resolved_addresses=resolved.addresses,
-                    status=TargetStatus.DOWN,
-                    error=None,
-                )
-            )
 
-    return runs
+async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
+    family = AddressFamily(args.address_family)
+    resolved = await resolve_target(target, family, numeric=args.numeric)
+    return target_run_from_resolution(resolved)
+
+
+async def resolve_runs(args: RunConfig) -> list[TargetRun]:
+    return await asyncio.gather(
+        *(resolve_run_target(target, args) for target in args.targets)
+    )
 
 
 async def _probe_address(
@@ -74,6 +75,7 @@ async def _probe_address(
     *,
     args: RunConfig,
     mode: ProbeMode,
+    executor: Executor | None = None,
 ) -> ProbeSample:
     if mode == ProbeMode.TCP:
         return await tcp_probe(address, args.port or 0, timeout_s=args.timeout)
@@ -82,6 +84,7 @@ async def _probe_address(
         address,
         timeout_s=args.timeout,
         address_family=AddressFamily(args.address_family),
+        executor=executor,
     )
 
 
@@ -91,6 +94,7 @@ async def probe_once(
     args: RunConfig,
     mode: ProbeMode,
     semaphore: asyncio.Semaphore,
+    executor: Executor | None = None,
 ) -> ProbeSample | None:
     if not target.resolved_address:
         return None
@@ -100,7 +104,12 @@ async def probe_once(
 
     async with semaphore:
         for address in addresses:
-            sample = await _probe_address(address, args=args, mode=mode)
+            sample = await _probe_address(
+                address,
+                args=args,
+                mode=mode,
+                executor=executor,
+            )
             if sample.status == SampleStatus.OK:
                 target.resolved_address = address
                 target.resolved_family = family_from_ip(address)
@@ -154,6 +163,7 @@ async def probe_target_loop(
     stop_event: asyncio.Event,
     immediate_event: asyncio.Event,
     initial_delay: float,
+    executor: Executor | None = None,
     probe_once_fn: ProbeOnce | None = None,
 ) -> None:
     """Run one target's probe loop without blocking other targets or UI refresh."""
@@ -166,7 +176,13 @@ async def probe_target_loop(
 
     while not stop_event.is_set():
         if probe_once_fn is None:
-            await probe_once(target, args=args, mode=mode, semaphore=semaphore)
+            await probe_once(
+                target,
+                args=args,
+                mode=mode,
+                semaphore=semaphore,
+                executor=executor,
+            )
         else:
             await probe_once_fn()
 
@@ -207,6 +223,28 @@ async def wait_for_stop_event(stop_event: asyncio.Event, timeout: float) -> bool
     return True
 
 
+def _iteration_sleep(
+    *,
+    interval: float,
+    iteration_elapsed: float,
+    duration_remaining: float | None = None,
+) -> float:
+    sleep_for = interval - iteration_elapsed
+    if sleep_for <= 0:
+        sleep_for = MIN_OVERRUN_SLEEP
+
+    if duration_remaining is not None:
+        sleep_for = min(sleep_for, max(0.0, duration_remaining))
+
+    return sleep_for
+
+
+def _icmp_executor(args: RunConfig, mode: ProbeMode) -> ThreadPoolExecutor | None:
+    if mode != ProbeMode.ICMP:
+        return None
+    return ThreadPoolExecutor(max_workers=args.concurrency)
+
+
 async def run_no_tui(
     args: RunConfig,
     mode: ProbeMode,
@@ -218,6 +256,7 @@ async def run_no_tui(
     cleanup_signal_handlers = install_stop_signal_handlers(stop_event)
     exit_reason = "completed"
     iteration = 0
+    executor = _icmp_executor(args, mode)
 
     try:
         targets = await resolve_runs(args)
@@ -226,7 +265,13 @@ async def run_no_tui(
             iteration += 1
             iteration_started_at = datetime.now(timezone.utc)
             probes = [
-                probe_once(target, args=args, mode=mode, semaphore=semaphore)
+                probe_once(
+                    target,
+                    args=args,
+                    mode=mode,
+                    semaphore=semaphore,
+                    executor=executor,
+                )
                 for target in targets
                 if target.resolved_address
             ]
@@ -251,9 +296,14 @@ async def run_no_tui(
                 break
 
             iteration_elapsed = (now - iteration_started_at).total_seconds()
-            sleep_for = max(0.0, args.interval - iteration_elapsed)
-            if args.duration is not None:
-                sleep_for = min(sleep_for, max(0.0, args.duration - duration_elapsed))
+            duration_remaining = (
+                None if args.duration is None else args.duration - duration_elapsed
+            )
+            sleep_for = _iteration_sleep(
+                interval=args.interval,
+                iteration_elapsed=iteration_elapsed,
+                duration_remaining=duration_remaining,
+            )
 
             if sleep_for > 0 and await wait_for_stop_event(stop_event, sleep_for):
                 exit_reason = "interrupted"
@@ -262,18 +312,30 @@ async def run_no_tui(
         exit_reason = "interrupted"
     finally:
         cleanup_signal_handlers()
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
 
     ended_at = datetime.now(timezone.utc)
     return targets, exit_reason, started_at, ended_at
 
 
-def exit_code_for_targets(targets: list[TargetRun], *, fail_on_down: bool) -> int:
+def exit_code_for_targets(
+    targets: list[TargetRun],
+    *,
+    fail_on_any_down: bool,
+    fail_on_all_down: bool,
+) -> int:
     """Return the process exit code for completed target statuses."""
-    if not fail_on_down or not targets:
+    if not targets or (not fail_on_any_down and not fail_on_all_down):
         return 0
 
     usable_statuses = {TargetStatus.HEALTHY, TargetStatus.INTERMITTENT}
-    return 0 if any(target.status in usable_statuses for target in targets) else 2
+    down_targets = [target for target in targets if target.status not in usable_statuses]
+
+    if fail_on_any_down:
+        return 2 if down_targets else 0
+
+    return 2 if len(down_targets) == len(targets) else 0
 
 
 async def run(args: RunConfig, *, mode: ProbeMode) -> int:
@@ -299,4 +361,9 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
             include_samples=not args.no_samples,
         )
 
-    return exit_code_for_targets(targets, fail_on_down=args.fail_on_down)
+    fail_on_all_down = args.fail_on_all_down or args.fail_on_down
+    return exit_code_for_targets(
+        targets,
+        fail_on_any_down=args.fail_on_any_down,
+        fail_on_all_down=fail_on_all_down,
+    )
