@@ -9,6 +9,7 @@ import pytest
 
 from pinghue.export import build_output_document, write_output_json
 from pinghue.models import (
+    MAX_TARGET_SAMPLES,
     AddressFamily,
     ProbeConfig,
     ProbeMode,
@@ -57,6 +58,49 @@ def test_build_output_document_matches_schema() -> None:
     jsonschema.validate(document, schema)
     assert document["schema_version"] == 1
     assert document["targets"][0]["samples"][0]["latency_ms"] == 9.2
+    assert document["run"]["samples_window"] == MAX_TARGET_SAMPLES
+
+
+def test_build_output_document_reports_samples_window_for_windowed_stats() -> None:
+    target = TargetRun(
+        target="1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+        status=TargetStatus.HEALTHY,
+    )
+    for index in range(MAX_TARGET_SAMPLES + 25):
+        target.apply_sample(
+            ProbeSample(
+                timestamp=datetime(2026, 5, 14, 18, 32, index % 60, tzinfo=timezone.utc),
+                latency_ms=float(index),
+                status=SampleStatus.OK,
+            ),
+            fail_threshold=3,
+            jitter_threshold_ms=10_000.0,
+        )
+
+    document = build_output_document(
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        host="ops-laptop-04",
+        exit_reason="completed",
+        probe=ProbeConfig(
+            mode=ProbeMode.ICMP,
+            port=None,
+            interval_s=1.0,
+            timeout_s=1.0,
+            address_family=AddressFamily.AUTO,
+        ),
+        targets=[target],
+    )
+    exported = document["targets"][0]
+
+    # The window caps emitted samples while stats stay cumulative: a consumer
+    # detects truncation via stats.sent > len(samples), bounded by samples_window.
+    assert document["run"]["samples_window"] == MAX_TARGET_SAMPLES
+    assert exported["stats"]["sent"] == MAX_TARGET_SAMPLES + 25
+    assert len(exported["samples"]) == MAX_TARGET_SAMPLES
+    assert exported["stats"]["sent"] > len(exported["samples"])
 
 
 def test_write_output_json_can_omit_samples(tmp_path: Path) -> None:

@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "pinghue_version": "0.3.0",
+  "pinghue_version": "1.0.0",
   "run": {
     "started_at": "2026-05-14T18:32:11.420Z",
     "ended_at": "2026-05-14T18:35:11.890Z",
     "host": "local",
     "exit_reason": "user_quit",
+    "samples_window": 1000,
     "probe": {
       "mode": "icmp",
       "port": null,

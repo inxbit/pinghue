@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/inxbit/pinghue/schemas/output-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json",
   "title": "pinghue output v1",
-  "description": "Output document produced by pinghue --output PATH. One file per run. Breaking changes increment schema_version.",
+  "description": "Output document produced by pinghue --output PATH. One file per run. Breaking changes increment schema_version. Per-target `stats` are computed over every probe sent during the run (`stats.sent`); the `samples` array retains only the most recent `run.samples_window` samples per target, so `samples` can be shorter than `stats.sent` on long runs. `--no-samples` emits empty `samples` arrays.",
   "type": "object",
   "required": ["schema_version", "pinghue_version", "run", "targets"],
   "additionalProperties": false,
@@ -27,7 +27,7 @@
   "$defs": {
     "run": {
       "type": "object",
-      "required": ["started_at", "ended_at", "host", "exit_reason", "probe"],
+      "required": ["started_at", "ended_at", "host", "exit_reason", "samples_window", "probe"],
       "additionalProperties": false,
       "properties": {
         "started_at": {
@@ -44,6 +44,11 @@
         "exit_reason": {
           "type": "string",
           "enum": ["user_quit", "interrupted", "deadline", "completed", "error"]
+        },
+        "samples_window": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of most-recent probe samples retained per target in its samples array. Per-target stats are computed over all probes (stats.sent), which can exceed this value on long runs."
         },
         "probe": {
           "$ref": "#/$defs/probe_config"

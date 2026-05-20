@@ -61,3 +61,63 @@ def test_homebrew_test_uses_fail_on_down_against_local_tcp_server() -> None:
 
     assert "TCPServer.new" in formula
     assert "--fail-on-down" in formula
+
+
+def test_pyproject_advertises_stable_release_status() -> None:
+    pyproject = read("pyproject.toml")
+
+    assert '"Development Status :: 5 - Production/Stable"' in pyproject
+    assert '"Development Status :: 3 - Alpha"' not in pyproject
+
+
+def test_output_schema_has_stable_v1_id_and_samples_window_contract() -> None:
+    schema = json.loads(read("schemas/output-v1.schema.json"))
+    run_definition = schema["$defs"]["run"]
+
+    assert schema["$id"] == "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json"
+    assert "samples_window" in run_definition["required"]
+    assert run_definition["properties"]["samples_window"]["minimum"] == 0
+
+
+def test_readme_declares_stable_support_and_deprecation_policy() -> None:
+    readme = read("README.md")
+
+    assert "## Stability Policy" in readme
+    assert "`schema_version: 1`" in readme
+    assert "at least one minor release" in readme
+    assert "## Supported Platforms" in readme
+    assert "macOS and Linux" in readme
+
+
+def test_release_checklist_revalidates_release_security_gates() -> None:
+    checklist = read("docs/release-checklist.md")
+
+    assert "pip-audit" in checklist
+    assert "hosted hardening" in checklist
+    assert "GitHub rulesets" in checklist
+    assert "`pypi` environment" in checklist
+    assert "Sigstore wheel signing" in checklist
+
+
+def test_changelog_has_dated_1_0_release_section() -> None:
+    changelog = read("CHANGELOG.md")
+
+    assert "Starting with `1.0.0`, this project follows semantic versioning." in changelog
+    assert "## [Unreleased]" in changelog
+    assert "## 1.0.0 - 2026-05-20" in changelog
+
+
+def test_release_version_surfaces_match_package_version() -> None:
+    pyproject = read("pyproject.toml")
+    readme = read("README.md")
+    example = json.loads(read("examples/pinghue-output-example.json"))
+    hero = read("docs/assets/pinghue-hero.svg")
+    demo = read("docs/assets/pinghue-demo.svg")
+    screenshot = read("docs/assets/pinghue-screenshot.svg")
+
+    assert 'version = "1.0.0"' in pyproject
+    assert "Current version: `1.0.0`." in readme
+    assert example["pinghue_version"] == "1.0.0"
+    assert "v1.0.0" in hero
+    assert "v1.0.0" in demo
+    assert "v1.0.0" in screenshot

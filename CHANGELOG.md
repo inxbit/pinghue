@@ -2,7 +2,18 @@
 
 All notable changes to this project are documented here.
 
-This project follows semantic versioning once it reaches `1.0.0`. Before `1.0.0`, CLI flags and JSON output may change; breaking JSON changes increment `schema_version`.
+Starting with `1.0.0`, this project follows semantic versioning. CLI flags and JSON output are compatibility contracts; breaking JSON changes increment `schema_version`.
+
+## [Unreleased]
+
+## 1.0.0 - 2026-05-20
+
+- Declared macOS and Linux as the 1.0 supported platforms.
+- Documented the CLI and JSON v1 stability contract, including the deprecation window for incompatible CLI changes.
+- Documented the bounded sample window used by JSON evidence and TUI statistics.
+- Added TUI integration coverage and CI coverage enforcement.
+- Added release gates for dependency auditing and hosted hardening re-verification.
+- Set the package maturity classifier to Production/Stable.
 
 ## 0.3.0 - 2026-05-20
 
