@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Header
 
 import pinghue.app as app_module
 import pinghue.runner as runner_module
@@ -135,3 +135,41 @@ async def test_pilot_burst_selected_triggers_an_immediate_probe(
         await _wait_until(pilot, lambda: len(probed) > baseline)
 
         assert len(probed) > baseline
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_arrow_navigation_recovers_after_header_click() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["a.example", "b.example", "c.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        assert table.cursor_row == 0
+
+        await pilot.click(Header, offset=(0, 0))
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert table.cursor_row == 1
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_arrow_navigation_recovers_after_bottom_corner_click() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["a.example", "b.example", "c.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(100, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        assert table.cursor_row == 0
+
+        await pilot.click(None, offset=(99, 23))
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert table.cursor_row == 1

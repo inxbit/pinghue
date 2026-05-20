@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+- Fixed TUI arrow-key navigation after mouse clicks on non-table chrome.
+
 ## 1.0.0 - 2026-05-20
 
 - Declared macOS and Linux as the 1.0 supported platforms.
