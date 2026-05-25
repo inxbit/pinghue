@@ -8,7 +8,7 @@ include pinghue-threat-model.md
 include security-best-practices-report.md
 prune .github
 prune packaging
-prune scripts
+include scripts/pinghue
 recursive-include schemas *.json
 recursive-include examples *.json
 recursive-include docs *.md *.svg

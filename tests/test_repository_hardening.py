@@ -11,7 +11,7 @@ def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
 
     assert "prune .github" in manifest
     assert "prune packaging" in manifest
-    assert "prune scripts" in manifest
+    assert "include scripts/pinghue" in manifest
     assert "recursive-include packaging" not in manifest
     assert "recursive-include scripts" not in manifest
     assert "recursive-include .github/workflows" not in manifest
@@ -115,9 +115,9 @@ def test_release_version_surfaces_match_package_version() -> None:
     demo = read("docs/assets/pinghue-demo.svg")
     screenshot = read("docs/assets/pinghue-screenshot.svg")
 
-    assert 'version = "1.0.1"' in pyproject
-    assert "Current version: `1.0.1`." in readme
-    assert example["pinghue_version"] == "1.0.1"
-    assert "v1.0.1" in hero
-    assert "v1.0.1" in demo
-    assert "v1.0.1" in screenshot
+    assert 'version = "1.0.2"' in pyproject
+    assert "Current version: `1.0.2`." in readme
+    assert example["pinghue_version"] == "1.0.2"
+    assert "v1.0.2" in hero
+    assert "v1.0.2" in demo
+    assert "v1.0.2" in screenshot

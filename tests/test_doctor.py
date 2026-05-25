@@ -78,6 +78,16 @@ def test_doctor_dns_probe_uses_configured_name(monkeypatch: pytest.MonkeyPatch) 
     assert error is None
 
 
+def test_doctor_dns_probe_handles_empty_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", lambda *_: [])
+
+    address, elapsed_ms, error = doctor._dns_probe("empty.example")
+
+    assert address is None
+    assert elapsed_ms is None
+    assert error == "getaddrinfo: no addresses returned"
+
+
 def test_run_check_prints_configured_dns_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)

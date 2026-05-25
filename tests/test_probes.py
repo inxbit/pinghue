@@ -85,6 +85,21 @@ async def test_resolve_target_numeric_rejects_hostname() -> None:
     assert resolved.error == "--numeric requires an IP literal"
 
 
+async def test_resolve_target_returns_dns_error_when_no_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLoop:
+        async def getaddrinfo(self, *_: object, **__: object) -> list[object]:
+            return []
+
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+
+    resolved = await resolve_target("example.com", AddressFamily.AUTO)
+
+    assert resolved.address is None
+    assert resolved.error == "getaddrinfo: no addresses returned"
+
+
 async def test_resolve_target_preserves_all_getaddrinfo_addresses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

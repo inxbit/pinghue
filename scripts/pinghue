@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Launch pinghue with a resilient import path bootstrap.
+
+This launcher avoids hard dependency on editable .pth processing by falling back
+to the editable source root path captured in `direct_url.json` when available.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from collections.abc import Callable
+from importlib import metadata
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+ImportProbeMain = Callable[[], Callable[[], int]]
+
+
+def _direct_import_main() -> Callable[[], int]:
+    """Return the installed entrypoint if the normal import path is healthy."""
+    from pinghue.cli import main
+
+    return main
+
+
+def _load_main_entrypoint(
+    *, importer: ImportProbeMain | None = None
+) -> Callable[[], int]:
+    """Return the package entrypoint without requiring import side-effects."""
+    import_main = importer or _direct_import_main
+    try:
+        return import_main()
+    except ModuleNotFoundError as exc:
+        if exc.name != "pinghue":
+            raise
+
+    try:
+        dist = metadata.distribution("pinghue")
+        direct_url = dist.read_text("direct_url.json")
+        payload = json.loads(direct_url)
+    except (FileNotFoundError, json.JSONDecodeError, metadata.PackageNotFoundError):
+        raise RuntimeError("pinghue package metadata is not available") from None
+
+    if not payload.get("dir_info", {}).get("editable", False):
+        raise RuntimeError("pinghue was not installed as editable")
+
+    raw_url = payload.get("url")
+    if not isinstance(raw_url, str) or not raw_url.startswith("file://"):
+        raise RuntimeError("unexpected editable source URL in pinghue metadata")
+
+    source_root = Path(unquote(urlparse(raw_url).path))
+    candidate_paths = [source_root / "src", source_root]
+    for candidate in candidate_paths:
+        sys.path.insert(0, str(candidate))
+        try:
+            from pinghue.cli import main
+        except ModuleNotFoundError:
+            continue
+        else:
+            return main
+
+    raise RuntimeError("could not resolve pinghue source path for editable install")
+
+
+def main() -> int:
+    try:
+        entrypoint = _load_main_entrypoint()
+    except RuntimeError as exc:
+        print(f"pinghue: unable to start: {exc}", file=sys.stderr)
+        return 1
+    return entrypoint()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
