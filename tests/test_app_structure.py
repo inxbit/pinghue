@@ -57,6 +57,16 @@ class FakeTable:
     def focus(self) -> None:
         self.focused = True
 
+    @property
+    def row_count(self) -> int:
+        return len(self.added_rows)
+
+    def action_cursor_up(self) -> None:
+        self.cursor_row = 0 if self.cursor_row is None else max(self.cursor_row - 1, 0)
+
+    def action_cursor_down(self) -> None:
+        self.cursor_row = 0 if self.cursor_row is None else self.cursor_row + 1
+
 
 def test_tui_uses_datatable_native_navigation() -> None:
     bound_actions = {binding.action for binding in PinghueTextualApp.BINDINGS}
@@ -96,6 +106,49 @@ def test_burst_selected_schedules_background_worker(monkeypatch) -> None:
     app.action_burst_selected()
 
     assert len(scheduled) == 1
+
+
+class _TestEvent:
+    def __init__(self, key: str) -> None:
+        self.key = key
+        self.prevented = False
+
+    def prevent_default(self) -> None:
+        self.prevented = True
+
+
+def test_on_click_focuses_target_table(monkeypatch) -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    table = FakeTable()
+    app.targets = [TargetRun("example.com", resolved_address="example.com")]
+    monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
+
+    app.on_click(_TestEvent("click"))  # type: ignore[arg-type]
+
+    assert table.focused is True
+
+
+def test_on_key_moves_cursor_when_up_down(monkeypatch) -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    table = FakeTable(cursor_row=0)
+    table.added_rows.append(("r0", ()))
+    table.added_rows.append(("r1", ()))
+    monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
+
+    app.on_key(_TestEvent("up"))  # type: ignore[arg-type]
+    app.on_key(_TestEvent("down"))  # type: ignore[arg-type]
+
+    assert table.focused is True
+    assert table.cursor_row == 1
+
+
+def test_on_key_non_navigation_is_ignored() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    event = _TestEvent("x")
+
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert event.prevented is False
 
 
 async def test_on_mount_renders_targets_before_dns_resolution(monkeypatch) -> None:
