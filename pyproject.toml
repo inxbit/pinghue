@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinghue"
-version = "1.0.1"
+version = "1.0.2"
 description = "Colored, concurrent ICMP/TCP ping monitor for the terminal"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -52,11 +52,11 @@ Issues = "https://github.com/inxbit/pinghue/issues"
 Changelog = "https://github.com/inxbit/pinghue/blob/main/CHANGELOG.md"
 Security = "https://github.com/inxbit/pinghue/security"
 
-[project.scripts]
-pinghue = "pinghue.cli:main"
-
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools]
+script-files = ["scripts/pinghue"]
 
 [tool.setuptools.package-data]
 pinghue = ["py.typed"]

@@ -9,6 +9,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.events import Click, Key
 from textual.widgets import DataTable, Footer, Header, Static
 
 from pinghue import __version__
@@ -79,8 +80,6 @@ class PinghueTextualApp(App[None]):
     }
     """
     BINDINGS = [
-        Binding("up", "cursor_up", show=False, priority=True),
-        Binding("down", "cursor_down", show=False, priority=True),
         Binding("q", "quit", "Quit"),
         Binding("a", "toggle_address", "Address"),
         Binding("r", "reset_selected", "Reset"),
@@ -274,16 +273,24 @@ class PinghueTextualApp(App[None]):
             cell_cache=self._cell_cache,
         )
 
-    def on_click(self) -> None:
+    def on_click(self, event: Click) -> None:
+        event.prevent_default()
         self._focus_target_table()
 
-    def action_cursor_up(self) -> None:
-        table = self._focus_target_table()
-        table.action_cursor_up()
+    def on_key(self, event: Key) -> None:
+        if event.key not in {"up", "down"}:
+            return
 
-    def action_cursor_down(self) -> None:
         table = self._focus_target_table()
-        table.action_cursor_down()
+        if table.row_count == 0:
+            return
+
+        if event.key == "up":
+            table.action_cursor_up()
+        else:
+            table.action_cursor_down()
+
+        event.prevent_default()
 
     def action_toggle_address(self) -> None:
         self.show_address = not self.show_address

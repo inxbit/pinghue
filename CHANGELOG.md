@@ -6,6 +6,13 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 1.0.2 - 2026-05-25
+
+- Fixed TUI navigation so up/down arrow keys remain functional after mouse interactions anywhere in the terminal.
+- Restored robust launcher entrypoint handling for editable installs by shipping a dedicated `scripts/pinghue` bootstrap.
+- Added explicit handling for empty DNS resolution results in probe/diagnostic paths to avoid false-positive success states on no-address responses.
+- Expanded test coverage for the launcher, DNS-empty response behavior, and address-resolution edge cases.
+
 ## 1.0.1 - 2026-05-20
 
 - Fixed TUI arrow-key navigation after mouse clicks on non-table chrome.

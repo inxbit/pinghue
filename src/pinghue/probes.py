@@ -133,6 +133,9 @@ async def resolve_target(
     except OSError as exc:
         return ResolvedTarget(target, None, None, f"getaddrinfo: {exc}")
 
+    if not infos:
+        return ResolvedTarget(target, None, None, "getaddrinfo: no addresses returned")
+
     # Prefer IPv4 in auto mode, then IPv6.
     if address_family == AddressFamily.AUTO:
         infos = sorted(infos, key=lambda item: 0 if item[0] == socket.AF_INET else 1)

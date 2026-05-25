@@ -101,6 +101,9 @@ def _dns_probe(resolve_name: str) -> tuple[str | None, float | None, str | None]
     except OSError as exc:
         return None, None, str(exc)
 
+    if not infos:
+        return None, None, "getaddrinfo: no addresses returned"
+
     elapsed_ms = float(round((time.perf_counter() - start) * 1000))
     family, *_rest, sockaddr = infos[0]
     address = cast(str, sockaddr[0])

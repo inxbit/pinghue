@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `1.0.1`.
+Current version: `1.0.2`.
 
 The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
@@ -106,7 +106,8 @@ pinghue --output maintenance.json 1.1.1.1 example.com
 pinghue --host-label maintenance-window --output maintenance.json 1.1.1.1
 ```
 
-Host files are plain text. Blank lines and lines starting with `#` are ignored.
+Host files are plain text. Blank lines and `#` comments are ignored. Inline comments
+on host lines are also ignored (`host.example  # comment`).
 Host files must be regular files, at most 1 MiB, and at most 5,000 lines.
 
 ```text
@@ -154,7 +155,7 @@ pinghue [OPTIONS] [TARGET ...]
 | Option | Default | Description |
 | --- | --- | --- |
 | `TARGET ...` | none | Hostnames or IP addresses to probe. Required unless `--check` is used. |
-| `-f, --file PATH` | none | Read targets from a plain-text host file. Blank lines and `#` comments are ignored. |
+| `-f, --file PATH` | none | Read targets from a plain-text host file. Blank lines and full-line/inline `#` comments are ignored. |
 | `-p, --port PORT` | ICMP | Enable TCP connect checks against `PORT`. Valid range: `1-65535`. |
 | `-4, --ipv4` | off | Force IPv4 resolution/probing. |
 | `-6, --ipv6` | off | Force IPv6 resolution/probing. |
