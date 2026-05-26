@@ -5,16 +5,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ipaddress
+import math
 import sys
 from pathlib import Path
 
 from pinghue import __version__
 from pinghue.doctor import run_check
-from pinghue.hostfile import parse_host_file
+from pinghue.hostfile import TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 
 INTERVAL_MINIMUM = 0.1
 CONCURRENCY_MAXIMUM = 1024
+HOST_LABEL_MAXIMUM = 128
 HISTORY_STYLES = ("bar", "dots", "sparkline", "none")
 
 
@@ -28,6 +30,7 @@ class ParsedArgs(argparse.Namespace):
     duration: float | None
     no_tui: bool
     output: Path | None
+    overwrite: bool
     no_samples: bool
     concurrency: int
     jitter_threshold: float
@@ -68,6 +71,11 @@ def _parser() -> argparse.ArgumentParser:
         help="print one line per probe instead of the TUI",
     )
     parser.add_argument("--output", type=Path, help="write a JSON run summary to PATH on exit")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="allow --output to replace an existing regular file",
+    )
     parser.add_argument(
         "--no-samples",
         action="store_true",
@@ -138,6 +146,24 @@ def dedupe_targets(targets: list[str]) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
+def _validate_finite(parser: argparse.ArgumentParser, name: str, value: float) -> None:
+    if not math.isfinite(value):
+        parser.error(f"{name} must be a finite number")
+
+
+def _validate_text_length(
+    parser: argparse.ArgumentParser,
+    name: str,
+    value: str,
+    *,
+    maximum: int,
+) -> None:
+    if not value.strip():
+        parser.error(f"{name} must not be empty")
+    if len(value) > maximum:
+        parser.error(f"{name} must not exceed {maximum} characters")
+
+
 def _address_family_from_literal(targets: list[str]) -> str:
     families: set[int] = set()
     for target in targets:
@@ -159,10 +185,12 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     parser = _parser()
     args = parser.parse_args(argv, namespace=ParsedArgs())
 
+    _validate_finite(parser, "interval", args.interval)
     if args.interval < INTERVAL_MINIMUM:
         parser.error(f"minimum interval is {INTERVAL_MINIMUM}")
 
     args.timeout = args.timeout if args.timeout is not None else args.interval
+    _validate_finite(parser, "timeout", args.timeout)
     if args.timeout <= 0:
         parser.error("timeout must be greater than 0")
 
@@ -174,6 +202,8 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
 
     if args.duration is not None and args.duration <= 0:
         parser.error("duration must be greater than 0")
+    if args.duration is not None:
+        _validate_finite(parser, "duration", args.duration)
 
     if args.concurrency <= 0:
         parser.error("concurrency must be greater than 0")
@@ -184,12 +214,32 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     if args.fail_threshold <= 0:
         parser.error("fail-threshold must be greater than 0")
 
+    _validate_finite(parser, "jitter-threshold", args.jitter_threshold)
+    if args.jitter_threshold < 0:
+        parser.error("jitter-threshold must be greater than or equal to 0")
+
     try:
         file_targets = parse_host_file(args.file) if args.file else []
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
     args.targets = dedupe_targets([*args.targets, *file_targets])
+    for target in args.targets:
+        _validate_text_length(parser, "target", target, maximum=TARGET_MAXIMUM)
+
+    if args.resolve_name is not None:
+        _validate_text_length(
+            parser,
+            "resolve-name",
+            args.resolve_name,
+            maximum=TARGET_MAXIMUM,
+        )
+    _validate_text_length(
+        parser,
+        "host-label",
+        args.host_label,
+        maximum=HOST_LABEL_MAXIMUM,
+    )
 
     if args.numeric:
         args.address_family = _address_family_from_literal(args.targets)
@@ -218,7 +268,11 @@ def main(argv: list[str] | None = None) -> int:
     from pinghue.runner import run
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
-    return asyncio.run(run(args, mode=mode))
+    try:
+        return asyncio.run(run(args, mode=mode))
+    except OSError as exc:
+        print(f"pinghue: error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover

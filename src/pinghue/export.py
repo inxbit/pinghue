@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -78,7 +79,20 @@ def build_output_document(
     }
 
 
-def write_output_json(path: str | Path, **kwargs: Any) -> None:
+def _install_output_file(tmp_path: Path, output_path: Path, *, overwrite: bool) -> None:
+    if overwrite:
+        tmp_path.replace(output_path)
+        return
+
+    try:
+        os.link(tmp_path, output_path)
+    except FileExistsError as exc:
+        raise FileExistsError(
+            f"output file already exists; use --overwrite to replace: {output_path}"
+        ) from exc
+
+
+def write_output_json(path: str | Path, *, overwrite: bool = False, **kwargs: Any) -> None:
     """Write a JSON export document to disk."""
     output_path = Path(path)
     document = build_output_document(**kwargs)
@@ -105,8 +119,11 @@ def write_output_json(path: str | Path, **kwargs: Any) -> None:
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
             tmp_file.write(output_text)
-        tmp_path.replace(output_path)
+        _install_output_file(tmp_path, output_path, overwrite=overwrite)
     except Exception:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
         raise
+    else:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)

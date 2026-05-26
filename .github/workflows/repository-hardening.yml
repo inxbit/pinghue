@@ -1,0 +1,26 @@
+name: Repository Hardening
+
+on:
+  schedule:
+    - cron: "41 10 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/repo-settings/**"
+      - ".github/workflows/repository-hardening.yml"
+      - "scripts/check-github-hardening.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Check hosted repository hardening
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-github-hardening.sh "${{ github.repository }}"

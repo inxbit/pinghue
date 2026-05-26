@@ -25,7 +25,7 @@
   <text class="mono muted" x="86" y="22" font-size="13">pinghue 1.1.1.1 8.8.8.8 example.com edge-router core-fw db-primary api-gateway</text>
 
   <rect x="0" y="34" width="1474" height="20" fill="#20313d"/>
-  <text class="mono title" x="737" y="49" text-anchor="middle" font-size="15">PingHUE v1.0.2</text>
+  <text class="mono title" x="737" y="49" text-anchor="middle" font-size="15">PingHUE v2.0.0</text>
   <text class="mono slow" x="1418" y="49" text-anchor="end" font-size="14">18:38:44</text>
 
   <rect x="9" y="69" width="1436" height="620" fill="#151b22" stroke="#2a313a"/>

@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-No open critical or high-risk runtime vulnerability was found in this pass. `pinghue` is a local Python CLI/TUI rather than a web service, so the available framework-specific security references for Django, FastAPI, and Flask do not directly apply. The current code follows the important secure defaults for this project shape: no shell execution from runtime inputs, no unsafe deserialization, bounded host-file reads, sanitized terminal/JSON evidence, unprivileged ICMP guidance, and hardened release workflows.
+No open critical or high-risk runtime vulnerability was found in this pass. `pinghue` is a local Python CLI/TUI rather than a web service, so the available framework-specific security references for Django, FastAPI, and Flask do not directly apply. The current code follows the important secure defaults for this project shape: no shell execution from runtime inputs, no unsafe deserialization, finite and bounded CLI inputs, descriptor-validated host-file reads, sanitized terminal/JSON evidence, no-clobber JSON output by default, unprivileged ICMP guidance, async probe containment, bounded DNS resolution, and hardened release workflows with hosted drift checks.
 
 ## Scope
 
@@ -36,33 +36,35 @@ Previously relevant medium-risk classes are now controlled:
 
 | ID | Class | Status | Evidence |
 | --- | --- | --- | --- |
-| BP-001 | Terminal or downstream JSON control-character injection | Controlled | `sanitize_display` escapes C0/C1 controls in `src/pinghue/display.py:6`; no-TUI output uses it in `src/pinghue/runner.py:184`; TUI cells use it in `src/pinghue/ui.py:217`; JSON export uses it in `src/pinghue/export.py:25`. |
+| BP-001 | Terminal or downstream JSON control-character injection | Controlled | `sanitize_display` escapes controls and non-ASCII characters in `src/pinghue/display.py:7`; no-TUI output uses it in `src/pinghue/runner.py:264`; TUI cells use it in `src/pinghue/ui.py:244`; JSON export uses it in `src/pinghue/export.py:25`. |
 | BP-002 | Release workflow supply-chain exposure | Controlled | Publish workflow pins actions, separates build and publish jobs, uses OIDC, and generates attestations in `.github/workflows/publish.yml:11` and `.github/workflows/publish.yml:38`. |
-| BP-003 | Evidence loss or temp-path symlink redirection on JSON write | Controlled | No-TUI mode installs SIGINT/SIGTERM handlers and records interrupted exits in `src/pinghue/runner.py:121` and `src/pinghue/runner.py:210`; JSON writes use a randomized `NamedTemporaryFile` (O_EXCL, mode 0600) followed by atomic replace in `src/pinghue/export.py:92`. |
+| BP-003 | Evidence loss or temp-path symlink redirection on JSON write | Controlled | No-TUI mode installs SIGINT/SIGTERM handlers and records interrupted exits; JSON writes use a randomized `NamedTemporaryFile` (O_EXCL, mode 0600), refuse to replace existing regular files by default, and require explicit `--overwrite` for replacement. |
+| BP-004 | Non-finite or oversized operator inputs | Controlled | CLI validation rejects non-finite float values, empty targets, targets above 253 characters, diagnostic resolve names above 253 characters, and host labels above 128 characters in `src/pinghue/cli.py:143` and `src/pinghue/cli.py:178`. |
+| BP-005 | Host-file symlink and path validation races | Controlled | Host files are opened with `O_NOFOLLOW` where available, validated with `fstat()` on the opened descriptor, capped at 1 MiB, capped at 5,000 lines, and target-capped at 253 characters in `src/pinghue/hostfile.py:15` and `src/pinghue/hostfile.py:54`. |
+| BP-006 | Resolver and probe-loop instability | Controlled | DNS resolution is throttled with an event-loop-scoped semaphore and bounded lookup timeout, failed DNS targets retry after a cooldown, unexpected resolver/probe exceptions are converted to target/sample failures, and working addresses are prioritized. |
 
 ### Low and residual
 
 | ID | Issue | Risk | Recommendation |
 | --- | --- | --- | --- |
-| BP-004 | Operator-selected output path can overwrite an existing writable file. | Low, because the same local user supplies the path and no privilege boundary is crossed. | Keep documentation clear that `--output` writes the selected path; re-review if `pinghue` is ever wrapped by a privileged service. |
-| BP-005 | Host-file validation has a normal path/stat/read race. | Low, because the path is local operator-controlled and the tool is unprivileged. | If future packaging adds privilege, switch to descriptor-based open/stat/read handling. |
-| BP-006 | Hosted GitHub rulesets and PyPI environment state cannot be proven from local files. | Closed in hosted repo as of 2026-05-19: live GitHub API checks showed active `protect main` and `protect release tags` rulesets, a protected `pypi` environment, and a `v*.*.*` tag deployment policy. Re-verify after any repository migration or owner change. | Keep the script as the source of truth; re-run after migrations and audit ruleset diffs before each release. |
+| BP-007 | Operator-selected output path can overwrite an existing writable file. | Closed by default no-clobber behavior; replacement now requires explicit `--overwrite`. | Keep overwrite coverage in export and CLI tests. |
+| BP-008 | Hosted GitHub rulesets and PyPI environment state can drift. | Controlled by `scripts/check-github-hardening.sh`, scheduled `.github/workflows/repository-hardening.yml`, and live verification on 2026-05-26. | Keep the scheduled workflow visible before release and re-run manually after migrations. |
 
 ## Secure defaults observed
 
-- CLI range validation covers interval, timeout, port, count, duration, concurrency, and fail threshold in `src/pinghue/cli.py:151`.
+- CLI validation covers finite interval, timeout, duration, and jitter values; port, count, concurrency, and fail threshold ranges; and target, resolve-name, and host-label lengths in `src/pinghue/cli.py:143` and `src/pinghue/cli.py:178`.
 - `--numeric` requires IP literals and uses automatic family mode for mixed IPv4/IPv6 literals in `src/pinghue/cli.py:134`.
-- Host files must be regular files, are capped at 1 MiB, and abort above 5,000 lines in `src/pinghue/hostfile.py:9`.
-- DNS resolution uses OS resolver APIs without shell execution in `src/pinghue/probes.py:53`.
+- Host files must be non-symlink regular files, are validated by descriptor, capped at 1 MiB, capped at 5,000 lines, and reject targets above 253 characters in `src/pinghue/hostfile.py:15`.
+- DNS resolution uses OS resolver APIs without shell execution in `src/pinghue/probes.py:100`.
 - TCP probing uses `asyncio.open_connection` with timeout and closed writers in `src/pinghue/probes.py:103`.
 - ICMP probing uses `icmplib` unprivileged mode in `src/pinghue/probes.py:144`.
-- Probe concurrency is bounded through `asyncio.Semaphore` in `src/pinghue/runner.py:216`.
+- Probe concurrency is bounded through `asyncio.Semaphore`, and DNS resolution has its own lower semaphore cap plus a bounded lookup timeout.
 - JSON host metadata defaults to the non-identifying `local` label through `--host-label` in `src/pinghue/cli.py:111`.
-- JSON output is written through a randomized `NamedTemporaryFile` (O_EXCL, mode 0600) in the destination directory and atomically replaced in `src/pinghue/export.py:92`.
+- JSON output is written through a randomized `NamedTemporaryFile` (O_EXCL, mode 0600) in the destination directory and refuses to replace existing regular files unless `--overwrite` is set.
 - Doctor guidance recommends group-specific `ping_group_range` before capability-based fallback in `src/pinghue/doctor.py:152`.
 - CI uses read-only repository permissions and non-persisted checkout credentials in `.github/workflows/ci.yml:9`.
 - Publish workflow uses pinned action SHAs, scoped publish permissions, artifact attestations, and release concurrency in `.github/workflows/publish.yml:11`.
-- Dependency audit runs weekly and on relevant PRs in `.github/workflows/dependency-audit.yml:1`.
+- Dependency audit runs weekly and on relevant PRs in `.github/workflows/dependency-audit.yml:1`; hosted repository hardening drift is checked weekly in `.github/workflows/repository-hardening.yml:1`.
 - `MANIFEST.in` excludes `.github` and `scripts` from published sdists while retaining user-facing docs and schemas in `MANIFEST.in:1`.
 - Homebrew resources are SHA256-pinned, and the formula test verifies a real local TCP success path with `--fail-on-down` in `packaging/homebrew/pinghue.rb:20` and `packaging/homebrew/pinghue.rb:106`.
 
@@ -70,24 +72,32 @@ Previously relevant medium-risk classes are now controlled:
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Input validation | Pass | CLI values and host files are validated before runtime scheduling. |
+| Input validation | Pass | CLI values and host-file targets are finite, range-checked, and length-bounded before runtime scheduling. |
 | Terminal output safety | Pass | Display sanitization is centralized and used by no-TUI, TUI, and JSON export paths. |
-| Local file handling | Pass with residual note | Host-file reads and JSON writes are bounded for the current unprivileged CLI model. |
+| Local file handling | Pass | Host-file reads use descriptor validation and JSON writes use randomized atomic temp files with default no-clobber behavior. |
+| Async stability | Pass | Resolver and probe failures are contained per target/sample, and DNS work is throttled and timeout-bounded separately from probe concurrency. |
 | Privilege minimization | Pass | Runtime avoids root requirements; Linux ICMP guidance prefers group-specific unprivileged sockets. |
 | Shell/code execution | Pass | No runtime `subprocess`, `os.system`, `eval`, or `exec` sink was found. |
 | Serialization | Pass | JSON export uses structured objects and schema tests; no pickle/YAML/XML parser surface was found. |
 | Dependency hygiene | Pass | Runtime ranges are narrow; Dependabot and `pip-audit` workflow are present. |
-| Release hardening | Pass | Pinned actions, OIDC trusted publishing, attestations, protected ruleset templates, and sdist pruning are present. |
+| Release hardening | Pass | Pinned actions, OIDC trusted publishing, attestations, protected ruleset templates, hosted drift checks, and sdist pruning are present. |
 | Secrets handling | Pass | No static PyPI tokens, GitHub tokens, passwords, or API keys were found in reviewed files. |
 
 ## Validation
 
 - Repository sink search: reviewed matches for shell execution, dynamic evaluation, serialization, file I/O, sockets, secrets, privilege commands, and release workflow permissions.
-- `.venv/bin/python -m pytest`: 69 passed.
-- `.venv/bin/pip-audit --cache-dir /tmp/pinghue-pip-audit-cache`: no known vulnerabilities found.
+- `.venv/bin/ruff check .`: all checks passed.
+- `.venv/bin/mypy src`: no issues in 13 source files.
+- `.venv/bin/bandit -r src scripts -x tests`: no issues identified after replacing a runtime `assert` with ordinary control flow.
+- `.venv/bin/semgrep scan --config p/python --config p/secrets --config p/github-actions --config p/bandit --error --exclude .venv --exclude dist --exclude build --exclude .git .`: 0 findings across 49 tracked files.
+- `.venv/bin/pytest`: 134 passed.
+- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 134 passed, 84.90% coverage.
+- `.venv/bin/pip-audit --desc`: no known vulnerabilities found.
+- `.venv/bin/python -m build --no-isolation`: built wheel and sdist.
+- `.venv/bin/twine check dist/*`: wheel and sdist passed.
+- `scripts/check-github-hardening.sh inxbit/pinghue`: hosted hardening checks passed.
 
 ## Recommended follow-up
 
-- Re-verify hosted GitHub branch rulesets, release-tag ruleset, and `pypi` environment approval after repository migrations or manual settings changes.
-- Keep `pip-audit` and Dependabot visible before every release.
+- Keep `pip-audit`, Dependabot, and repository-hardening drift checks visible before every release.
 - Re-open the file-handling threat model if `pinghue` is ever executed by a privileged wrapper, daemon, or scheduled service.

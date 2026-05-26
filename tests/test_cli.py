@@ -1,6 +1,6 @@
 import pytest
 
-from pinghue.cli import CONCURRENCY_MAXIMUM, parse_args
+from pinghue.cli import CONCURRENCY_MAXIMUM, HOST_LABEL_MAXIMUM, TARGET_MAXIMUM, main, parse_args
 
 
 def test_parse_args_defaults_to_icmp_auto_family_and_tui() -> None:
@@ -26,6 +26,66 @@ def test_parse_args_tcp_count_and_no_tui() -> None:
 def test_parse_args_rejects_too_fast_interval() -> None:
     with pytest.raises(SystemExit):
         parse_args(["--interval", "0.01", "1.1.1.1"])
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--interval", "nan"),
+        ("--interval", "inf"),
+        ("--timeout", "nan"),
+        ("--timeout", "-inf"),
+        ("--duration", "nan"),
+        ("--jitter-threshold", "inf"),
+    ],
+)
+def test_parse_args_rejects_non_finite_float_values(option: str, value: str) -> None:
+    with pytest.raises(SystemExit):
+        parse_args([option, value, "1.1.1.1"])
+
+
+def test_parse_args_rejects_overlong_target() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["a" * (TARGET_MAXIMUM + 1)])
+
+
+def test_parse_args_rejects_overlong_check_resolve_name() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--check", "--resolve-name", "a" * (TARGET_MAXIMUM + 1)])
+
+
+def test_parse_args_rejects_overlong_host_label() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--host-label", "a" * (HOST_LABEL_MAXIMUM + 1), "1.1.1.1"])
+
+
+def test_parse_args_accepts_explicit_output_overwrite() -> None:
+    args = parse_args(["--output", "out.json", "--overwrite", "1.1.1.1"])
+
+    assert args.overwrite is True
+
+
+def test_parse_args_leaves_output_overwrite_off_by_default() -> None:
+    args = parse_args(["--output", "out.json", "1.1.1.1"])
+
+    assert args.overwrite is False
+
+
+def test_main_reports_output_write_errors_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        raise FileExistsError("output file already exists")
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    assert main(["--output", "out.json", "1.1.1.1"]) == 1
+    captured = capsys.readouterr()
+    assert "output file already exists" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_parse_args_numeric_sets_family_from_ip_literal() -> None:
