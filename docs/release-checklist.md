@@ -28,12 +28,14 @@ SOURCE_DATE_EPOCH=0 python -m build --no-isolation
 twine check dist/*
 pinghue --version
 pinghue -p 1 127.0.0.1 -c 1 --no-tui
+scripts/check-github-hardening.sh inxbit/pinghue
 ```
 
 ## Hosted Hardening Re-Verification
 
 Re-verify hosted hardening before every release, even when no repository settings were intentionally changed:
 
+- `scripts/check-github-hardening.sh inxbit/pinghue` passes.
 - GitHub rulesets for `main` and `v*.*.*` release tags are active.
 - The `main` ruleset still requires pull requests, status checks, signed commits, and review-thread resolution.
 - The `main` ruleset still allows squash and rebase merges only.

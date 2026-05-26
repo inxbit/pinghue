@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json",
   "title": "pinghue output v1",
-  "description": "Output document produced by pinghue --output PATH. One file per run. Breaking changes increment schema_version. Per-target `stats` are computed over every probe sent during the run (`stats.sent`); the `samples` array retains only the most recent `run.samples_window` samples per target, so `samples` can be shorter than `stats.sent` on long runs. `--no-samples` emits empty `samples` arrays.",
+  "description": "Output document produced by pinghue --output PATH. One file per run. Existing regular files are preserved unless --overwrite is passed. Breaking schema changes increment schema_version. Per-target `stats` are computed over every probe sent during the run (`stats.sent`); the `samples` array retains only the most recent `run.samples_window` samples per target, so `samples` can be shorter than `stats.sent` on long runs. `--no-samples` emits empty `samples` arrays.",
   "type": "object",
   "required": ["schema_version", "pinghue_version", "run", "targets"],
   "additionalProperties": false,

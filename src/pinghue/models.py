@@ -212,6 +212,7 @@ class TargetRun:
     status: TargetStatus = TargetStatus.ERROR
     error: str | None = None
     samples: SampleWindow = field(default_factory=SampleWindow)
+    _last_resolve_time: float = field(default=0.0, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.samples), SampleWindow):

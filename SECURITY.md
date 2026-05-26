@@ -2,11 +2,12 @@
 
 ## Supported Versions
 
-`pinghue` is pre-1.0 software. Security fixes are provided for the latest released version.
+Security fixes are provided for the latest stable release line.
 
 | Version | Supported |
 | --- | --- |
-| `0.3.x` | Yes |
+| `2.x` | Yes |
+| `<2.0` | No |
 
 ## Reporting a Vulnerability
 

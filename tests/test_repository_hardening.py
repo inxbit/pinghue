@@ -99,11 +99,27 @@ def test_release_checklist_revalidates_release_security_gates() -> None:
     assert "Sigstore wheel signing" in checklist
 
 
+def test_repository_hardening_drift_check_is_scheduled() -> None:
+    workflow = read(".github/workflows/repository-hardening.yml")
+    script = read("scripts/check-github-hardening.sh")
+
+    assert "schedule:" in workflow
+    assert "scripts/check-github-hardening.sh" in workflow
+    assert "set -euo pipefail" in script
+    assert "protect main" in script
+    assert "protect release tags" in script
+    assert "pypi" in script
+    assert "reviewers" in script
+    assert "v*.*.*" in script
+
+
 def test_changelog_has_dated_1_0_release_section() -> None:
     changelog = read("CHANGELOG.md")
 
     assert "Starting with `1.0.0`, this project follows semantic versioning." in changelog
     assert "## [Unreleased]" in changelog
+    assert "## 2.0.0 - 2026-05-26" in changelog
+    assert "`--output PATH` no longer replaces an existing regular file by default" in changelog
     assert "## 1.0.0 - 2026-05-20" in changelog
 
 
@@ -115,9 +131,17 @@ def test_release_version_surfaces_match_package_version() -> None:
     demo = read("docs/assets/pinghue-demo.svg")
     screenshot = read("docs/assets/pinghue-screenshot.svg")
 
-    assert 'version = "1.0.2"' in pyproject
-    assert "Current version: `1.0.2`." in readme
-    assert example["pinghue_version"] == "1.0.2"
-    assert "v1.0.2" in hero
-    assert "v1.0.2" in demo
-    assert "v1.0.2" in screenshot
+    assert 'version = "2.0.0"' in pyproject
+    assert "Current version: `2.0.0`." in readme
+    assert example["pinghue_version"] == "2.0.0"
+    assert "v2.0.0" in hero
+    assert "v2.0.0" in demo
+    assert "v2.0.0" in screenshot
+
+
+def test_security_policy_matches_stable_support_line() -> None:
+    security = read("SECURITY.md")
+
+    assert "`2.x` | Yes" in security
+    assert "`1.x` | Yes" not in security
+    assert "`0.3.x` | Yes" not in security

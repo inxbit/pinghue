@@ -127,6 +127,57 @@ def test_write_output_json_can_omit_samples(tmp_path: Path) -> None:
     assert document["targets"][0]["samples"] == []
 
 
+def test_write_output_json_refuses_to_replace_existing_file_by_default(tmp_path: Path) -> None:
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        write_output_json(
+            output_path,
+            started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+            host="ops-laptop-04",
+            exit_reason="user_quit",
+            probe=ProbeConfig(
+                mode=ProbeMode.ICMP,
+                port=None,
+                interval_s=1.0,
+                timeout_s=1.0,
+                address_family=AddressFamily.AUTO,
+            ),
+            targets=[build_target()],
+            include_samples=False,
+        )
+
+    assert output_path.read_text(encoding="utf-8") == "previous\n"
+
+
+def test_write_output_json_allows_explicit_overwrite(tmp_path: Path) -> None:
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+
+    write_output_json(
+        output_path,
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        host="ops-laptop-04",
+        exit_reason="user_quit",
+        probe=ProbeConfig(
+            mode=ProbeMode.ICMP,
+            port=None,
+            interval_s=1.0,
+            timeout_s=1.0,
+            address_family=AddressFamily.AUTO,
+        ),
+        targets=[build_target()],
+        include_samples=False,
+        overwrite=True,
+    )
+
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    assert document["pinghue_version"]
+
+
 def test_write_output_json_writes_special_device_directly() -> None:
     write_output_json(
         Path("/dev/null"),
@@ -186,6 +237,35 @@ def test_build_output_document_escapes_control_characters() -> None:
     assert exported_target["samples"][0]["error"] == "sample\\x1b[2Jerror"
 
 
+def test_build_output_document_escapes_non_ascii_confusables() -> None:
+    target = TargetRun(
+        target="g\u03bf\u03bfgle.example",
+        resolved_address=None,
+        resolved_family=None,
+        status=TargetStatus.ERROR,
+        error="looks\u0430like",
+    )
+
+    document = build_output_document(
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        host="ops\u2011host",
+        exit_reason="user_quit",
+        probe=ProbeConfig(
+            mode=ProbeMode.ICMP,
+            port=None,
+            interval_s=1.0,
+            timeout_s=1.0,
+            address_family=AddressFamily.AUTO,
+        ),
+        targets=[target],
+    )
+
+    assert document["run"]["host"] == "ops\\u2011host"
+    assert document["targets"][0]["target"] == "g\\u03bf\\u03bfgle.example"
+    assert document["targets"][0]["error"] == "looks\\u0430like"
+
+
 def test_write_output_json_preserves_existing_file_on_write_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -226,6 +306,7 @@ def test_write_output_json_preserves_existing_file_on_write_failure(
             ),
             targets=[build_target()],
             include_samples=False,
+            overwrite=True,
         )
 
     assert output_path.read_text(encoding="utf-8") == "previous\n"

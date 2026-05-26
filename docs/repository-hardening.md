@@ -50,6 +50,15 @@ The helper script uses `.github/repo-settings/pypi-environment.json` as the docu
 scripts/apply-github-hardening.sh inxbit/pinghue
 ```
 
+Check the hosted settings for drift:
+
+```sh
+scripts/check-github-hardening.sh inxbit/pinghue
+```
+
+`.github/workflows/repository-hardening.yml` runs the same drift check on a
+weekly schedule and whenever repository-hardening files change.
+
 ## Local Maintainer Defaults
 
 ```sh

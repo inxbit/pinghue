@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `1.0.2`.
+Current version: `2.0.0`.
 
 The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
@@ -43,9 +43,9 @@ The command-line interface and JSON output are stable public interfaces. JSON ou
 
 ## Supported Platforms
 
-The 1.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
+The 2.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
 
-The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 1.0 support scope unless explicitly added later.
+The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 2.0 support scope unless explicitly added later.
 
 ## Stability Policy
 
@@ -54,6 +54,8 @@ The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and
 CLI removals, flag renames, and incompatible behavior changes are deprecated for at least one minor release before removal. Deprecated flags continue to parse during that window and release notes identify the replacement. Patch releases do not intentionally break CLI or JSON consumers.
 
 Starting with `1.0.0`, release versions follow semantic versioning: patch releases are bug fixes, minor releases may add compatible behavior, and major releases are reserved for breaking CLI or JSON changes.
+
+`2.0.0` changes the default `--output` behavior: existing regular files are preserved unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
 
 ## Install
 
@@ -103,12 +105,14 @@ pinghue -f hosts.txt
 pinghue -p 443 example.com
 pinghue -p 1 127.0.0.1 -c 1 --no-tui
 pinghue --output maintenance.json 1.1.1.1 example.com
+pinghue --output maintenance.json --overwrite 1.1.1.1 example.com
 pinghue --host-label maintenance-window --output maintenance.json 1.1.1.1
 ```
 
 Host files are plain text. Blank lines and `#` comments are ignored. Inline comments
 on host lines are also ignored (`host.example  # comment`).
-Host files must be regular files, at most 1 MiB, and at most 5,000 lines.
+Host files must be non-symlink regular files, at most 1 MiB, and at most 5,000
+lines. Each target string is capped at 253 characters.
 
 ```text
 # edge and core checks
@@ -154,8 +158,8 @@ pinghue [OPTIONS] [TARGET ...]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `TARGET ...` | none | Hostnames or IP addresses to probe. Required unless `--check` is used. |
-| `-f, --file PATH` | none | Read targets from a plain-text host file. Blank lines and full-line/inline `#` comments are ignored. |
+| `TARGET ...` | none | Hostnames or IP addresses to probe, up to 253 characters each. Required unless `--check` is used. |
+| `-f, --file PATH` | none | Read targets from a non-symlink plain-text host file. Blank lines and full-line/inline `#` comments are ignored. |
 | `-p, --port PORT` | ICMP | Enable TCP connect checks against `PORT`. Valid range: `1-65535`. |
 | `-4, --ipv4` | off | Force IPv4 resolution/probing. |
 | `-6, --ipv6` | off | Force IPv6 resolution/probing. |
@@ -165,7 +169,8 @@ pinghue [OPTIONS] [TARGET ...]
 | `-c, --count N` | continuous | Stop after `N` probes per target. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
-| `--output PATH` | none | Write a JSON run summary on exit. |
+| `--output PATH` | none | Write a JSON run summary on exit. Existing regular files are not replaced unless `--overwrite` is set. |
+| `--overwrite` | off | Allow `--output` to replace an existing regular file. |
 | `--no-samples` | off | Omit per-probe samples from JSON output. |
 | `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP mode uses a dedicated thread pool sized to this limit. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this standard deviation. |
@@ -174,9 +179,9 @@ pinghue [OPTIONS] [TARGET ...]
 | `--fail-on-all-down` | off | Return a non-zero exit code only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
-| `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics. Defaults to the first target when provided. |
+| `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics, up to 253 characters. Defaults to the first target when provided. |
 | `--quiet` | off | With `--check`, suppress output and use only the exit code. |
-| `--host-label LABEL` | `local` | Operator-controlled host label written to JSON output. |
+| `--host-label LABEL` | `local` | Operator-controlled host label written to JSON output, up to 128 characters. |
 | `-v, --version` | none | Print the installed version. |
 | `-h, --help` | none | Print help. |
 
@@ -273,10 +278,11 @@ Do not set capabilities on a shared Python interpreter.
 
 ## JSON Output
 
-`--output PATH` writes one JSON document per run. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
+`--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. This is the breaking `2.0.0` CLI change for scripts that previously reused the same output file. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
 
 ```sh
 pinghue -f hosts.txt --duration 180 --output maintenance.json
+pinghue -f hosts.txt --duration 180 --output maintenance.json --overwrite
 ```
 
 Use `--no-samples` when you only need final per-target statistics.
@@ -293,7 +299,7 @@ Every output document includes:
 
 Per-target `stats` (sent, received, loss, latency, jitter) are computed over **every** probe in the run, so `stats.sent` reflects the whole run. The per-target `samples` array retains only the most recent `run.samples_window` probes (currently 1000). On long runs `stats.sent` therefore exceeds `len(samples)` — that is expected windowing, not a truncated file. When reconciling evidence, treat `samples` as the recent tail and `stats` as authoritative for the full run; `--no-samples` omits the array entirely.
 
-The `run.host` field defaults to `local` to avoid leaking workstation hostnames. Use `--host-label` when a report needs an operator-selected system or maintenance-window label.
+The `run.host` field defaults to `local` to avoid leaking workstation hostnames. Use `--host-label` when a report needs an operator-selected system or maintenance-window label. Operator-visible target, host-label, and error text is escaped outside printable ASCII so terminal controls and visually deceptive Unicode are represented literally.
 
 ## Security Model
 

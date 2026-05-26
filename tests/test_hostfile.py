@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pinghue.hostfile import parse_host_file
+from pinghue.hostfile import TARGET_MAXIMUM, parse_host_file
 
 
 def test_parse_host_file_ignores_blank_lines_and_comments(tmp_path: Path) -> None:
@@ -40,6 +40,16 @@ def test_parse_host_file_rejects_non_regular_file(tmp_path: Path) -> None:
         parse_host_file(tmp_path)
 
 
+def test_parse_host_file_rejects_symlink(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_text("1.1.1.1\n", encoding="utf-8")
+    link = tmp_path / "hosts-link.txt"
+    link.symlink_to(path)
+
+    with pytest.raises(ValueError, match="regular file"):
+        parse_host_file(link)
+
+
 def test_parse_host_file_rejects_large_file(tmp_path: Path) -> None:
     path = tmp_path / "hosts.txt"
     path.write_text("a" * (1024 * 1024 + 1), encoding="utf-8")
@@ -53,4 +63,12 @@ def test_parse_host_file_rejects_too_many_lines(tmp_path: Path) -> None:
     path.write_text("\n".join(f"host-{index}" for index in range(5001)), encoding="utf-8")
 
     with pytest.raises(ValueError, match="too many lines"):
+        parse_host_file(path)
+
+
+def test_parse_host_file_rejects_overlong_target(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_text("a" * (TARGET_MAXIMUM + 1), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="target too long"):
         parse_host_file(path)

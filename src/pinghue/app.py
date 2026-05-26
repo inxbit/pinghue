@@ -166,11 +166,10 @@ class PinghueTextualApp(App[None]):
         return table
 
     def _start_probe_tasks(self) -> None:
-        active_targets = [target for target in self.targets if target.resolved_address]
-        active_count = len(active_targets)
+        active_count = len(self.targets)
         self._immediate_events = []
 
-        for index, target in enumerate(active_targets):
+        for index, target in enumerate(self.targets):
             immediate_event = asyncio.Event()
             self._immediate_events.append(immediate_event)
             task = asyncio.create_task(
@@ -223,8 +222,7 @@ class PinghueTextualApp(App[None]):
     async def _probe_all_now(self) -> None:
         probes = [
             self._probe_selected_now(index)
-            for index, target in enumerate(self.targets)
-            if target.resolved_address
+            for index in range(len(self.targets))
         ]
         if probes:
             await asyncio.gather(*probes)

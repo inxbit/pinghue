@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -25,6 +26,44 @@ from pinghue.probes import ResolvedTarget, family_from_ip, icmp_probe, resolve_t
 ProbeOnce = Callable[[], Awaitable[None]]
 StopSignalCleanup = Callable[[], None]
 MIN_OVERRUN_SLEEP = 0.1
+DNS_RESOLVE_CONCURRENCY = 16
+DNS_RETRY_INTERVAL_SECONDS = 10.0
+DNS_LOOKUP_TIMEOUT_SECONDS = 5.0
+
+_dns_semaphore: asyncio.Semaphore | None = None
+_dns_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_dns_semaphore() -> asyncio.Semaphore:
+    global _dns_semaphore, _dns_semaphore_loop
+    loop = asyncio.get_running_loop()
+    semaphore = _dns_semaphore
+    if semaphore is None or _dns_semaphore_loop is not loop:
+        semaphore = asyncio.Semaphore(DNS_RESOLVE_CONCURRENCY)
+        _dns_semaphore = semaphore
+        _dns_semaphore_loop = loop
+    return semaphore
+
+
+async def _resolve_target_bounded(
+    target: str,
+    family: AddressFamily,
+    *,
+    numeric: bool,
+) -> ResolvedTarget:
+    async with _get_dns_semaphore():
+        try:
+            return await asyncio.wait_for(
+                resolve_target(target, family, numeric=numeric),
+                timeout=DNS_LOOKUP_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return ResolvedTarget(
+                target,
+                None,
+                None,
+                f"getaddrinfo timed out after {DNS_LOOKUP_TIMEOUT_SECONDS:g}s",
+            )
 
 
 def probe_config(args: RunConfig, mode: ProbeMode) -> ProbeConfig:
@@ -60,7 +99,17 @@ def target_run_from_resolution(resolved: ResolvedTarget) -> TargetRun:
 
 async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
     family = AddressFamily(args.address_family)
-    resolved = await resolve_target(target, family, numeric=args.numeric)
+    try:
+        resolved = await _resolve_target_bounded(target, family, numeric=args.numeric)
+    except Exception as exc:
+        return TargetRun(
+            target=target,
+            resolved_address=None,
+            resolved_family=None,
+            resolved_addresses=(),
+            status=TargetStatus.DNS_FAILURE,
+            error=str(exc),
+        )
     return target_run_from_resolution(resolved)
 
 
@@ -97,19 +146,57 @@ async def probe_once(
     executor: Executor | None = None,
 ) -> ProbeSample | None:
     if not target.resolved_address:
-        return None
+        now = time.monotonic()
+        if now - target._last_resolve_time < DNS_RETRY_INTERVAL_SECONDS:
+            return None
+        target._last_resolve_time = now
+        family = AddressFamily(args.address_family)
+        try:
+            resolved = await _resolve_target_bounded(
+                target.target,
+                family,
+                numeric=args.numeric,
+            )
+            if resolved.error:
+                target.status = TargetStatus.DNS_FAILURE
+                target.error = resolved.error
+                return None
+            target.resolved_address = resolved.address
+            target.resolved_family = resolved.family
+            target.resolved_addresses = resolved.addresses
+            target.status = TargetStatus.DOWN
+            target.error = None
+        except Exception as exc:
+            target.status = TargetStatus.DNS_FAILURE
+            target.error = str(exc)
+            return None
 
-    addresses = target.resolved_addresses or (target.resolved_address,)
+    primary = target.resolved_address
+    if not primary:
+        return None
+    addresses = list(target.resolved_addresses) if target.resolved_addresses else [primary]
+    if primary in addresses:
+        addresses.remove(primary)
+        addresses.insert(0, primary)
+
     sample: ProbeSample | None = None
 
     async with semaphore:
         for address in addresses:
-            sample = await _probe_address(
-                address,
-                args=args,
-                mode=mode,
-                executor=executor,
-            )
+            try:
+                sample = await _probe_address(
+                    address,
+                    args=args,
+                    mode=mode,
+                    executor=executor,
+                )
+            except Exception as exc:
+                sample = ProbeSample(
+                    timestamp=datetime.now(timezone.utc),
+                    latency_ms=None,
+                    status=SampleStatus.ERROR,
+                    error=f"Unexpected probe error: {exc}",
+                )
             if sample.status == SampleStatus.OK:
                 target.resolved_address = address
                 target.resolved_family = family_from_ip(address)
@@ -273,13 +360,12 @@ async def run_no_tui(
                     executor=executor,
                 )
                 for target in targets
-                if target.resolved_address
             ]
             samples = await asyncio.gather(*probes) if probes else []
             sample_by_target = iter(samples)
 
             for target in targets:
-                sample = next(sample_by_target) if target.resolved_address else None
+                sample = next(sample_by_target)
                 print_sample(target, sample)
 
             if args.count is not None and iteration >= args.count:
@@ -359,6 +445,7 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
             probe=probe,
             targets=targets,
             include_samples=not args.no_samples,
+            overwrite=args.overwrite,
         )
 
     fail_on_all_down = args.fail_on_all_down or args.fail_on_down

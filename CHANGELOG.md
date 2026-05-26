@@ -6,6 +6,22 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 2.0.0 - 2026-05-26
+
+### Breaking
+
+- `--output PATH` no longer replaces an existing regular file by default. Existing reports are preserved and the command exits with a clear error. Add `--overwrite` to scripts that intentionally reuse the same JSON path.
+
+### Security and stability
+
+- Added strict finite-value validation for timing and jitter options.
+- Added target, diagnostic resolve-name, host-label, and host-file target length caps.
+- Hardened host-file reads with descriptor-based regular-file validation, symlink rejection, byte caps, line caps, and target-length caps.
+- Escaped operator-visible controls and non-ASCII characters in terminal and JSON output to reduce terminal injection and Unicode confusable risks.
+- Added DNS lookup throttling, bounded DNS lookup timeouts, DNS retry cooldowns, working-address prioritization, and per-target resolver/probe exception containment.
+- Added a hosted repository hardening drift check script and scheduled workflow.
+- Updated the security policy and threat model for the `2.x` support line.
+
 ## 1.0.2 - 2026-05-25
 
 - Fixed TUI navigation so up/down arrow keys remain functional after mouse interactions anywhere in the terminal.
