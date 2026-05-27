@@ -14,7 +14,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from pinghue import __version__
 from pinghue.config import RunConfig
-from pinghue.models import ProbeMode, TargetRun, TargetStatus
+from pinghue.models import ProbeMode, TargetRun, TargetStatus, classify_samples
 from pinghue.runner import (
     probe_once,
     probe_target_loop,
@@ -107,10 +107,13 @@ class PinghueTextualApp(App[None]):
         self._probe_tasks: list[asyncio.Task[None]] = []
         self._resolution_task: asyncio.Task[None] | None = None
         self._resolution_target_tasks: list[asyncio.Task[tuple[int, TargetRun]]] = []
+        self._deadline_task: asyncio.Task[None] | None = None
+        self._completion_task: asyncio.Task[None] | None = None
         self._immediate_events: list[asyncio.Event] = []
         self._table_initialized = False
         self._cell_cache: dict[tuple[str, str], object] = {}
         self._column_widths: dict[str, int] = {}
+        self._finishing = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -135,6 +138,8 @@ class PinghueTextualApp(App[None]):
         self._focus_target_table()
         self._refresh_table()
         self.set_interval(UI_REFRESH_INTERVAL, self._refresh_table)
+        if self.args_config.duration is not None:
+            self._deadline_task = asyncio.create_task(self._wait_for_deadline())
         self._resolution_task = asyncio.create_task(self._resolve_targets())
 
     async def _resolve_one_target(self, index: int, target: str) -> tuple[int, TargetRun]:
@@ -190,6 +195,11 @@ class PinghueTextualApp(App[None]):
             )
             self._probe_tasks.append(task)
 
+        if self.args_config.count is not None:
+            self._completion_task = asyncio.create_task(
+                self._finish_when_probe_tasks_complete()
+            )
+
     async def _stop_probe_tasks(self) -> None:
         self._stop_event.set()
         for event in self._immediate_events:
@@ -208,6 +218,41 @@ class PinghueTextualApp(App[None]):
         self._resolution_task.cancel()
         await asyncio.gather(self._resolution_task, return_exceptions=True)
         self._resolution_task = None
+
+    async def _stop_background_task(self, task: asyncio.Task[None] | None) -> None:
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def _wait_for_deadline(self) -> None:
+        duration = self.args_config.duration
+        if duration is None:
+            return
+
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=duration)
+        except asyncio.TimeoutError:
+            await self._finish("deadline")
+
+    async def _finish_when_probe_tasks_complete(self) -> None:
+        if not self._probe_tasks:
+            return
+
+        await asyncio.gather(*self._probe_tasks, return_exceptions=True)
+        if not self._stop_event.is_set():
+            await self._finish("completed")
+
+    async def _finish(self, exit_reason: str) -> None:
+        if self._finishing:
+            return
+
+        self._finishing = True
+        self.ended_at = datetime.now(timezone.utc)
+        self.exit_reason = exit_reason
+        await self._stop_probe_tasks()
+        self.exit()
 
     async def _probe_selected_now(self, index: int) -> None:
         if 0 <= index < len(self.targets):
@@ -243,6 +288,8 @@ class PinghueTextualApp(App[None]):
     async def on_unmount(self) -> None:
         await self._stop_resolution_tasks()
         await self._stop_probe_tasks()
+        await self._stop_background_task(self._deadline_task)
+        await self._stop_background_task(self._completion_task)
         if self._probe_executor is not None:
             self._probe_executor.shutdown(wait=True, cancel_futures=True)
             self._probe_executor = None
@@ -298,13 +345,26 @@ class PinghueTextualApp(App[None]):
         table = self.query_one("#targets", DataTable)
         row = table.cursor_row
         if row is not None and 0 <= row < len(self.targets):
-            self.targets[row].samples.clear()
+            self._reset_target_samples(self.targets[row])
         self._refresh_table()
 
     def action_reset_all(self) -> None:
         for target in self.targets:
-            target.samples.clear()
+            self._reset_target_samples(target)
         self._refresh_table()
+
+    def _reset_target_samples(self, target: TargetRun) -> None:
+        had_samples = len(target.samples) > 0
+        target.samples.clear()
+        if not had_samples:
+            return
+
+        target.status = classify_samples(
+            target.samples,
+            fail_threshold=self.args_config.fail_threshold,
+            jitter_threshold_ms=self.args_config.jitter_threshold,
+        )
+        target.error = None
 
     def action_burst_selected(self) -> None:
         table = self.query_one("#targets", DataTable)
@@ -316,10 +376,7 @@ class PinghueTextualApp(App[None]):
         self.run_worker(self._probe_all_and_refresh())
 
     async def action_quit(self) -> None:
-        self.ended_at = datetime.now(timezone.utc)
-        self.exit_reason = "user_quit"
-        await self._stop_probe_tasks()
-        self.exit()
+        await self._finish("user_quit")
 
 
 class PinghueApp:

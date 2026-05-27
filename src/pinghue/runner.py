@@ -261,6 +261,8 @@ async def probe_target_loop(
         except asyncio.TimeoutError:
             pass
 
+    probes_completed = 0
+    probe_limit = getattr(args, "count", None)
     while not stop_event.is_set():
         if probe_once_fn is None:
             await probe_once(
@@ -272,6 +274,10 @@ async def probe_target_loop(
             )
         else:
             await probe_once_fn()
+
+        probes_completed += 1
+        if probe_limit is not None and probes_completed >= probe_limit:
+            return
 
         if stop_event.is_set():
             return

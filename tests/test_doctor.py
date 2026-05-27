@@ -104,3 +104,27 @@ def test_run_check_prints_configured_dns_name(monkeypatch: pytest.MonkeyPatch) -
 
     assert exit_code == 0
     assert 'getaddrinfo("internal.example")' in output.getvalue()
+
+
+def test_run_check_sanitizes_dns_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    dns_name = "\x1b]52;c;QUJD\x07bad"
+    dns_error = "\x1b[31mboom"
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda: (0.12, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: (None, None, dns_error))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(
+        stream=output,
+        quiet=False,
+        use_color=False,
+        resolve_name=dns_name,
+    )
+
+    text = output.getvalue()
+    assert exit_code == 0
+    assert dns_name not in text
+    assert dns_error not in text
+    assert r'\x1b]52;c;QUJD\x07bad' in text
+    assert r"\x1b[31mboom" in text

@@ -1,10 +1,18 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
 import pinghue.app as app_module
 from pinghue.app import PinghueTextualApp
-from pinghue.models import AddressFamily, ProbeMode, TargetRun, TargetStatus
+from pinghue.models import (
+    AddressFamily,
+    ProbeMode,
+    ProbeSample,
+    SampleStatus,
+    TargetRun,
+    TargetStatus,
+)
 
 
 def test_tui_app_class_is_module_scoped() -> None:
@@ -15,6 +23,8 @@ def build_args(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "address_family": AddressFamily.AUTO.value,
         "concurrency": 1,
+        "count": None,
+        "duration": None,
         "fail_threshold": 3,
         "history_style": "bar",
         "interval": 1.0,
@@ -87,6 +97,79 @@ def test_reset_selected_ignores_missing_cursor_row(monkeypatch) -> None:
     app.action_reset_selected()
 
     assert app.targets[0].samples == []
+
+
+def test_reset_selected_recomputes_target_state(monkeypatch) -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    target = TargetRun(
+        "1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+    )
+    target.apply_sample(
+        ProbeSample(
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            latency_ms=10.0,
+            status=SampleStatus.OK,
+        ),
+        fail_threshold=3,
+        jitter_threshold_ms=50.0,
+    )
+    target.apply_sample(
+        ProbeSample(
+            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=timezone.utc),
+            latency_ms=None,
+            status=SampleStatus.TIMEOUT,
+            error="timeout",
+        ),
+        fail_threshold=3,
+        jitter_threshold_ms=50.0,
+    )
+    assert target.status == TargetStatus.INTERMITTENT
+    app.targets = [target]
+    table = FakeTable(cursor_row=0)
+    monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
+    monkeypatch.setattr(app, "_refresh_table", lambda: None)
+
+    app.action_reset_selected()
+
+    assert app.targets[0].samples == []
+    assert app.targets[0].status == TargetStatus.DOWN
+    assert app.targets[0].error is None
+
+
+def test_reset_all_recomputes_all_target_states(monkeypatch) -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+    targets = [
+        TargetRun(
+            "1.1.1.1",
+            resolved_address="1.1.1.1",
+            resolved_family=AddressFamily.IPV4,
+        ),
+        TargetRun(
+            "8.8.8.8",
+            resolved_address="8.8.8.8",
+            resolved_family=AddressFamily.IPV4,
+        ),
+    ]
+    for target in targets:
+        target.apply_sample(
+            ProbeSample(
+                timestamp=timestamp,
+                latency_ms=5.0,
+                status=SampleStatus.OK,
+            ),
+            fail_threshold=3,
+            jitter_threshold_ms=50.0,
+        )
+    app.targets = targets
+    monkeypatch.setattr(app, "_refresh_table", lambda: None)
+
+    app.action_reset_all()
+
+    assert [list(target.samples) for target in app.targets] == [[], []]
+    assert [target.status for target in app.targets] == [TargetStatus.DOWN, TargetStatus.DOWN]
 
 
 def test_burst_selected_schedules_background_worker(monkeypatch) -> None:

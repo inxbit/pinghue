@@ -47,6 +47,38 @@ async def test_probe_target_loop_runs_independent_probe_without_global_wait() ->
     assert calls == 1
 
 
+async def test_probe_target_loop_stops_after_count_limit() -> None:
+    target = TargetRun(
+        target="1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+    )
+    args = SimpleNamespace(count=2, interval=0.01)
+    stop_event = asyncio.Event()
+    immediate_event = asyncio.Event()
+    calls = 0
+
+    async def fake_probe_once() -> None:
+        nonlocal calls
+        calls += 1
+
+    await asyncio.wait_for(
+        probe_target_loop(
+            target,
+            args=args,
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=stop_event,
+            immediate_event=immediate_event,
+            initial_delay=0,
+            probe_once_fn=fake_probe_once,
+        ),
+        timeout=0.1,
+    )
+
+    assert calls == 2
+
+
 async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

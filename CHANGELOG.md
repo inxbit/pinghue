@@ -6,6 +6,14 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 2.0.1 - 2026-05-27
+
+### Security and stability
+
+- Sanitized environment-doctor DNS diagnostic output so configured names and resolver errors cannot render terminal control sequences.
+- Fixed TUI `--count` and `--duration` handling so bounded runs exit as requested.
+- Fixed TUI reset actions so cleared targets recompute their status and stale errors are removed.
+
 ## 2.0.0 - 2026-05-26
 
 ### Breaking
