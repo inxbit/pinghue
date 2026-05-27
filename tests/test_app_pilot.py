@@ -31,6 +31,8 @@ def build_args(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "address_family": AddressFamily.AUTO.value,
         "concurrency": 4,
+        "count": None,
+        "duration": None,
         "fail_threshold": 3,
         "history_style": "bar",
         # A long interval means each probe loop fires exactly one immediate
@@ -87,6 +89,33 @@ async def _wait_until(pilot: Any, predicate: Any, *, ticks: int = 60) -> bool:
             return True
         await pilot.pause()
     return False
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_count_exits_after_requested_probe_count() -> None:
+    app = PinghueTextualApp(
+        args=build_args(count=1, targets=["a.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test() as pilot:
+        completed = await _wait_until(pilot, lambda: app.exit_reason == "completed")
+
+    assert completed
+    assert app.exit_reason == "completed"
+    assert len(app.targets[0].samples) == 1
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_duration_exits_at_deadline() -> None:
+    app = PinghueTextualApp(
+        args=build_args(duration=0.01, targets=["a.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test() as pilot:
+        deadline = await _wait_until(pilot, lambda: app.exit_reason == "deadline")
+
+    assert deadline
+    assert app.exit_reason == "deadline"
 
 
 @pytest.mark.usefixtures("stub_network")

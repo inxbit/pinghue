@@ -118,6 +118,8 @@ def test_changelog_has_dated_1_0_release_section() -> None:
 
     assert "Starting with `1.0.0`, this project follows semantic versioning." in changelog
     assert "## [Unreleased]" in changelog
+    assert "## 2.0.1 - 2026-05-27" in changelog
+    assert "Sanitized environment-doctor DNS diagnostic output" in changelog
     assert "## 2.0.0 - 2026-05-26" in changelog
     assert "`--output PATH` no longer replaces an existing regular file by default" in changelog
     assert "## 1.0.0 - 2026-05-20" in changelog
@@ -131,12 +133,12 @@ def test_release_version_surfaces_match_package_version() -> None:
     demo = read("docs/assets/pinghue-demo.svg")
     screenshot = read("docs/assets/pinghue-screenshot.svg")
 
-    assert 'version = "2.0.0"' in pyproject
-    assert "Current version: `2.0.0`." in readme
-    assert example["pinghue_version"] == "2.0.0"
-    assert "v2.0.0" in hero
-    assert "v2.0.0" in demo
-    assert "v2.0.0" in screenshot
+    assert 'version = "2.0.1"' in pyproject
+    assert "Current version: `2.0.1`." in readme
+    assert example["pinghue_version"] == "2.0.1"
+    assert "v2.0.1" in hero
+    assert "v2.0.1" in demo
+    assert "v2.0.1" in screenshot
 
 
 def test_security_policy_matches_stable_support_line() -> None:

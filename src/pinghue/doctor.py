@@ -10,6 +10,7 @@ import time
 from typing import NamedTuple, TextIO, cast
 
 from pinghue import __version__
+from pinghue.display import sanitize_display
 
 OK = "[ok]"
 FAIL = "[fail]"
@@ -251,16 +252,18 @@ def run_check(
 
     dns_name = resolve_name or DEFAULT_DNS_PROBE_NAME
     address, dns_ms, dns_error = _dns_probe(dns_name)
+    display_dns_name = sanitize_display(dns_name)
     lines.extend(["", "DNS"])
     if dns_error:
         lines.append(
             f'  {_status(WARN, use_color=use_color)}  '
-            f'getaddrinfo("{dns_name}") failed: {dns_error}'
+            f'getaddrinfo("{display_dns_name}") failed: {sanitize_display(dns_error)}'
         )
     else:
         lines.append(
             f'  {_status(OK, use_color=use_color)}    '
-            f'getaddrinfo("{dns_name}") → {address} ({dns_ms:.0f} ms)'
+            f'getaddrinfo("{display_dns_name}") → '
+            f"{sanitize_display(address or '')} ({dns_ms:.0f} ms)"
         )
 
     if icmp_ready and is_root:
