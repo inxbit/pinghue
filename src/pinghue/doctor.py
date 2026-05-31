@@ -253,9 +253,10 @@ def run_check(
     if icmp6.ok:
         loopback6_ms, loopback6_error = _loopback_icmp_probe("::1")
         if loopback6_error:
+            ipv4_suffix = "; IPv4 ICMP still works" if icmp_ready else ""
             lines.append(
                 f"  {_status(WARN, use_color=use_color)}  "
-                f"IPv6 ICMP probe to ::1 failed ({loopback6_error}); IPv4 ICMP still works"
+                f"IPv6 ICMP probe to ::1 failed ({loopback6_error}){ipv4_suffix}"
             )
         else:
             lines.append(

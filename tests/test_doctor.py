@@ -79,6 +79,49 @@ def test_doctor_verifies_ipv6_icmp_loopback(monkeypatch: pytest.MonkeyPatch) -> 
     assert "ICMPv6 probe to ::1 succeeded" in text
 
 
+def test_doctor_ipv6_loopback_warning_depends_on_ipv4_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def loopback_probe(address: str = "127.0.0.1") -> tuple[float | None, str | None]:
+        if address == "::1":
+            return None, "timeout"
+        return 0.12, None
+
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", loopback_probe)
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("1.1.1.1", 1.0, None))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert exit_code == 0
+    assert "IPv6 ICMP probe to ::1 failed (timeout); IPv4 ICMP still works" in text
+
+
+def test_doctor_ipv6_loopback_warning_does_not_claim_failed_ipv4(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def loopback_probe(address: str = "127.0.0.1") -> tuple[float | None, str | None]:
+        if address == "::1":
+            return None, "timeout"
+        return None, "timeout"
+
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", loopback_probe)
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("1.1.1.1", 1.0, None))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert exit_code == 1
+    assert "IPv6 ICMP probe to ::1 failed (timeout)" in text
+    assert "IPv4 ICMP still works" not in text
+
+
 def test_doctor_quiet_suppresses_output(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
