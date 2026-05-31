@@ -1,72 +1,54 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
-  <title id="title">animated pinghue terminal demo</title>
-  <desc id="desc">Animated terminal output showing pinghue monitoring healthy, intermittent, and down hosts.</desc>
-  <style>
-    .mono { font-family: SFMono-Regular, Menlo, Consolas, monospace; }
-    .muted { fill: #8ea0b8; }
-    .text { fill: #e6edf3; }
-    .green { fill: #7ee787; }
-    .amber { fill: #f2cc60; }
-    .red { fill: #ff7b72; }
-    .blue { fill: #58a6ff; }
-  </style>
-  <rect width="1200" height="330" rx="12" fill="#101418"/>
-  <rect x="28" y="28" width="1144" height="274" rx="10" fill="#151b22" stroke="#2a313a"/>
-  <rect x="28" y="28" width="1144" height="34" rx="10" fill="#1b2630"/>
-  <circle cx="50" cy="45" r="5" fill="#8ea0b8"/>
-  <text class="mono text" x="600" y="50" text-anchor="middle" font-size="15" font-weight="700">PingHUE v2.1.0</text>
-  <text class="mono amber" x="1140" y="50" text-anchor="end" font-size="15">probe cycle</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="t d">
+  <title id="t">animated pinghue terminal demo</title>
+  <desc id="d">A looping terminal animation: a live probe cursor sweeps across continuous green and amber history bars that break into red dots on the down host, then a JSON summary write is confirmed.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#151b22"/><stop offset="1" stop-color="#101418"/></linearGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#58a6ff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#58a6ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#58a6ff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="hclip"><rect x="900" y="104" width="258" height="108"/></clipPath>
+    <style>.mono{font-family:'SFMono-Regular','JetBrains Mono',Menlo,Consolas,'Liberation Mono',monospace;}</style>
+  </defs>
 
-  <g class="mono" font-size="16">
-    <text x="48" y="88" class="muted" font-weight="700">host</text>
-    <text x="252" y="88" class="muted" font-weight="700">address</text>
-    <text x="392" y="88" class="muted" font-weight="700">state</text>
-    <text x="536" y="88" class="muted" font-weight="700">last</text>
-    <text x="632" y="88" class="muted" font-weight="700">avg</text>
-    <text x="722" y="88" class="muted" font-weight="700">jitter</text>
-    <text x="842" y="88" class="red" font-weight="700">loss</text>
-    <text x="942" y="88" class="muted" font-weight="700">history</text>
+  <rect x="3" y="3" width="1194" height="354" rx="16" fill="#101418" stroke="#2a313a" stroke-width="2"/>
 
-    <g>
-      <animate attributeName="opacity" values="1;1;0.96;1" dur="3s" repeatCount="indefinite"/>
-      <text x="48" y="122" class="blue" font-weight="700">1.1.1.1</text>
-      <text x="252" y="122" class="green">1.1.1.1</text>
-      <text x="392" y="122" class="green" font-weight="700">healthy</text>
-      <text x="536" y="122" class="text">4.38</text>
-      <text x="632" y="122" class="text">5.49</text>
-      <text x="722" y="122" class="text">1.76</text>
-      <text x="842" y="122" class="text">0.00%</text>
-      <text x="942" y="122" class="green">▁▁▂▁▁▁▂▁▁▁▂▁▁▂▁</text>
+  <rect x="24" y="22" width="1152" height="316" rx="12" fill="url(#panel)" stroke="#2a313a"/>
+  <rect x="24" y="22" width="1152" height="34" rx="12" fill="#1b2630"/>
+  <rect x="24" y="44" width="1152" height="12" fill="#1b2630"/>
+  <circle cx="46" cy="39" r="6" fill="#ff5f57"/><circle cx="68" cy="39" r="6" fill="#ffbd2e"/><circle cx="90" cy="39" r="6" fill="#28c840"/>
+  <text class="mono" x="600.0" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="#e6edf3">pinghue v2.1.0</text>
+  <text class="mono" x="1160" y="44" text-anchor="end" font-size="14" fill="#f2cc60">probe cycle
+    <animate attributeName="opacity" values="0.55;1;0.55" dur="2.4s" repeatCount="indefinite"/></text>
+
+  <g class="mono" font-size="15">
+    <g font-size="13" font-weight="700" fill="#8ea0b8">
+      <text x="44" y="100">host</text>
+      <text x="196" y="100">address</text>
+      <text x="340" y="100">state</text>
+      <text x="470" y="100">last</text>
+      <text x="552" y="100">avg</text>
+      <text x="632" y="100">jitter</text>
+      <text x="740" y="100" fill="#8ea0b8">loss</text>
+      <text x="834" y="100">mode</text>
+      <text x="904" y="100">history</text>
     </g>
+    <rect x="32" y="113" width="1136" height="22" fill="#113a55" opacity="0.45"/><text class="mono" x="44" y="128" fill="#7ee787" font-weight="700">1.1.1.1</text><text class="mono" x="196" y="128" fill="#8ea0b8">1.1.1.1</text><text class="mono" x="340" y="128" fill="#7ee787" font-weight="700">healthy</text><text class="mono" x="470" y="128" fill="#e6edf3" font-weight="700">4.38</text><text class="mono" x="552" y="128" fill="#e6edf3" font-weight="700">5.49</text><text class="mono" x="632" y="128" fill="#e6edf3" font-weight="700">1.76</text><text class="mono" x="740" y="128" fill="#e6edf3" font-weight="700">0.00%</text><text class="mono" x="834" y="128" fill="#8ea0b8">icmp</text><rect x="904.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="909.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="914.00" y="114" width="5.70" height="12" fill="#f2cc60"/><rect x="919.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="924.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="929.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="934.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="939.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="944.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="949.00" y="118" width="5.70" height="8" fill="#7ee787"/><rect x="954.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="959.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="964.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="969.00" y="118" width="5.70" height="8" fill="#7ee787"/><rect x="974.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="979.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="984.00" y="114" width="5.70" height="12" fill="#f2cc60"/><rect x="989.00" y="114" width="5.70" height="12" fill="#f2cc60"/><rect x="994.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="999.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="1004.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1009.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1014.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="1019.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1024.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1029.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1034.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1039.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1044.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1049.00" y="118" width="5.70" height="8" fill="#7ee787"/><rect x="1054.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="1059.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="1064.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1069.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="1074.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1079.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1084.00" y="114" width="5.70" height="12" fill="#f2cc60"/><rect x="1089.00" y="114" width="5.70" height="12" fill="#f2cc60"/><rect x="1094.00" y="118" width="5.70" height="8" fill="#7ee787"/><rect x="1099.00" y="119" width="5.70" height="7" fill="#7ee787"/><rect x="1104.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1109.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1114.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1119.00" y="121" width="5.70" height="5" fill="#7ee787"/><rect x="1124.00" y="118" width="5.70" height="8" fill="#7ee787"/><rect x="1129.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1134.00" y="118" width="5.70" height="8" fill="#7ee787"/><rect x="1139.00" y="120" width="5.70" height="6" fill="#7ee787"/><rect x="1144.00" y="114" width="5.70" height="12" fill="#f2cc60"/><rect x="1149.00" y="118" width="5.70" height="8" fill="#7ee787"/><text class="mono" x="44" y="164" fill="#7ee787" font-weight="700">db.internal</text><text class="mono" x="196" y="164" fill="#8ea0b8">10.42.3.17</text><text class="mono" x="340" y="164" fill="#f2cc60" font-weight="700">intermittent</text><text class="mono" x="470" y="164" fill="#f2cc60" font-weight="700">312.00</text><text class="mono" x="552" y="164" fill="#e6edf3" font-weight="700">38.42</text><text class="mono" x="632" y="164" fill="#f2cc60" font-weight="700">58.70</text><text class="mono" x="740" y="164" fill="#ff7b72" font-weight="700">7.22%</text><text class="mono" x="834" y="164" fill="#8ea0b8">icmp</text><rect x="904.0" y="159" width="3" height="3" fill="#ff7b72"/><rect x="909.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="914.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="919.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="924.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="929.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="934.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="939.00" y="152" width="5.70" height="10" fill="#7ee787"/><rect x="944.00" y="151" width="5.70" height="11" fill="#7ee787"/><rect x="949.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="954.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="959.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="964.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="969.00" y="151" width="5.70" height="11" fill="#7ee787"/><rect x="974.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="979.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="984.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="989.0" y="159" width="3" height="3" fill="#ff7b72"/><rect x="994.00" y="151" width="5.70" height="11" fill="#7ee787"/><rect x="999.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1004.00" y="152" width="5.70" height="10" fill="#7ee787"/><rect x="1009.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1014.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1019.00" y="152" width="5.70" height="10" fill="#7ee787"/><rect x="1024.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1029.00" y="152" width="5.70" height="10" fill="#7ee787"/><rect x="1034.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1039.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1044.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1049.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1054.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="1059.00" y="151" width="5.70" height="11" fill="#7ee787"/><rect x="1064.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1069.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="1074.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1079.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1084.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="1089.00" y="152" width="5.70" height="10" fill="#7ee787"/><rect x="1094.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1099.00" y="147" width="5.70" height="15" fill="#f2cc60"/><rect x="1104.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1109.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1114.00" y="151" width="5.70" height="11" fill="#7ee787"/><rect x="1119.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1124.00" y="153" width="5.70" height="9" fill="#7ee787"/><rect x="1129.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1134.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1139.00" y="152" width="5.70" height="10" fill="#7ee787"/><rect x="1144.00" y="154" width="5.70" height="8" fill="#7ee787"/><rect x="1149.00" y="152" width="5.70" height="10" fill="#7ee787"/><text class="mono" x="44" y="200" fill="#7ee787" font-weight="700">api.edge</text><text class="mono" x="196" y="200" fill="#8ea0b8">203.0.113.10</text><text class="mono" x="340" y="200" fill="#ff7b72" font-weight="700">down</text><text class="mono" x="470" y="200" fill="#ff7b72" font-weight="700">-</text><text class="mono" x="552" y="200" fill="#e6edf3" font-weight="700">-</text><text class="mono" x="632" y="200" fill="#e6edf3" font-weight="700">-</text><text class="mono" x="740" y="200" fill="#ff7b72" font-weight="700">100.00%</text><text class="mono" x="834" y="200" fill="#8ea0b8">tcp</text><rect x="904.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="914.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="924.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="934.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="944.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="954.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="964.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="974.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="984.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="994.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1004.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1014.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1024.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1034.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1044.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1054.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1064.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1074.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1084.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1094.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1104.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1114.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1124.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1134.0" y="195" width="3" height="3" fill="#ff7b72"/><rect x="1144.0" y="195" width="3" height="3" fill="#ff7b72"/>
+  </g>
 
-    <g>
-      <animate attributeName="opacity" values="0.75;1;1;0.82;1" dur="4s" repeatCount="indefinite"/>
-      <text x="48" y="158" class="blue" font-weight="700">db.internal</text>
-      <text x="252" y="158" class="green">10.42.3.17</text>
-      <text x="392" y="158" class="amber" font-weight="700">intermittent</text>
-      <text x="536" y="158" class="amber">312.00</text>
-      <text x="632" y="158" class="text">38.42</text>
-      <text x="722" y="158" class="amber">58.70</text>
-      <text x="842" y="158" class="red">7.22%</text>
-      <text x="942" y="158"><tspan class="green">▁▂</tspan><tspan class="red">·</tspan><tspan class="amber">▇</tspan><tspan class="green">▁▁▂</tspan><tspan class="red">·</tspan><tspan class="green">▁▁</tspan><tspan class="amber">▆</tspan></text>
-    </g>
+  <!-- live probe sweep over the history area -->
+  <g clip-path="url(#hclip)">
+    <rect x="0" y="104" width="60" height="108" fill="url(#sweep)">
+      <animate attributeName="x" values="840;1158" dur="3.0s" repeatCount="indefinite"/>
+    </rect>
+  </g>
 
-    <g>
-      <animate attributeName="opacity" values="1;0.86;1;1" dur="3.5s" repeatCount="indefinite"/>
-      <text x="48" y="194" class="blue" font-weight="700">api.edge</text>
-      <text x="252" y="194" class="green">203.0.113.10</text>
-      <text x="392" y="194" class="red" font-weight="700">down</text>
-      <text x="536" y="194" class="red">-</text>
-      <text x="632" y="194" class="text">-</text>
-      <text x="722" y="194" class="text">-</text>
-      <text x="842" y="194" class="red">100.00%</text>
-      <text x="942" y="194" class="red">···············</text>
-    </g>
-
-    <g>
-      <animate attributeName="opacity" values="0;0;1;1;0" dur="5s" repeatCount="indefinite"/>
-      <text x="48" y="238" class="muted">$ pinghue -f hosts.txt --duration 180 --output maintenance.json --overwrite</text>
-      <text x="48" y="266" class="green">Ready: JSON summary written to maintenance.json</text>
-    </g>
+  <!-- command + JSON write confirmation -->
+  <line x1="40" y1="240" x2="1160" y2="240" stroke="#2a313a"/>
+  <text class="mono" x="44" y="272" font-size="14" fill="#8ea0b8">$ pinghue -f hosts.txt --duration 180 --output maintenance.json --overwrite</text>
+  <g>
+    <animate attributeName="opacity" values="0;0;1;1;1" keyTimes="0;0.45;0.6;0.95;1" dur="3.0s" repeatCount="indefinite"/>
+    <text class="mono" x="44" y="302" font-size="14" fill="#7ee787" font-weight="700">→ wrote maintenance.json  ·  3 targets  ·  schema_version 1</text>
   </g>
 </svg>
