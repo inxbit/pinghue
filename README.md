@@ -1,61 +1,46 @@
-# pinghue
-
 <p align="center">
-  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-hero.svg" alt="pinghue - terminal ping monitor for maintenance windows" width="920">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-hero.svg" alt="pinghue - colored concurrent ICMP/TCP ping monitor for maintenance windows" width="920">
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/pinghue/"><img alt="PyPI" src="https://img.shields.io/pypi/v/pinghue?color=58a6ff"></a>
   <a href="https://pypi.org/project/pinghue/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/pinghue?color=7ee787"></a>
   <a href="https://github.com/inxbit/pinghue/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/inxbit/pinghue/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/inxbit/homebrew-tap"><img alt="Homebrew tap" src="https://img.shields.io/badge/homebrew-inxbit%2Ftap-f2cc60"></a>
   <a href="https://github.com/inxbit/pinghue/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/inxbit/pinghue?color=f2cc60"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#modes">Modes</a> ·
+  <a href="#cli-reference">CLI Reference</a> ·
+  <a href="#json-output">JSON Output</a> ·
+  <a href="#security-model">Security</a>
 </p>
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `2.1.0`.
-
-The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
+Current version: `2.1.0`. The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.svg" alt="animated pinghue terminal demo" width="920">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.svg" alt="animated pinghue terminal demo showing healthy, intermittent, and down hosts" width="920">
 </p>
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-screenshot.svg" alt="pinghue dense maintenance-window table with history bars and legend" width="920">
-</p>
+## Why pinghue
 
-## What This Is
-
-- A focused terminal monitor for maintenance windows, migrations, and quick reachability checks.
-- A concurrent ICMP/TCP probe runner with a readable Textual TUI.
-- A scriptable probe tool with `--no-tui`, `--count`, `--duration`, and `--output`.
-- A JSON-producing report helper for post-maintenance evidence.
-- A local operator tool designed for macOS and Linux.
-
-## What This Is Not
-
-- Not a Prometheus, Smokeping, Zabbix, or NMS replacement.
-- Not a long-running metrics database or alerting system.
-- Not a privileged daemon.
-- Not a packet capture or traceroute tool.
-- Not a service that accepts remote network requests.
-
-## Supported Platforms
-
-The 2.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
-
-The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 2.0 support scope unless explicitly added later.
-
-## Stability Policy
-
-`pinghue` treats CLI flags and JSON exports as compatibility contracts. `schema_version: 1` is the JSON v1 contract: additive fields are non-breaking, but removing fields, changing field types, changing enum values, or changing required-field behavior requires a new schema version.
-
-CLI removals, flag renames, and incompatible behavior changes are deprecated for at least one minor release before removal. Deprecated flags continue to parse during that window and release notes identify the replacement. Patch releases do not intentionally break CLI or JSON consumers.
-
-Starting with `1.0.0`, release versions follow semantic versioning: patch releases are bug fixes, minor releases may add compatible behavior, and major releases are reserved for breaking CLI or JSON changes.
-
-`2.0.0` changes the default `--output` behavior: existing regular files are preserved unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
+<table>
+  <tr>
+    <td width="33%" valign="top"><b>Dense at-a-glance view</b><br><br>Watch many hosts in one readable terminal table — per-host latency, loss, jitter, and a live history bar.</td>
+    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</td>
+    <td width="33%" valign="top"><b>Evidence-ready JSON</b><br><br><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Whole-run accuracy</b><br><br>Host states reflect everything that happened in the window, not just the most recent probes.</td>
+    <td valign="top"><b>Scriptable</b><br><br><code>--no-tui</code>, <code>--count</code>, <code>--duration</code>, and fail-on-down exit codes for automation.</td>
+    <td valign="top"><b>Local &amp; safe</b><br><br>No server, no daemon, no credentials. Runs on macOS and Linux, Python 3.10–3.13.</td>
+  </tr>
+</table>
 
 ## Install
 
@@ -121,6 +106,42 @@ lines. Each target string is capped at 253 characters.
 example.com
 internal-db.corp
 ```
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-screenshot.svg" alt="pinghue dense maintenance-window table with latency columns, history bars, legend, and keybindings" width="920">
+</p>
+
+## What This Is
+
+- A focused terminal monitor for maintenance windows, migrations, and quick reachability checks.
+- A concurrent ICMP/TCP probe runner with a readable Textual TUI.
+- A scriptable probe tool with `--no-tui`, `--count`, `--duration`, and `--output`.
+- A JSON-producing report helper for post-maintenance evidence.
+- A local operator tool designed for macOS and Linux.
+
+## What This Is Not
+
+- Not a Prometheus, Smokeping, Zabbix, or NMS replacement.
+- Not a long-running metrics database or alerting system.
+- Not a privileged daemon.
+- Not a packet capture or traceroute tool.
+- Not a service that accepts remote network requests.
+
+## Supported Platforms
+
+The 2.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
+
+The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 2.0 support scope unless explicitly added later.
+
+## Stability Policy
+
+`pinghue` treats CLI flags and JSON exports as compatibility contracts. `schema_version: 1` is the JSON v1 contract: additive fields are non-breaking, but removing fields, changing field types, changing enum values, or changing required-field behavior requires a new schema version.
+
+CLI removals, flag renames, and incompatible behavior changes are deprecated for at least one minor release before removal. Deprecated flags continue to parse during that window and release notes identify the replacement. Patch releases do not intentionally break CLI or JSON consumers.
+
+Starting with `1.0.0`, release versions follow semantic versioning: patch releases are bug fixes, minor releases may add compatible behavior, and major releases are reserved for breaking CLI or JSON changes.
+
+`2.0.0` changes the default `--output` behavior: existing regular files are preserved unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
 
 ## Modes
 
