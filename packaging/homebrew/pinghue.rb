@@ -10,8 +10,8 @@ class Pinghue < Formula
 
   desc "Colored, concurrent ICMP/TCP ping monitor for the terminal"
   homepage "https://github.com/inxbit/pinghue"
-  url "https://files.pythonhosted.org/packages/source/p/pinghue/pinghue-2.1.0.tar.gz"
-  sha256 "2d9f6cb5ba54fd16099ceb4e497f06f5720d71fd6e3c9707c79ea0838475159d"
+  url "https://files.pythonhosted.org/packages/75/14/76730fbd2168321ada9de2adc3b03f5cecb505c88eabca1dc00c0e85ebe8/pinghue-2.1.0.tar.gz"
+  sha256 "c1b08200f7c25fa6f366572ab2aca320d4dc2d851df26f7c6ce02ac957f56284"
   license "MIT"
   head "https://github.com/inxbit/pinghue.git", branch: "main"
 
@@ -43,7 +43,7 @@ class Pinghue < Formula
   end
 
   resource "platformdirs" do
-    url "https://files.pythonhosted.org/packages/source/p/platformdirs/platformdirs-4.10.0.tar.gz"
+    url "https://files.pythonhosted.org/packages/d7/47/e4501f49c178ae1d9f4a75073fda4204f52647993f075a9db4d14930e0c5/platformdirs-4.10.0.tar.gz"
     sha256 "31e761a6a0ca04faf7353ea759bdba55652be214725111e5aac52dfa29d4bef7"
   end
 
@@ -58,7 +58,7 @@ class Pinghue < Formula
   end
 
   resource "textual" do
-    url "https://files.pythonhosted.org/packages/source/t/textual/textual-8.2.7.tar.gz"
+    url "https://files.pythonhosted.org/packages/9b/7a/c519db0aba5024f86e71e9631810bfdd6866ed2c8695bd7fa34b90e7ef59/textual-8.2.7.tar.gz"
     sha256 "658f568ff81e30ed43890c3e07520390e5cf1b4763822006e060656b0a88f105"
   end
 
