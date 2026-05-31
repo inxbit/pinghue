@@ -156,9 +156,6 @@ def format_state_cell(status: TargetStatus) -> Text:
 
 
 def _history_sample_style(sample: ProbeSample, *, slow_latency_ms: float) -> str:
-    if sample.status == SampleStatus.REFUSED:
-        return AMBER
-
     if sample.status != SampleStatus.OK or sample.latency_ms is None:
         return RED
 
@@ -197,7 +194,7 @@ def format_history_legend() -> Text:
     text.append("slow  ", style=MUTED)
     text.append("·", style=RED)
     text.append(" loss/down  ", style=MUTED)
-    text.append("!", style=AMBER)
+    text.append("!", style=RED)
     text.append(" tcp refused", style=MUTED)
     return text
 

@@ -149,6 +149,9 @@ async def test_pilot_reset_selected_clears_the_selected_targets_samples() -> Non
         await pilot.pause()
 
         assert len(app.targets[0].samples) == 0
+        # L6: a cleared target shows a pending state, not DOWN (red), until the
+        # next probe arrives.
+        assert app.targets[0].status == TargetStatus.RESOLVING
 
 
 async def test_pilot_burst_selected_triggers_an_immediate_probe(

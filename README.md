@@ -13,7 +13,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `2.0.1`.
+Current version: `2.1.0`.
 
 The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
@@ -166,14 +166,15 @@ pinghue [OPTIONS] [TARGET ...]
 | `-n, --numeric` | off | Skip DNS and require IP literals. |
 | `-i, --interval SEC` | `1.0` | Seconds between probes. Minimum: `0.1`. |
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
-| `-c, --count N` | continuous | Stop after `N` probes per target. |
-| `--duration SEC` | continuous | Stop after elapsed seconds. |
+| `-c, --count N` | continuous | Stop after `N` probes per target. Intentionally has no upper bound. |
+| `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. Existing regular files are not replaced unless `--overwrite` is set. |
 | `--overwrite` | off | Allow `--output` to replace an existing regular file. |
+| `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
 | `--no-samples` | off | Omit per-probe samples from JSON output. |
 | `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP mode uses a dedicated thread pool sized to this limit. |
-| `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this standard deviation. |
+| `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
 | `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
 | `--fail-on-any-down` | off | Return a non-zero exit code when any target finishes down. |
 | `--fail-on-all-down` | off | Return a non-zero exit code only when all targets finish down. `--fail-on-down` remains a compatibility alias. |

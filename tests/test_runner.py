@@ -33,6 +33,7 @@ def build_args(**overrides: object) -> SimpleNamespace:
         "no_tui": True,
         "numeric": False,
         "output": None,
+        "output_mode": "private",
         "overwrite": False,
         "port": None,
         "targets": ["1.1.1.1"],
@@ -69,6 +70,7 @@ async def test_run_writes_configured_host_label(
     assert exit_code == 0
     assert captured["host"] == "operator-selected"
     assert captured["overwrite"] is False
+    assert captured["output_mode"] == "private"
 
 
 async def test_run_fail_on_down_returns_nonzero_when_all_targets_down(
@@ -154,6 +156,28 @@ async def test_run_legacy_fail_on_down_matches_all_down_mode(
     exit_code = await runner.run(build_args(fail_on_down=True), mode=ProbeMode.ICMP)
 
     assert exit_code == 0
+
+
+def test_short_all_failed_run_is_down_and_trips_fail_on_any_down() -> None:
+    # H1: a run shorter than fail_threshold with zero successful samples must be
+    # DOWN and return a failing exit code, not be treated as usable/INTERMITTENT.
+    target = TargetRun("192.0.2.1")
+    for _ in range(2):  # fewer samples than the default fail_threshold of 3
+        target.apply_sample(
+            ProbeSample(
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+                latency_ms=None,
+                status=SampleStatus.TIMEOUT,
+            ),
+            fail_threshold=3,
+            jitter_threshold_ms=50.0,
+        )
+
+    assert target.status == TargetStatus.DOWN
+    assert (
+        runner.exit_code_for_targets([target], fail_on_any_down=True, fail_on_all_down=False)
+        == 2
+    )
 
 
 async def test_probe_once_caches_and_prioritizes_working_address(

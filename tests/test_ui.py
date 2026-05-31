@@ -99,6 +99,20 @@ def test_format_history_cell_colors_each_probe_segment() -> None:
     assert [span.style for span in history.spans] == [GREEN, AMBER, RED]
 
 
+def test_format_history_cell_marks_refused_red() -> None:
+    # L5: a consistently refused TCP target is classified DOWN, so its history
+    # glyph must render red to match the state badge.
+    history = format_history_cell(
+        [sample(SampleStatus.REFUSED)],
+        width=10,
+        style="bar",
+        slow_latency_ms=300.0,
+    )
+
+    assert history.plain == "!"
+    assert [span.style for span in history.spans] == [RED]
+
+
 def test_format_history_legend_explains_probe_glyphs() -> None:
     legend = format_history_legend()
 

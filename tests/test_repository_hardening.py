@@ -36,6 +36,61 @@ def test_dependency_audit_workflow_runs_pip_audit_weekly() -> None:
     assert "pip-audit" in workflow
 
 
+def test_dependency_audit_pins_bootstrap_tooling() -> None:
+    # L15: pip/setuptools/wheel must not be installed unpinned.
+    workflow = read(".github/workflows/dependency-audit.yml")
+
+    assert "--upgrade pip setuptools wheel" not in workflow
+    assert 'setuptools==82.0.1' in workflow
+    assert 'wheel==0.47.0' in workflow
+
+
+def test_requirements_build_is_hash_pinned() -> None:
+    # L14: the build backend is pinned with sha256 hashes for --require-hashes.
+    requirements = read("requirements-build.txt")
+
+    assert "build==1.5.0" in requirements
+    assert "setuptools==82.0.1" in requirements
+    assert "wheel==0.47.0" in requirements
+    assert "--hash=sha256:" in requirements
+
+
+def test_publish_workflow_verifies_tag_and_hash_pins_build() -> None:
+    workflow = read(".github/workflows/publish.yml")
+
+    # L13: the build must fail when the tag disagrees with the package version.
+    assert "Verify tag matches package version" in workflow
+    assert 'GITHUB_REF_NAME#v' in workflow
+    # L14: the artifact-producing toolchain is installed from the hash-pinned lock.
+    assert "pip install --require-hashes -r requirements-build.txt" in workflow
+    assert 'SOURCE_DATE_EPOCH: "0"' in workflow
+    # I3: GitHub release is created with the built-in gh CLI, not a third-party action.
+    assert "gh release create" in workflow
+    assert "softprops/action-gh-release" not in workflow
+
+
+def test_publish_workflow_keeps_package_check_out_of_build_job() -> None:
+    workflow = read(".github/workflows/publish.yml")
+
+    build_job, check_and_publish = workflow.split("  check:", 1)
+
+    assert "twine==6.2.0" not in build_job
+    assert "twine check dist/*" not in build_job
+    assert "python -m build --no-isolation" in build_job
+    assert "twine==6.2.0" in check_and_publish
+    assert "twine check dist/*" in check_and_publish
+    assert "needs:\n      - build\n      - check" in check_and_publish
+
+
+def test_ci_build_matches_publish_build_path() -> None:
+    # L16: CI exercises the same build invocation as publish.
+    ci = read(".github/workflows/ci.yml")
+
+    assert "pip install --require-hashes -r requirements-build.txt" in ci
+    assert "python -m build --no-isolation" in ci
+    assert 'SOURCE_DATE_EPOCH: "0"' in ci
+
+
 def test_main_ruleset_requires_pull_request_flow() -> None:
     ruleset = json.loads(read(".github/repo-settings/main-ruleset.json"))
     pull_request = next(rule for rule in ruleset["rules"] if rule["type"] == "pull_request")
@@ -113,6 +168,17 @@ def test_repository_hardening_drift_check_is_scheduled() -> None:
     assert "v*.*.*" in script
 
 
+def test_repository_hardening_drift_check_validates_ruleset_internals() -> None:
+    script = read("scripts/check-github-hardening.sh")
+
+    assert "main-ruleset.json" in script
+    assert "release-tag-ruleset.json" in script
+    assert "required_review_thread_resolution" in script
+    assert "required_status_checks" in script
+    assert "required_signatures" in script
+    assert "update_allows_fetch_and_merge" in script
+
+
 def test_changelog_has_dated_1_0_release_section() -> None:
     changelog = read("CHANGELOG.md")
 
@@ -132,13 +198,16 @@ def test_release_version_surfaces_match_package_version() -> None:
     hero = read("docs/assets/pinghue-hero.svg")
     demo = read("docs/assets/pinghue-demo.svg")
     screenshot = read("docs/assets/pinghue-screenshot.svg")
+    formula = read("packaging/homebrew/pinghue.rb")
 
-    assert 'version = "2.0.1"' in pyproject
-    assert "Current version: `2.0.1`." in readme
-    assert example["pinghue_version"] == "2.0.1"
-    assert "v2.0.1" in hero
-    assert "v2.0.1" in demo
-    assert "v2.0.1" in screenshot
+    assert 'version = "2.1.0"' in pyproject
+    assert "Current version: `2.1.0`." in readme
+    assert example["pinghue_version"] == "2.1.0"
+    assert "v2.1.0" in hero
+    assert "v2.1.0" in demo
+    assert "v2.1.0" in screenshot
+    assert "pinghue-2.1.0.tar.gz" in formula
+    assert "pinghue-2.0.1.tar.gz" not in formula
 
 
 def test_security_policy_matches_stable_support_line() -> None:

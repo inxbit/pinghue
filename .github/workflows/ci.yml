@@ -39,7 +39,11 @@ jobs:
         run: mypy src
       - name: Tests
         run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
+      - name: Install build backend (hash-pinned)
+        run: python -m pip install --require-hashes -r requirements-build.txt
       - name: Build
-        run: python -m build
+        run: python -m build --no-isolation
+        env:
+          SOURCE_DATE_EPOCH: "0"
       - name: Check package
         run: twine check dist/*

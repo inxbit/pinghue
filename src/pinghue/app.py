@@ -14,7 +14,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from pinghue import __version__
 from pinghue.config import RunConfig
-from pinghue.models import ProbeMode, TargetRun, TargetStatus, classify_samples
+from pinghue.models import ProbeMode, TargetRun, TargetStatus
 from pinghue.runner import (
     probe_once,
     probe_target_loop,
@@ -272,14 +272,6 @@ class PinghueTextualApp(App[None]):
         if probes:
             await asyncio.gather(*probes)
 
-    async def _probe_selected_and_refresh(self, index: int) -> None:
-        await self._probe_selected_now(index)
-        self._refresh_table()
-
-    async def _probe_all_and_refresh(self) -> None:
-        await self._probe_all_now()
-        self._refresh_table()
-
     async def _tick(self) -> None:
         # Kept for tests and future manual refresh paths; normal probing is per-host.
         await self._probe_all_now()
@@ -291,7 +283,8 @@ class PinghueTextualApp(App[None]):
         await self._stop_background_task(self._deadline_task)
         await self._stop_background_task(self._completion_task)
         if self._probe_executor is not None:
-            self._probe_executor.shutdown(wait=True, cancel_futures=True)
+            # Don't block teardown joining in-flight pings; drop queued probes.
+            self._probe_executor.shutdown(wait=False, cancel_futures=True)
             self._probe_executor = None
 
     def _refresh_table(self) -> None:
@@ -359,21 +352,22 @@ class PinghueTextualApp(App[None]):
         if not had_samples:
             return
 
-        target.status = classify_samples(
-            target.samples,
-            fail_threshold=self.args_config.fail_threshold,
-            jitter_threshold_ms=self.args_config.jitter_threshold,
-        )
+        # An empty window has no evidence yet; show a pending state rather than
+        # DOWN (what classify_samples returns for no samples) until the next probe.
+        target.status = TargetStatus.RESOLVING
         target.error = None
 
     def action_burst_selected(self) -> None:
+        # Wake the selected target's existing probe loop instead of starting a
+        # second concurrent probe on the same TargetRun (which double-counts).
         table = self.query_one("#targets", DataTable)
         row = table.cursor_row
-        if row is not None and 0 <= row < len(self.targets):
-            self.run_worker(self._probe_selected_and_refresh(row))
+        if row is not None and 0 <= row < len(self._immediate_events):
+            self._immediate_events[row].set()
 
     def action_burst_all(self) -> None:
-        self.run_worker(self._probe_all_and_refresh())
+        for event in self._immediate_events:
+            event.set()
 
     async def action_quit(self) -> None:
         await self._finish("user_quit")

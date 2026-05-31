@@ -39,10 +39,13 @@ class ResolvedTarget:
 
 @dataclass(frozen=True)
 class _IcmpBackend:
-    ping: Callable[..., Any]
+    socket_v4: Callable[..., Any]
+    socket_v6: Callable[..., Any]
+    request: Callable[..., Any]
+    unique_identifier: Callable[[], int]
     timeout_error: type[BaseException]
     permission_error: type[BaseException]
-    name_lookup_error: type[BaseException]
+    unreachable_errors: tuple[type[BaseException], ...]
     library_error: type[BaseException]
 
 
@@ -59,22 +62,31 @@ def _get_icmp_backend() -> _IcmpBackend:
         raise _icmp_import_error
 
     try:
-        from icmplib import ping  # type: ignore[import-untyped]
         from icmplib.exceptions import (  # type: ignore[import-untyped]
+            DestinationUnreachable,
             ICMPLibError,
-            NameLookupError,
             SocketPermissionError,
+            TimeExceeded,
             TimeoutExceeded,
         )
+        from icmplib.models import ICMPRequest  # type: ignore[import-untyped]
+        from icmplib.sockets import (  # type: ignore[import-untyped]
+            ICMPv4Socket,
+            ICMPv6Socket,
+        )
+        from icmplib.utils import unique_identifier  # type: ignore[import-untyped]
     except ImportError as exc:
         _icmp_import_error = exc
         raise
 
     _icmp_backend = _IcmpBackend(
-        ping=ping,
+        socket_v4=ICMPv4Socket,
+        socket_v6=ICMPv6Socket,
+        request=ICMPRequest,
+        unique_identifier=unique_identifier,
         timeout_error=TimeoutExceeded,
         permission_error=SocketPermissionError,
-        name_lookup_error=NameLookupError,
+        unreachable_errors=(DestinationUnreachable, TimeExceeded),
         library_error=ICMPLibError,
     )
     return _icmp_backend
@@ -191,6 +203,32 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
     return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)
 
 
+def _run_icmp_echo(
+    backend: _IcmpBackend,
+    address: str,
+    *,
+    timeout_s: float,
+    ipv6: bool,
+) -> float:
+    """Send one ICMP echo and return the round-trip time in ms (blocking).
+
+    Raises icmplib exceptions: TimeoutExceeded on no reply,
+    DestinationUnreachable/TimeExceeded when the network reports the destination
+    cannot be reached, and SocketPermissionError/ICMPLibError on socket errors.
+    """
+    socket_factory = backend.socket_v6 if ipv6 else backend.socket_v4
+    with socket_factory(None, False) as sock:
+        request = backend.request(
+            destination=address,
+            id=backend.unique_identifier(),
+            sequence=0,
+        )
+        sock.send(request)
+        reply = sock.receive(request, timeout_s)
+        reply.raise_for_status()
+        return round(float(reply.time - request.time) * 1000, 2)
+
+
 async def icmp_probe(
     address: str,
     *,
@@ -198,7 +236,11 @@ async def icmp_probe(
     address_family: AddressFamily,
     executor: Executor | None = None,
 ) -> ProbeSample:
-    """Probe a target with icmplib."""
+    """Probe a target with a single ICMP echo via icmplib's low-level sockets.
+
+    Reading the reply directly (rather than icmplib.ping, which swallows error
+    replies) lets us tell an unreachable destination apart from a timeout.
+    """
     timestamp = datetime.now(timezone.utc)
     try:
         backend = _get_icmp_backend()
@@ -210,61 +252,46 @@ async def icmp_probe(
             error=str(exc),
         )
 
-    family = None
-    if address_family == AddressFamily.IPV4:
-        family = 4
-    elif address_family == AddressFamily.IPV6:
-        family = 6
+    try:
+        ipv6 = ipaddress.ip_address(address).version == 6
+    except ValueError:
+        ipv6 = address_family == AddressFamily.IPV6
 
     loop = asyncio.get_running_loop()
     try:
-        result: Any = await loop.run_in_executor(
+        latency_ms = await loop.run_in_executor(
             executor,
-            partial(
-                backend.ping,
-                address,
-                count=1,
-                interval=0,
-                timeout=timeout_s,
-                family=family,
-                privileged=False,
-            ),
+            partial(_run_icmp_echo, backend, address, timeout_s=timeout_s, ipv6=ipv6),
         )
-    except Exception as exc:
-        if isinstance(exc, backend.timeout_error):
-            return ProbeSample(
-                timestamp=timestamp,
-                latency_ms=None,
-                status=SampleStatus.TIMEOUT,
-            )
-        if isinstance(exc, backend.permission_error):
-            return ProbeSample(
-                timestamp=timestamp,
-                latency_ms=None,
-                status=SampleStatus.ERROR,
-                error=f"permission denied: {exc}",
-            )
-        if isinstance(exc, backend.name_lookup_error):
-            return ProbeSample(
-                timestamp=timestamp,
-                latency_ms=None,
-                status=SampleStatus.ERROR,
-                error=str(exc),
-            )
-        if isinstance(exc, backend.library_error):
-            return ProbeSample(
-                timestamp=timestamp,
-                latency_ms=None,
-                status=SampleStatus.UNREACHABLE,
-                error=str(exc),
-            )
-        raise
-
-    if not result.is_alive:
+    except backend.timeout_error:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
+    except backend.unreachable_errors as exc:
+        return ProbeSample(
+            timestamp=timestamp,
+            latency_ms=None,
+            status=SampleStatus.UNREACHABLE,
+            error=str(exc),
+        )
+    except backend.permission_error as exc:
+        return ProbeSample(
+            timestamp=timestamp,
+            latency_ms=None,
+            status=SampleStatus.ERROR,
+            error=f"permission denied: {exc}",
+        )
+    except backend.library_error as exc:
+        return ProbeSample(
+            timestamp=timestamp,
+            latency_ms=None,
+            status=SampleStatus.ERROR,
+            error=str(exc),
+        )
+    except OSError as exc:
+        return ProbeSample(
+            timestamp=timestamp,
+            latency_ms=None,
+            status=SampleStatus.ERROR,
+            error=str(exc),
+        )
 
-    return ProbeSample(
-        timestamp=timestamp,
-        latency_ms=round(float(result.avg_rtt), 2),
-        status=SampleStatus.OK,
-    )
+    return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)

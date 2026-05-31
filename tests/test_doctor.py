@@ -41,10 +41,48 @@ def test_doctor_linux_blocked_prints_fix_block(monkeypatch: pytest.MonkeyPatch) 
     assert "Not ready for ICMP. TCP mode works. See fixes above." in text
 
 
+def test_doctor_reports_ipv6_icmp_unavailable_without_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # L4: IPv6 ICMP is verified separately; its absence warns but does not flip
+    # the IPv4-driven exit code.
+    def socket_factory(family: int, _type: int, _proto: int) -> FakeSocket:
+        if family == doctor.socket.AF_INET6:
+            raise PermissionError("no ipv6 icmp")
+        return FakeSocket()
+
+    monkeypatch.setattr(doctor.socket, "socket", socket_factory)
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("1.1.1.1", 1.0, None))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert exit_code == 0
+    assert "Unprivileged ICMP sockets available" in text
+    assert "IPv6 ICMP not verified" in text
+
+
+def test_doctor_verifies_ipv6_icmp_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.2, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("1.1.1.1", 1.0, None))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert exit_code == 0
+    assert "ICMPv6 probe to ::1 succeeded" in text
+
+
 def test_doctor_quiet_suppresses_output(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
-    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda: (0.12, None))
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
     monkeypatch.setattr(doctor, "_dns_probe", lambda _: ("93.184.215.14", 1.0, None))
     output = io.StringIO()
 
@@ -91,7 +129,7 @@ def test_doctor_dns_probe_handles_empty_response(monkeypatch: pytest.MonkeyPatch
 def test_run_check_prints_configured_dns_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
-    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda: (0.12, None))
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
     monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("10.0.0.10", 1.0, None))
     output = io.StringIO()
 
@@ -111,7 +149,7 @@ def test_run_check_sanitizes_dns_diagnostics(monkeypatch: pytest.MonkeyPatch) ->
     dns_error = "\x1b[31mboom"
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
-    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda: (0.12, None))
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
     monkeypatch.setattr(doctor, "_dns_probe", lambda _name: (None, None, dns_error))
     output = io.StringIO()
 
