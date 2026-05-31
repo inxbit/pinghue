@@ -134,7 +134,7 @@ def test_reset_selected_recomputes_target_state(monkeypatch) -> None:
     app.action_reset_selected()
 
     assert app.targets[0].samples == []
-    assert app.targets[0].status == TargetStatus.DOWN
+    assert app.targets[0].status == TargetStatus.RESOLVING
     assert app.targets[0].error is None
 
 
@@ -169,26 +169,42 @@ def test_reset_all_recomputes_all_target_states(monkeypatch) -> None:
     app.action_reset_all()
 
     assert [list(target.samples) for target in app.targets] == [[], []]
-    assert [target.status for target in app.targets] == [TargetStatus.DOWN, TargetStatus.DOWN]
+    assert [target.status for target in app.targets] == [
+        TargetStatus.RESOLVING,
+        TargetStatus.RESOLVING,
+    ]
 
 
-def test_burst_selected_schedules_background_worker(monkeypatch) -> None:
+def test_burst_selected_wakes_only_the_selected_target_loop(monkeypatch) -> None:
+    # L1: bursting must wake the existing per-target probe loop (via its
+    # immediate event) rather than spawn a second concurrent probe on the same
+    # TargetRun, which double-counts samples.
     app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
-    app.targets = [TargetRun("1.1.1.1", resolved_address="1.1.1.1")]
-    table = FakeTable(cursor_row=0)
-    scheduled: list[object] = []
-
-    def fake_run_worker(coro: object) -> None:
-        scheduled.append(coro)
-        if hasattr(coro, "close"):
-            coro.close()
-
+    app.targets = [
+        TargetRun("1.1.1.1", resolved_address="1.1.1.1"),
+        TargetRun("8.8.8.8", resolved_address="8.8.8.8"),
+    ]
+    app._immediate_events = [asyncio.Event(), asyncio.Event()]
+    table = FakeTable(cursor_row=1)
     monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
-    monkeypatch.setattr(app, "run_worker", fake_run_worker)
 
     app.action_burst_selected()
 
-    assert len(scheduled) == 1
+    assert app._immediate_events[1].is_set()
+    assert not app._immediate_events[0].is_set()
+
+
+def test_burst_all_wakes_every_target_loop() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    app.targets = [
+        TargetRun("1.1.1.1", resolved_address="1.1.1.1"),
+        TargetRun("8.8.8.8", resolved_address="8.8.8.8"),
+    ]
+    app._immediate_events = [asyncio.Event(), asyncio.Event()]
+
+    app.action_burst_all()
+
+    assert all(event.is_set() for event in app._immediate_events)
 
 
 class _TestEvent:

@@ -264,6 +264,7 @@ async def probe_target_loop(
     probes_completed = 0
     probe_limit = getattr(args, "count", None)
     while not stop_event.is_set():
+        probe_started = time.monotonic()
         if probe_once_fn is None:
             await probe_once(
                 target,
@@ -282,8 +283,14 @@ async def probe_target_loop(
         if stop_event.is_set():
             return
 
+        # Subtract the probe's own duration so cadence tracks the interval even
+        # when probes are slow (e.g. timeout > interval against a dead host).
+        wait_timeout = _iteration_sleep(
+            interval=args.interval,
+            iteration_elapsed=time.monotonic() - probe_started,
+        )
         try:
-            await asyncio.wait_for(immediate_event.wait(), timeout=args.interval)
+            await asyncio.wait_for(immediate_event.wait(), timeout=wait_timeout)
         except asyncio.TimeoutError:
             continue
         finally:
@@ -405,7 +412,10 @@ async def run_no_tui(
     finally:
         cleanup_signal_handlers()
         if executor is not None:
-            executor.shutdown(wait=True, cancel_futures=True)
+            # Don't block the event loop joining in-flight pings; drop queued
+            # probes. Lingering threads finish within timeout_s and their
+            # results are discarded.
+            executor.shutdown(wait=False, cancel_futures=True)
 
     ended_at = datetime.now(timezone.utc)
     return targets, exit_reason, started_at, ended_at
@@ -452,6 +462,7 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
             targets=targets,
             include_samples=not args.no_samples,
             overwrite=args.overwrite,
+            output_mode=args.output_mode,
         )
 
     fail_on_all_down = args.fail_on_all_down or args.fail_on_down

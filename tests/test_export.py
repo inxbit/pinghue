@@ -1,4 +1,7 @@
+import errno
 import json
+import os
+import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +39,106 @@ def build_target() -> TargetRun:
             )
         ],
     )
+
+
+def _write(output_path: Path, **overrides: Any) -> None:
+    kwargs: dict[str, Any] = dict(
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        host="ops-laptop-04",
+        exit_reason="user_quit",
+        probe=ProbeConfig(
+            mode=ProbeMode.ICMP,
+            port=None,
+            interval_s=1.0,
+            timeout_s=1.0,
+            address_family=AddressFamily.AUTO,
+        ),
+        targets=[build_target()],
+        include_samples=False,
+    )
+    kwargs.update(overrides)
+    write_output_json(output_path, **kwargs)
+
+
+def test_write_output_json_does_not_follow_symlink_to_device(tmp_path: Path) -> None:
+    # L11: a symlink at the output path must not be followed to a device; with no
+    # --overwrite the run refuses rather than writing through the link.
+    link = tmp_path / "out.json"
+    link.symlink_to("/dev/null")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        _write(link)
+
+    assert link.is_symlink()
+
+
+def test_write_output_json_refuses_fifo_without_hanging(tmp_path: Path) -> None:
+    output_path = tmp_path / "out.fifo"
+    os.mkfifo(output_path)
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        _write(output_path)
+
+    assert stat.S_ISFIFO(output_path.stat().st_mode)
+
+
+def test_write_output_json_falls_back_when_hardlinks_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # L12: filesystems without hardlink support still get the report written.
+    output_path = tmp_path / "out.json"
+
+    def no_hardlinks(_src: object, _dst: object) -> None:
+        raise OSError(errno.EOPNOTSUPP, "hardlinks not supported")
+
+    monkeypatch.setattr(os, "link", no_hardlinks)
+
+    _write(output_path)
+
+    document = json.loads(output_path.read_text(encoding="utf-8"))
+    assert document["pinghue_version"]
+
+
+def test_write_output_json_refuses_existing_file_without_hardlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+
+    def no_hardlinks(_src: object, _dst: object) -> None:
+        raise OSError(errno.EOPNOTSUPP, "hardlinks not supported")
+
+    monkeypatch.setattr(os, "link", no_hardlinks)
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        _write(output_path)
+
+    assert output_path.read_text(encoding="utf-8") == "previous\n"
+
+
+def test_write_output_json_private_mode_is_owner_only(tmp_path: Path) -> None:
+    # Default --output-mode private is 0600 regardless of a permissive umask.
+    output_path = tmp_path / "out.json"
+    previous_umask = os.umask(0o000)
+    try:
+        _write(output_path)
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
+
+
+def test_write_output_json_umask_mode_honors_umask(tmp_path: Path) -> None:
+    # --output-mode umask follows the process umask (I2).
+    output_path = tmp_path / "out.json"
+    previous_umask = os.umask(0o022)
+    try:
+        _write(output_path, output_mode="umask")
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o644
 
 
 def test_build_output_document_matches_schema() -> None:

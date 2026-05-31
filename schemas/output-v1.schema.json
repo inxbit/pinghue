@@ -182,7 +182,8 @@
         },
         "jitter_ms": {
           "type": ["number", "null"],
-          "minimum": 0
+          "minimum": 0,
+          "description": "RFC 3550 interarrival jitter in milliseconds: the smoothed mean absolute difference between consecutive latencies, not the latency standard deviation."
         }
       }
     },

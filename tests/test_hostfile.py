@@ -1,3 +1,5 @@
+import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -72,3 +74,21 @@ def test_parse_host_file_rejects_overlong_target(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="target too long"):
         parse_host_file(path)
+
+
+def test_parse_host_file_rejects_fifo_without_hanging(tmp_path: Path) -> None:
+    # M4: a FIFO must be rejected as a non-regular file, not block forever on open().
+    fifo = tmp_path / "hosts.fifo"
+    os.mkfifo(fifo)
+
+    def _timeout(_signum: int, _frame: object) -> None:
+        raise TimeoutError("parse_host_file blocked opening a FIFO")
+
+    previous = signal.signal(signal.SIGALRM, _timeout)
+    signal.setitimer(signal.ITIMER_REAL, 2.0)
+    try:
+        with pytest.raises(ValueError, match="regular file"):
+            parse_host_file(fifo)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)

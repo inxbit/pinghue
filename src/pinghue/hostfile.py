@@ -18,6 +18,10 @@ def _read_regular_file(path: Path) -> bytes:
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        # Without O_NONBLOCK a read-only open() on a FIFO blocks until a writer
+        # appears, so the fstat() regular-file check below would never run.
+        flags |= os.O_NONBLOCK
 
     try:
         fd = os.open(path, flags)

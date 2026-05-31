@@ -7,9 +7,11 @@ import asyncio
 import ipaddress
 import math
 import sys
+import unicodedata
 from pathlib import Path
 
 from pinghue import __version__
+from pinghue.display import sanitize_display
 from pinghue.doctor import run_check
 from pinghue.hostfile import TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
@@ -31,6 +33,7 @@ class ParsedArgs(argparse.Namespace):
     no_tui: bool
     output: Path | None
     overwrite: bool
+    output_mode: str
     no_samples: bool
     concurrency: int
     jitter_threshold: float
@@ -75,6 +78,15 @@ def _parser() -> argparse.ArgumentParser:
         "--overwrite",
         action="store_true",
         help="allow --output to replace an existing regular file",
+    )
+    parser.add_argument(
+        "--output-mode",
+        choices=("private", "umask"),
+        default="private",
+        help=(
+            "permissions for the --output file: 'private' (0600, owner only; default) "
+            "or 'umask' (honor the process umask)"
+        ),
     )
     parser.add_argument(
         "--no-samples",
@@ -164,18 +176,34 @@ def _validate_text_length(
         parser.error(f"{name} must not exceed {maximum} characters")
 
 
-def _address_family_from_literal(targets: list[str]) -> str:
+def _contains_control_characters(value: str) -> bool:
+    return any(unicodedata.category(char)[0] == "C" for char in value)
+
+
+def _numeric_address_family(
+    parser: argparse.ArgumentParser,
+    targets: list[str],
+    *,
+    force_ipv4: bool,
+    force_ipv6: bool,
+) -> str:
     families: set[int] = set()
     for target in targets:
         try:
             families.add(ipaddress.ip_address(target).version)
-        except ValueError as exc:
-            raise argparse.ArgumentTypeError(f"--numeric requires IP literals: {target}") from exc
+        except ValueError:
+            parser.error(f"--numeric requires IP literals: {sanitize_display(target)}")
 
+    if force_ipv4:
+        if 6 in families:
+            parser.error("--ipv4/-4 conflicts with an IPv6 literal target under --numeric")
+        return AddressFamily.IPV4.value
+    if force_ipv6:
+        if 4 in families:
+            parser.error("--ipv6/-6 conflicts with an IPv4 literal target under --numeric")
+        return AddressFamily.IPV6.value
     if families == {6}:
         return AddressFamily.IPV6.value
-    if families == {4}:
-        return AddressFamily.IPV4.value
     if families == {4, 6}:
         return AddressFamily.AUTO.value
     return AddressFamily.IPV4.value
@@ -221,11 +249,13 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     try:
         file_targets = parse_host_file(args.file) if args.file else []
     except (OSError, ValueError) as exc:
-        parser.error(str(exc))
+        parser.error(sanitize_display(str(exc)))
 
-    args.targets = dedupe_targets([*args.targets, *file_targets])
+    args.targets = dedupe_targets([target.strip() for target in (*args.targets, *file_targets)])
     for target in args.targets:
         _validate_text_length(parser, "target", target, maximum=TARGET_MAXIMUM)
+        if _contains_control_characters(target):
+            parser.error(f"target contains control characters: {sanitize_display(target)}")
 
     if args.resolve_name is not None:
         _validate_text_length(
@@ -242,7 +272,9 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     )
 
     if args.numeric:
-        args.address_family = _address_family_from_literal(args.targets)
+        args.address_family = _numeric_address_family(
+            parser, args.targets, force_ipv4=args.ipv4, force_ipv6=args.ipv6
+        )
     elif args.ipv6:
         args.address_family = AddressFamily.IPV6.value
     elif args.ipv4:
@@ -271,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return asyncio.run(run(args, mode=mode))
     except OSError as exc:
-        print(f"pinghue: error: {exc}", file=sys.stderr)
+        print(f"pinghue: error: {sanitize_display(str(exc))}", file=sys.stderr)
         return 1
 
 

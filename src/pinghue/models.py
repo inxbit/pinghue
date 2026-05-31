@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
@@ -85,7 +84,8 @@ class _RunningSampleStats:
         self.sent = 0
         self.received = 0
         self.latency_mean = 0.0
-        self.latency_m2 = 0.0
+        self.latency_jitter = 0.0
+        self.latency_previous: float | None = None
         self.latency_min: float | None = None
         self.latency_max: float | None = None
 
@@ -98,7 +98,12 @@ class _RunningSampleStats:
         self.received += 1
         delta = latency - self.latency_mean
         self.latency_mean += delta / self.received
-        self.latency_m2 += delta * (latency - self.latency_mean)
+        # RFC 3550 interarrival jitter: smoothed mean absolute difference between
+        # consecutive received latencies, J += (|D| - J) / 16.
+        if self.latency_previous is not None:
+            difference = abs(latency - self.latency_previous)
+            self.latency_jitter += (difference - self.latency_jitter) / 16.0
+        self.latency_previous = latency
         self.latency_min = (
             latency if self.latency_min is None else min(self.latency_min, latency)
         )
@@ -133,10 +138,7 @@ class _RunningSampleStats:
                 jitter_ms=None,
             )
 
-        jitter_ms = None
-        if received >= 2:
-            variance = self.latency_m2 / (received - 1)
-            jitter_ms = round(math.sqrt(max(0.0, variance)), 2)
+        jitter_ms = round(self.latency_jitter, 2) if received >= 2 else None
 
         return SummaryStats(
             sent=sent,
@@ -276,6 +278,12 @@ def classify_samples(
         return TargetStatus.DOWN
 
     summary = summarize_samples(samples)
+    # A window with no successful samples is down, even when the run is shorter
+    # than fail_threshold (so the consecutive-failure check above cannot fire).
+    # INTERMITTENT requires at least one successful response.
+    if summary.received == 0:
+        return TargetStatus.DOWN
+
     if summary.loss_pct > 0:
         return TargetStatus.INTERMITTENT
 

@@ -35,7 +35,32 @@ def test_summarize_samples_calculates_loss_and_jitter() -> None:
     assert summary.min_ms == 10.0
     assert summary.avg_ms == 15.0
     assert summary.max_ms == 20.0
-    assert summary.jitter_ms == 7.07
+    # RFC 3550 inter-packet jitter: J += (|D| - J) / 16; for [10, 20] -> 0.62.
+    assert summary.jitter_ms == 0.62
+
+
+def test_summarize_samples_uses_rfc3550_interpacket_jitter() -> None:
+    summary = summarize_samples(
+        [
+            sample(SampleStatus.OK, 10.0),
+            sample(SampleStatus.OK, 20.0),
+            sample(SampleStatus.OK, 50.0),
+        ]
+    )
+
+    assert summary.jitter_ms == 2.46
+
+
+def test_classify_samples_marks_down_when_all_failed_below_threshold() -> None:
+    # H1: a host that never responded is DOWN even when the run is shorter than
+    # fail_threshold, so it cannot be misreported as INTERMITTENT (and exit 0).
+    status = classify_samples(
+        [sample(SampleStatus.TIMEOUT), sample(SampleStatus.TIMEOUT)],
+        fail_threshold=3,
+        jitter_threshold_ms=50.0,
+    )
+
+    assert status == TargetStatus.DOWN
 
 
 def test_classify_samples_marks_down_after_failure_threshold() -> None:

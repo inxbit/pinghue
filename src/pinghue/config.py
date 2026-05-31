@@ -19,6 +19,7 @@ class RunConfig(Protocol):
     no_tui: bool
     output: Path | None
     overwrite: bool
+    output_mode: str
     no_samples: bool
     concurrency: int
     jitter_threshold: float

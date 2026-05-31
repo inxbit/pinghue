@@ -79,6 +79,48 @@ async def test_probe_target_loop_stops_after_count_limit() -> None:
     assert calls == 2
 
 
+async def test_probe_target_loop_subtracts_probe_duration_from_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # L2: the per-target loop must compensate the inter-probe wait for the time
+    # the probe itself took, rather than always waiting the full interval.
+    recorded: list[tuple[float, float]] = []
+
+    def spy_iteration_sleep(
+        *, interval: float, iteration_elapsed: float, _duration_remaining: float | None = None
+    ) -> float:
+        recorded.append((interval, iteration_elapsed))
+        return 0.0
+
+    monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
+
+    args = SimpleNamespace(count=2, interval=5.0)
+    stop_event = asyncio.Event()
+    immediate_event = asyncio.Event()
+
+    async def fake_probe_once() -> None:
+        await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(
+        probe_target_loop(
+            TargetRun("1.1.1.1", resolved_address="1.1.1.1"),
+            args=args,
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=stop_event,
+            immediate_event=immediate_event,
+            initial_delay=0,
+            probe_once_fn=fake_probe_once,
+        ),
+        timeout=1.0,
+    )
+
+    assert len(recorded) == 1
+    interval, elapsed = recorded[0]
+    assert interval == 5.0
+    assert 0.03 <= elapsed < 1.0
+
+
 async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -297,6 +339,10 @@ async def test_run_no_tui_uses_dedicated_icmp_executor(
     assert executors[0].max_workers == 5
     assert seen_executors == [executors[0]]
     assert executors[0].shutdown_called is True
+    # M1: shutting the ICMP pool down must not block the event loop waiting for
+    # in-flight pings; queued-but-unstarted probes are dropped.
+    assert executors[0].wait is False
+    assert executors[0].cancel_futures is True
 
 
 async def test_resolve_runs_resolves_targets_concurrently_and_preserves_order(

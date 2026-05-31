@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "pinghue_version": "2.0.1",
+  "pinghue_version": "2.1.0",
   "run": {
     "started_at": "2026-05-14T18:32:11.420Z",
     "ended_at": "2026-05-14T18:35:11.890Z",

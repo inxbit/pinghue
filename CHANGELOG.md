@@ -6,6 +6,44 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 2.1.0 - 2026-05-31
+
+### Security
+
+- Sanitized the `--numeric` non-IP-literal error, host-file parse errors, and the top-level `OSError` message so operator- and host-file-supplied strings can no longer inject raw terminal control sequences via stderr.
+- Rejected control characters in command-line targets and trimmed surrounding whitespace, matching host-file target handling.
+- Stopped the host-file parser from blocking indefinitely when `--file` points at a FIFO; non-regular files are now rejected promptly.
+- Stopped `--output` from following a symlink at the output path to a character device or FIFO, and closed the stat/write race with an `O_NOFOLLOW` open plus `fstat` re-check.
+
+### Changed
+
+- `jitter_ms` is now RFC 3550 interarrival jitter (smoothed mean absolute difference between consecutive latencies) instead of the latency standard deviation. Reported values differ from earlier releases. `--jitter-threshold` is interpreted against this metric.
+- ICMP probing reports `unreachable` distinctly from `timeout` by reading ICMP destination-unreachable/time-exceeded replies through low-level sockets instead of `icmplib.ping`, which swallowed them.
+- A target that never responds is classified `down` even when the run is shorter than `--fail-threshold`, so unreachable hosts can no longer exit `0` under `--fail-on-any-down`/`--fail-on-all-down`.
+- `--numeric` now errors when combined with a conflicting `-4`/`-6` flag instead of silently ignoring the forced family.
+- Added `--output-mode` to control `--output` file permissions: `private` (`0600`, owner-only; default) or `umask` (honor the process umask). Report files default to owner-only `0600`.
+- TCP `refused` history cells render red to match the `down` state badge.
+- `--count` and `--duration` are documented as intentionally unbounded.
+
+### Fixed
+
+- ICMP thread-pool shutdown no longer blocks the event loop on in-flight probes when quitting the TUI or interrupting `--no-tui`.
+- The TUI "probe now" burst wakes the existing per-target loop instead of starting a concurrent probe that double-counted samples.
+- The per-target TUI probe loop subtracts probe duration from the interval so cadence no longer drifts when `--timeout` is large.
+- `--check` now verifies IPv6 ICMP capability (socket plus `::1` loopback) separately from IPv4.
+- `--output` writes succeed on filesystems without hardlink support (e.g. exFAT, some FUSE mounts) while still refusing to clobber an existing file.
+
+### Release and packaging
+
+- The publish workflow fails when the pushed tag does not match the `pyproject.toml` version.
+- The build toolchain is hash-pinned via `requirements-build.txt` and installed with `pip --require-hashes`; CI builds with the same toolchain, `--no-isolation`, and `SOURCE_DATE_EPOCH`.
+- The publish package-check job now runs separately from the artifact-producing build job, so the build/upload path uses only the hash-pinned build toolchain.
+- The checked-in Homebrew formula now targets the 2.1.0 sdist and refreshed runtime resources.
+- The hosted repository hardening drift check now validates active branch/tag ruleset internals against the checked-in policy files, not just ruleset names.
+- The dependency-audit workflow pins its bootstrap `setuptools`/`wheel` instead of installing them unpinned.
+- GitHub releases are created with the built-in `gh` CLI instead of a third-party action.
+- Added a fully-pinned `requirements.txt` lockfile so dependency (SCA) scanners can resolve the full package tree; it does not change the version ranges in `pyproject.toml`.
+
 ## 2.0.1 - 2026-05-27
 
 ### Security and stability

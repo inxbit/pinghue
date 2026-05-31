@@ -16,6 +16,8 @@ OK = "[ok]"
 FAIL = "[fail]"
 WARN = "[warn]"
 
+_IPPROTO_ICMPV6 = getattr(socket, "IPPROTO_ICMPV6", 58)
+
 
 class IcmpSocketCheck(NamedTuple):
     ok: bool
@@ -58,18 +60,23 @@ def _uid_label() -> str:
     return f"{euid} ({kind})"
 
 
-def _check_dgram_icmp_socket() -> IcmpSocketCheck:
+def _check_dgram_icmp_socket(
+    *, family: int = socket.AF_INET, proto: int | None = None
+) -> IcmpSocketCheck:
+    proto = proto if proto is not None else socket.IPPROTO_ICMP
+    family_label = "AF_INET6" if family == socket.AF_INET6 else "AF_INET"
+    proto_label = "IPPROTO_ICMPV6" if family == socket.AF_INET6 else "IPPROTO_ICMP"
+    descriptor = f"socket({family_label}, SOCK_DGRAM, {proto_label})"
+
     try:
-        probe_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP)
+        probe_socket = socket.socket(family, socket.SOCK_DGRAM, proto)
     except PermissionError as exc:
-        detail = f"socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) → {type(exc).__name__}"
-        return IcmpSocketCheck(False, detail)
+        return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}")
     except OSError as exc:
-        detail = f"socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) → {type(exc).__name__}: {exc}"
-        return IcmpSocketCheck(False, detail)
+        return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}: {exc}")
 
     probe_socket.close()
-    return IcmpSocketCheck(True, "socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) succeeded")
+    return IcmpSocketCheck(True, f"{descriptor} succeeded")
 
 
 def _read_ping_group_range() -> tuple[int, int, str] | None:
@@ -112,11 +119,11 @@ def _dns_probe(resolve_name: str) -> tuple[str | None, float | None, str | None]
     return f"{address} ({protocol})", elapsed_ms, None
 
 
-def _loopback_icmp_probe() -> tuple[float | None, str | None]:
+def _loopback_icmp_probe(address: str = "127.0.0.1") -> tuple[float | None, str | None]:
     try:
         from icmplib import ping  # type: ignore[import-untyped]
 
-        result = ping("127.0.0.1", count=1, timeout=1, privileged=False)
+        result = ping(address, count=1, timeout=1, privileged=False)
     except Exception as exc:  # noqa: BLE001 - doctor reports exact environment failures
         return None, f"{type(exc).__name__}: {exc}"
 
@@ -241,6 +248,25 @@ def run_check(
                     suffix = "  (empty range)" if empty else ""
                     lines.append(f'          Current value: "{raw}"{suffix}')
             _write_linux_fix(lines, egid=egid)
+
+    icmp6 = _check_dgram_icmp_socket(family=socket.AF_INET6, proto=_IPPROTO_ICMPV6)
+    if icmp6.ok:
+        loopback6_ms, loopback6_error = _loopback_icmp_probe("::1")
+        if loopback6_error:
+            ipv4_suffix = "; IPv4 ICMP still works" if icmp_ready else ""
+            lines.append(
+                f"  {_status(WARN, use_color=use_color)}  "
+                f"IPv6 ICMP probe to ::1 failed ({loopback6_error}){ipv4_suffix}"
+            )
+        else:
+            lines.append(
+                f"  {_status(OK, use_color=use_color)}    "
+                f"DGRAM ICMPv6 probe to ::1 succeeded ({loopback6_ms:.2f} ms)"
+            )
+    else:
+        lines.append(
+            f"  {_status(WARN, use_color=use_color)}  IPv6 ICMP not verified ({icmp6.detail})"
+        )
 
     lines.extend(
         [
