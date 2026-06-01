@@ -47,8 +47,14 @@
     </g>
   </g>
 
+  <!-- panel shadow: the filter is applied to a standalone rect (hidden behind the
+       panel) so the panel text stays vector-crisp — Safari rasterizes filtered
+       groups at 1x, which softened the table text on Retina displays -->
+  <g transform="translate(64 256)">
+    <rect width="1072" height="178" rx="12" fill="#0b0e12" filter="url(#sh)"/>
+  </g>
   <!-- terminal panel -->
-  <g transform="translate(64 256)" filter="url(#sh)">
+  <g transform="translate(64 256)">
     <rect width="1072" height="178" rx="12" fill="url(#panel)" stroke="#2a313a"/>
     <rect width="1072" height="34" rx="12" fill="#1b2630"/>
     <rect y="22" width="1072" height="12" fill="#1b2630"/>
