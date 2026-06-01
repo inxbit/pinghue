@@ -24,7 +24,7 @@
 Current version: `2.1.0`. The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.svg" alt="animated pinghue terminal demo showing healthy, intermittent, and down hosts" width="920">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.gif" alt="real pinghue terminal recording: healthy hosts with green history bars, a TCP-refused host with amber markers, and unreachable hosts down in red" width="920">
 </p>
 
 ## Why pinghue
@@ -108,7 +108,7 @@ internal-db.corp
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-screenshot.svg" alt="pinghue dense maintenance-window table with latency columns, history bars, legend, and keybindings" width="920">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-screenshot.png" alt="real pinghue screenshot: a dense maintenance-window table monitoring sixteen hosts with addresses, latency columns, loss, per-host history bars, a legend, and footer keybindings" width="920">
 </p>
 
 ## What This Is
