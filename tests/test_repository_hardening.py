@@ -196,16 +196,14 @@ def test_release_version_surfaces_match_package_version() -> None:
     readme = read("README.md")
     example = json.loads(read("examples/pinghue-output-example.json"))
     hero = read("docs/assets/pinghue-hero.svg")
-    demo = read("docs/assets/pinghue-demo.svg")
-    screenshot = read("docs/assets/pinghue-screenshot.svg")
     formula = read("packaging/homebrew/pinghue.rb")
 
+    # The demo (GIF) and screenshot (PNG) are real TUI captures, so the version
+    # they show is rendered from the package itself and needs no text surface here.
     assert 'version = "2.1.0"' in pyproject
     assert "Current version: `2.1.0`." in readme
     assert example["pinghue_version"] == "2.1.0"
     assert "v2.1.0" in hero
-    assert "v2.1.0" in demo
-    assert "v2.1.0" in screenshot
     assert "pinghue-2.1.0.tar.gz" in formula
     assert "pinghue-2.0.1.tar.gz" not in formula
 

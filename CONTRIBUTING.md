@@ -11,6 +11,19 @@ ruff check .
 mypy src
 ```
 
+## README Artwork
+
+The animated demo and dense screenshot in the README are real captures of the
+TUI. Regenerate them with [`vhs`](https://github.com/charmbracelet/vhs) and
+`ffmpeg` installed and `pinghue` on `PATH`:
+
+```sh
+brew install vhs ffmpeg
+scripts/gen-readme-assets.sh
+```
+
+The hero image (`docs/assets/pinghue-hero.svg`) is hand-authored.
+
 ## Commit and PR Policy
 
 - Work on branches named with conventional prefixes such as `feat/`, `fix/`, `docs/`, `ci/`, or `release/`.
