@@ -8,10 +8,10 @@
 # The hero image (docs/assets/pinghue-hero.svg) is hand-authored and is not
 # regenerated here.
 #
-# Requirements: vhs and ffmpeg (brew install vhs ffmpeg) and pinghue on PATH
-# (or an editable install at .venv/bin/pinghue). Needs network access; the
-# staged targets are real (healthy public hosts, a refused localhost port, and
-# unroutable TEST-NET-1 addresses for the down rows).
+# Requirements: vhs and ffmpeg (brew install vhs ffmpeg) plus either an editable
+# install at .venv/bin/pinghue or a matching pinghue on PATH. Needs network
+# access; the staged targets are real (healthy public hosts, a refused localhost
+# port, and unroutable TEST-NET-1 addresses for the down rows).
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,9 +20,20 @@ assets="${root}/docs/assets"
 command -v vhs >/dev/null 2>&1 || { printf 'vhs not found (brew install vhs)\n' >&2; exit 1; }
 command -v ffmpeg >/dev/null 2>&1 || { printf 'ffmpeg not found (brew install ffmpeg)\n' >&2; exit 1; }
 
-pinghue_bin="$(command -v pinghue 2>/dev/null || true)"
-[ -n "${pinghue_bin}" ] || pinghue_bin="${root}/.venv/bin/pinghue"
+venv_pinghue="${root}/.venv/bin/pinghue"
+if [ -x "${venv_pinghue}" ]; then
+  pinghue_bin="${venv_pinghue}"
+else
+  pinghue_bin="$(command -v pinghue 2>/dev/null || true)"
+fi
 [ -x "${pinghue_bin}" ] || { printf 'pinghue not found (pip install -e ".[dev]")\n' >&2; exit 1; }
+package_version="$(awk -F '"' '/^version = / { print $2; exit }' "${root}/pyproject.toml")"
+expected_version="pinghue ${package_version}"
+actual_version="$("${pinghue_bin}" --version)"
+[ "${actual_version}" = "${expected_version}" ] || {
+  printf 'pinghue version mismatch: expected "%s", got "%s"\n' "${expected_version}" "${actual_version}" >&2
+  exit 1
+}
 bindir="$(cd -- "$(dirname -- "${pinghue_bin}")" && pwd)"
 
 tmp="$(mktemp -d)"
