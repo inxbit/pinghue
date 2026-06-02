@@ -12,6 +12,7 @@ def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
     assert "prune .github" in manifest
     assert "prune packaging" in manifest
     assert "include scripts/pinghue" in manifest
+    assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
     assert "recursive-include packaging" not in manifest
     assert "recursive-include scripts" not in manifest
     assert "recursive-include .github/workflows" not in manifest
@@ -142,6 +143,20 @@ def test_readme_declares_stable_support_and_deprecation_policy() -> None:
     assert "at least one minor release" in readme
     assert "## Supported Platforms" in readme
     assert "macOS and Linux" in readme
+
+
+def test_readme_artwork_uses_packaged_real_assets() -> None:
+    readme = read("README.md")
+    manifest = read("MANIFEST.in")
+
+    assert "docs/assets/pinghue-demo.gif" in readme
+    assert "docs/assets/pinghue-screenshot.png" in readme
+    assert Path("docs/assets/pinghue-demo.gif").is_file()
+    assert Path("docs/assets/pinghue-screenshot.png").is_file()
+    assert "docs/assets/pinghue-demo.svg" not in readme
+    assert "docs/assets/pinghue-screenshot.svg" not in readme
+    assert "scripts/gen-readme-assets.py" not in readme
+    assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
 
 
 def test_release_checklist_revalidates_release_security_gates() -> None:

@@ -11,5 +11,5 @@ prune packaging
 include scripts/pinghue
 recursive-include schemas *.json
 recursive-include examples *.json
-recursive-include docs *.md *.svg
+recursive-include docs *.md *.svg *.gif *.png
 recursive-include tests *.py
