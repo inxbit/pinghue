@@ -18,7 +18,7 @@ charset-normalizer==3.4.7
     # via requests
 coverage==7.14.1
     # via pytest-cov
-cyclonedx-python-lib==11.7.0
+cyclonedx-python-lib==11.8.0
     # via pip-audit
 defusedxml==0.7.1
     # via py-serializable
