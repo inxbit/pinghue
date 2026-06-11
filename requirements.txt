@@ -121,7 +121,7 @@ pytest-asyncio==1.4.0
     # via pinghue (pyproject.toml)
 pytest-cov==7.1.0
     # via pinghue (pyproject.toml)
-readme-renderer==44.0
+readme-renderer==45.0
     # via twine
 referencing==0.37.0
     # via
