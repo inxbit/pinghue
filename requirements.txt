@@ -71,7 +71,7 @@ mypy==2.1.0
     # via pinghue (pyproject.toml)
 mypy-extensions==1.1.0
     # via mypy
-nh3==0.3.5
+nh3==0.3.6
     # via readme-renderer
 packageurl-python==0.17.6
     # via cyclonedx-python-lib
