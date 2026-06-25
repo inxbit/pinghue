@@ -146,7 +146,7 @@ rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-ruff==0.15.18
+ruff==0.15.20
     # via pinghue (pyproject.toml)
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
