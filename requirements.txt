@@ -24,7 +24,7 @@ defusedxml==0.7.1
     # via py-serializable
 docutils==0.23
     # via readme-renderer
-filelock==3.29.3
+filelock==3.29.4
     # via cachecontrol
 icmplib==3.0.4
     # via pinghue (pyproject.toml)
