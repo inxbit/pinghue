@@ -38,12 +38,22 @@ def test_dependency_audit_workflow_runs_pip_audit_weekly() -> None:
 
 
 def test_dependency_audit_pins_bootstrap_tooling() -> None:
-    # L15: pip/setuptools/wheel must not be installed unpinned.
+    # L15: pip/setuptools/wheel must not be installed unpinned; the audit
+    # toolchain installs from the hash-pinned lock file.
     workflow = read(".github/workflows/dependency-audit.yml")
 
     assert "--upgrade pip setuptools wheel" not in workflow
-    assert 'setuptools==82.0.1' in workflow
-    assert 'wheel==0.47.0' in workflow
+    assert "--require-hashes -r requirements-audit.txt" in workflow
+
+
+def test_requirements_audit_is_hash_pinned() -> None:
+    # The audit toolchain is pinned with sha256 hashes for --require-hashes.
+    requirements = read("requirements-audit.txt")
+
+    assert "pip-audit==" in requirements
+    assert "setuptools==82.0.1" in requirements
+    assert "wheel==0.47.0" in requirements
+    assert "--hash=sha256:" in requirements
 
 
 def test_requirements_build_is_hash_pinned() -> None:
@@ -215,17 +225,17 @@ def test_release_version_surfaces_match_package_version() -> None:
 
     # The demo (GIF) and screenshot (PNG) are real TUI captures, so the version
     # they show is rendered from the package itself and needs no text surface here.
-    assert 'version = "2.1.0"' in pyproject
-    assert "Current version: `2.1.0`." in readme
-    assert example["pinghue_version"] == "2.1.0"
-    assert "v2.1.0" in hero
-    assert "pinghue-2.1.0.tar.gz" in formula
-    assert "pinghue-2.0.1.tar.gz" not in formula
+    assert 'version = "3.0.0"' in pyproject
+    assert "Current version: `3.0.0`." in readme
+    assert example["pinghue_version"] == "3.0.0"
+    assert "v3.0.0" in hero
+    assert "pinghue-3.0.0.tar.gz" in formula
+    assert "pinghue-2.1.0.tar.gz" not in formula
 
 
 def test_security_policy_matches_stable_support_line() -> None:
     security = read("SECURITY.md")
 
-    assert "`2.x` | Yes" in security
+    assert "`3.x` | Yes" in security
+    assert "`2.x` | Yes" not in security
     assert "`1.x` | Yes" not in security
-    assert "`0.3.x` | Yes" not in security

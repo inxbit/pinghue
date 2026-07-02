@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import tempfile
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -164,10 +165,15 @@ def write_output_json(
     output_mode: str = "private",
     **kwargs: Any,
 ) -> None:
-    """Write a JSON export document to disk."""
-    output_path = Path(path)
+    """Write a JSON export document to disk (or stdout when path is "-")."""
     document = build_output_document(**kwargs)
     output_text = json.dumps(document, indent=2, sort_keys=False) + "\n"
+
+    if str(path) == "-":
+        sys.stdout.write(output_text)
+        return
+
+    output_path = Path(path)
 
     device_fd = _existing_special_device_fd(output_path)
     if device_fd is not None:

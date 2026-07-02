@@ -58,7 +58,11 @@ def _read_regular_file(path: Path) -> bytes:
 def parse_host_file(path: str | Path) -> list[str]:
     """Return targets from a plain text host file."""
     host_path = Path(path)
-    content = _read_regular_file(host_path).decode("utf-8")
+    try:
+        # utf-8-sig strips a leading BOM, common in Windows-authored files.
+        content = _read_regular_file(host_path).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"host file is not valid UTF-8: {host_path}") from exc
 
     targets: list[str] = []
 

@@ -73,7 +73,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print one line per probe instead of the TUI",
     )
-    parser.add_argument("--output", type=Path, help="write a JSON run summary to PATH on exit")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write a JSON run summary to PATH on exit ('-' for stdout)",
+    )
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -130,8 +134,10 @@ def _parser() -> argparse.ArgumentParser:
         help="skip DNS and require IP literals",
     )
     family = parser.add_mutually_exclusive_group()
-    family.add_argument("-4", "--ipv4", action="store_true", help="force IPv4")
-    family.add_argument("-6", "--ipv6", action="store_true", help="force IPv6")
+    # No -4/-6 short aliases: options that look like negative numbers make
+    # argparse treat values like "-c -3" as flags, breaking validation errors.
+    family.add_argument("--ipv4", action="store_true", help="force IPv4")
+    family.add_argument("--ipv6", action="store_true", help="force IPv6")
     parser.add_argument("--check", action="store_true", help="run environment diagnostics and exit")
     parser.add_argument(
         "--resolve-name",
@@ -196,11 +202,11 @@ def _numeric_address_family(
 
     if force_ipv4:
         if 6 in families:
-            parser.error("--ipv4/-4 conflicts with an IPv6 literal target under --numeric")
+            parser.error("--ipv4 conflicts with an IPv6 literal target under --numeric")
         return AddressFamily.IPV4.value
     if force_ipv6:
         if 4 in families:
-            parser.error("--ipv6/-6 conflicts with an IPv4 literal target under --numeric")
+            parser.error("--ipv6 conflicts with an IPv4 literal target under --numeric")
         return AddressFamily.IPV6.value
     if families == {6}:
         return AddressFamily.IPV6.value
@@ -254,6 +260,10 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     args.targets = dedupe_targets([target.strip() for target in (*args.targets, *file_targets)])
     for target in args.targets:
         _validate_text_length(parser, "target", target, maximum=TARGET_MAXIMUM)
+        if target.startswith("-"):
+            # Hostnames and IPs never start with "-"; catches stale flag usage
+            # like "-4" (argparse passes numeric-looking tokens as positionals).
+            parser.error(f"invalid target: {sanitize_display(target)}")
         if _contains_control_characters(target):
             parser.error(f"target contains control characters: {sanitize_display(target)}")
 

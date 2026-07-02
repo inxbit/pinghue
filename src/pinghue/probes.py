@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
 import ipaddress
 import socket
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Executor
@@ -15,6 +17,10 @@ from functools import partial
 from typing import Any
 
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
+
+MAX_FAILOVER_ADDRESSES = 8
+MAX_DNS_DAEMON_THREADS = 16
+_dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
 
 UNREACHABLE_ERRNOS = {
     value
@@ -109,6 +115,43 @@ def family_from_ip(address: str) -> AddressFamily:
     return _family_from_ip(address)
 
 
+async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
+    """Run getaddrinfo on a daemon thread.
+
+    loop.getaddrinfo uses asyncio's default executor, whose non-daemon worker
+    threads are joined without a bound at interpreter exit (and for up to
+    THREAD_JOIN_TIMEOUT=300s by Runner.close), so a resolver call stuck past
+    the libc timeouts would keep the finished process from exiting. A daemon
+    thread is abandoned instead.
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[list[Any]] = loop.create_future()
+    if not _dns_thread_slots.acquire(blocking=False):
+        raise OSError(
+            f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"
+        )
+
+    def deliver(apply: Callable[[], None]) -> None:
+        if not future.done():
+            apply()
+
+    def worker() -> None:
+        try:
+            result = socket.getaddrinfo(target, None, family=family, type=socket.SOCK_STREAM)
+        except BaseException as exc:  # noqa: BLE001 - re-raised via the future
+            outcome = partial(future.set_exception, exc)
+        else:
+            outcome = partial(future.set_result, result)
+        finally:
+            _dns_thread_slots.release()
+        # RuntimeError: loop already closed; the caller has moved on.
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(deliver, outcome)
+
+    threading.Thread(target=worker, name="pinghue-dns", daemon=True).start()
+    return await future
+
+
 async def resolve_target(
     target: str,
     address_family: AddressFamily,
@@ -132,14 +175,8 @@ async def resolve_target(
             return ResolvedTarget(target, None, None, f"target is not {address_family.value}")
         return ResolvedTarget(target, target, literal_family, addresses=(target,))
 
-    loop = asyncio.get_running_loop()
     try:
-        infos = await loop.getaddrinfo(
-            target,
-            None,
-            family=_socket_family(address_family),
-            type=socket.SOCK_STREAM,
-        )
+        infos = await _getaddrinfo_daemon(target, _socket_family(address_family))
     except socket.gaierror as exc:
         return ResolvedTarget(target, None, None, f"getaddrinfo: {exc.strerror or exc}")
     except OSError as exc:
@@ -159,7 +196,11 @@ async def resolve_target(
             addresses.append(address)
 
     family = AddressFamily.IPV4 if infos[0][0] == socket.AF_INET else AddressFamily.IPV6
-    return ResolvedTarget(target, addresses[0], family, addresses=tuple(addresses))
+    # Cap the failover set so a name resolving to many dead addresses cannot
+    # stretch one probe cycle to len(addresses) * timeout_s.
+    return ResolvedTarget(
+        target, addresses[0], family, addresses=tuple(addresses[:MAX_FAILOVER_ADDRESSES])
+    )
 
 
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:

@@ -89,7 +89,7 @@ async def test_run_fail_on_down_returns_nonzero_when_all_targets_down(
 
     exit_code = await runner.run(build_args(fail_on_all_down=True), mode=ProbeMode.ICMP)
 
-    assert exit_code == 2
+    assert exit_code == 3
 
 
 async def test_run_fail_on_down_returns_zero_when_any_target_is_usable(
@@ -133,7 +133,7 @@ async def test_run_fail_on_any_down_returns_nonzero_when_any_target_is_down(
 
     exit_code = await runner.run(build_args(fail_on_any_down=True), mode=ProbeMode.ICMP)
 
-    assert exit_code == 2
+    assert exit_code == 3
 
 
 async def test_run_legacy_fail_on_down_matches_all_down_mode(
@@ -176,7 +176,7 @@ def test_short_all_failed_run_is_down_and_trips_fail_on_any_down() -> None:
     assert target.status == TargetStatus.DOWN
     assert (
         runner.exit_code_for_targets([target], fail_on_any_down=True, fail_on_all_down=False)
-        == 2
+        == 3
     )
 
 

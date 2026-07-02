@@ -421,6 +421,10 @@ async def run_no_tui(
     return targets, exit_reason, started_at, ended_at
 
 
+# Exit 3 keeps "target down" distinct from argparse usage errors (exit 2).
+EXIT_TARGETS_DOWN = 3
+
+
 def exit_code_for_targets(
     targets: list[TargetRun],
     *,
@@ -435,9 +439,9 @@ def exit_code_for_targets(
     down_targets = [target for target in targets if target.status not in usable_statuses]
 
     if fail_on_any_down:
-        return 2 if down_targets else 0
+        return EXIT_TARGETS_DOWN if down_targets else 0
 
-    return 2 if len(down_targets) == len(targets) else 0
+    return EXIT_TARGETS_DOWN if len(down_targets) == len(targets) else 0
 
 
 async def run(args: RunConfig, *, mode: ProbeMode) -> int:

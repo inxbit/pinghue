@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from pinghue.cli import CONCURRENCY_MAXIMUM, HOST_LABEL_MAXIMUM, TARGET_MAXIMUM, main, parse_args
@@ -185,26 +190,26 @@ def test_parse_args_numeric_error_sanitizes_control_bytes(
 
 
 def test_parse_args_numeric_ipv4_flag_conflicts_with_ipv6_literal() -> None:
-    # M3: -4 with an IPv6 literal under --numeric must be rejected, not silently overridden.
+    # M3: --ipv4 with an IPv6 literal under --numeric must be rejected, not silently overridden.
     with pytest.raises(SystemExit):
-        parse_args(["-n", "-4", "::1"])
+        parse_args(["-n", "--ipv4", "::1"])
 
 
 def test_parse_args_numeric_ipv6_flag_conflicts_with_ipv4_literal() -> None:
-    # M3: -6 with an IPv4 literal under --numeric must be rejected.
+    # M3: --ipv6 with an IPv4 literal under --numeric must be rejected.
     with pytest.raises(SystemExit):
-        parse_args(["-n", "-6", "1.1.1.1"])
+        parse_args(["-n", "--ipv6", "1.1.1.1"])
 
 
 def test_parse_args_numeric_respects_ipv4_flag() -> None:
-    args = parse_args(["-n", "-4", "1.1.1.1"])
+    args = parse_args(["-n", "--ipv4", "1.1.1.1"])
     assert args.address_family == "ipv4"
 
 
 def test_parse_args_numeric_ipv4_flag_rejects_mixed_ipv6_literal() -> None:
-    # M3: an explicit -4 must not be silently dropped for mixed literals.
+    # M3: an explicit --ipv4 must not be silently dropped for mixed literals.
     with pytest.raises(SystemExit):
-        parse_args(["-4", "-n", "1.1.1.1", "::1"])
+        parse_args(["--ipv4", "-n", "1.1.1.1", "::1"])
 
 
 def test_parse_args_strips_target_whitespace() -> None:
@@ -246,3 +251,50 @@ def test_main_sanitizes_control_chars_in_error_output(
     captured = capsys.readouterr()
     assert "\x1b" not in captured.err
     assert "\\x1b" in captured.err
+
+
+def test_python_dash_m_entrypoint_reports_version() -> None:
+    src_dir = Path(__file__).resolve().parent.parent / "src"
+    env = {**os.environ, "PYTHONPATH": str(src_dir)}
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pinghue", "--version"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.startswith("pinghue ")
+
+
+@pytest.mark.parametrize(
+    ("option", "message"),
+    [
+        ("-c", "count must be greater than 0"),
+        ("--duration", "duration must be greater than 0"),
+        ("--jitter-threshold", "jitter-threshold must be greater than or equal to 0"),
+    ],
+)
+def test_parse_args_negative_values_reach_dedicated_validators(
+    option: str,
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Without the -4/-6 numeric-looking flags, argparse passes "-3" through as
+    # a value, so the dedicated range validators fire with a clear message.
+    with pytest.raises(SystemExit):
+        parse_args([option, "-3", "1.1.1.1"])
+    assert message in capsys.readouterr().err
+
+
+def test_parse_args_rejects_dash_prefixed_target(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Stale "-4"/"-6" flag usage parses as a numeric-looking positional; it
+    # must be rejected as an invalid target, not probed or TUI-launched.
+    with pytest.raises(SystemExit):
+        parse_args(["-4", "1.1.1.1"])
+    assert "invalid target" in capsys.readouterr().err

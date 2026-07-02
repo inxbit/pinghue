@@ -21,7 +21,7 @@
 
 `pinghue` is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. It gives operators a dense terminal view for many hosts at once and can also write structured JSON for reports, cron jobs, and CI checks.
 
-Current version: `2.1.0`. The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
+Current version: `3.0.0`. The command-line interface and JSON output are stable public interfaces. JSON output uses `schema_version: 1`; breaking JSON changes require a new schema version.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-demo.gif" alt="real pinghue terminal recording: healthy hosts with green history bars, a TCP-refused host with amber markers, and unreachable hosts down in red" width="920">
@@ -129,9 +129,9 @@ internal-db.corp
 
 ## Supported Platforms
 
-The 2.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
+The 3.0 support contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
 
-The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 2.0 support scope unless explicitly added later.
+The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared 3.0 support scope unless explicitly added later.
 
 ## Stability Policy
 
@@ -182,23 +182,23 @@ pinghue [OPTIONS] [TARGET ...]
 | `TARGET ...` | none | Hostnames or IP addresses to probe, up to 253 characters each. Required unless `--check` is used. |
 | `-f, --file PATH` | none | Read targets from a non-symlink plain-text host file. Blank lines and full-line/inline `#` comments are ignored. |
 | `-p, --port PORT` | ICMP | Enable TCP connect checks against `PORT`. Valid range: `1-65535`. |
-| `-4, --ipv4` | off | Force IPv4 resolution/probing. |
-| `-6, --ipv6` | off | Force IPv6 resolution/probing. |
+| `--ipv4` | off | Force IPv4 resolution/probing. |
+| `--ipv6` | off | Force IPv6 resolution/probing. |
 | `-n, --numeric` | off | Skip DNS and require IP literals. |
 | `-i, --interval SEC` | `1.0` | Seconds between probes. Minimum: `0.1`. |
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
 | `-c, --count N` | continuous | Stop after `N` probes per target. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
-| `--output PATH` | none | Write a JSON run summary on exit. Existing regular files are not replaced unless `--overwrite` is set. |
+| `--output PATH` | none | Write a JSON run summary on exit (`-` for stdout). Existing regular files are not replaced unless `--overwrite` is set. |
 | `--overwrite` | off | Allow `--output` to replace an existing regular file. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
 | `--no-samples` | off | Omit per-probe samples from JSON output. |
 | `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP mode uses a dedicated thread pool sized to this limit. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
 | `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
-| `--fail-on-any-down` | off | Return a non-zero exit code when any target finishes down. |
-| `--fail-on-all-down` | off | Return a non-zero exit code only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
+| `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
+| `--fail-on-all-down` | off | Exit `3` only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
 | `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics, up to 253 characters. Defaults to the first target when provided. |
@@ -206,6 +206,15 @@ pinghue [OPTIONS] [TARGET ...]
 | `--host-label LABEL` | `local` | Operator-controlled host label written to JSON output, up to 128 characters. |
 | `-v, --version` | none | Print the installed version. |
 | `-h, --help` | none | Print help. |
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Run completed (and no `--fail-on-*` condition triggered). Interrupting a run with Ctrl-C still evaluates the fail conditions, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. |
+| `1` | Runtime error (for example the `--output` file could not be written), or `--check` found the environment not ICMP-ready. |
+| `2` | Usage error: unknown flag or invalid value. |
+| `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
 
 ## TUI Controls
 
@@ -290,13 +299,7 @@ echo "net.ipv4.ping_group_range=${gid} ${gid}" \
 
 The broader range `0 2147483647` also works, but enables unprivileged ICMP for every local group on the system.
 
-The capability alternative is available but must be re-applied after binary upgrades:
-
-```sh
-sudo setcap cap_net_raw+ep "$(command -v pinghue)"
-```
-
-Do not set capabilities on a shared Python interpreter.
+`setcap cap_net_raw` does not work for pip or Homebrew installs: the `pinghue` command is a Python launcher script, and Linux ignores file capabilities on interpreter scripts. Use the `ping_group_range` fix above, or TCP mode. Do not set capabilities on a shared Python interpreter.
 
 ## JSON Output
 

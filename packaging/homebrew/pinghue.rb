@@ -10,8 +10,8 @@ class Pinghue < Formula
 
   desc "Colored, concurrent ICMP/TCP ping monitor for the terminal"
   homepage "https://github.com/inxbit/pinghue"
-  url "https://files.pythonhosted.org/packages/75/14/76730fbd2168321ada9de2adc3b03f5cecb505c88eabca1dc00c0e85ebe8/pinghue-2.1.0.tar.gz"
-  sha256 "c1b08200f7c25fa6f366572ab2aca320d4dc2d851df26f7c6ce02ac957f56284"
+  url "https://files.pythonhosted.org/packages/source/p/pinghue/pinghue-3.0.0.tar.gz"
+  sha256 "8d78fbac32a1d38d2bc6a5a398c00800233fb1deca5a7ce94f11770f935da33f"
   license "MIT"
   head "https://github.com/inxbit/pinghue.git", branch: "main"
 
@@ -91,12 +91,12 @@ class Pinghue < Formula
               The broader range 0 2147483647 also works, but enables
               unprivileged ICMP for every local group.
 
-          (B) Grant the binary CAP_NET_RAW (must be re-applied after every
-              upgrade; Homebrew cannot do this for you):
-                sudo setcap cap_net_raw+ep "$(brew --prefix)/opt/pinghue/libexec/bin/pinghue"
-
-          (C) Skip ICMP entirely and use TCP mode:
+          (B) Skip ICMP entirely and use TCP mode:
                 pinghue -p 443 example.com
+
+        Note: setcap cap_net_raw does not work here — the pinghue command is
+        a Python launcher script, and Linux ignores file capabilities on
+        interpreter scripts.
 
         Run `pinghue --check` to diagnose your environment.
       EOS

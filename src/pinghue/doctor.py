@@ -6,8 +6,9 @@ import os
 import platform
 import socket
 import sys
+import threading
 import time
-from typing import NamedTuple, TextIO, cast
+from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
@@ -100,21 +101,46 @@ def _read_ping_group_range() -> tuple[int, int, str] | None:
 
 
 DEFAULT_DNS_PROBE_NAME = "example.com"
+DNS_PROBE_TIMEOUT_SECONDS = 5.0
 
 
-def _dns_probe(resolve_name: str) -> tuple[str | None, float | None, str | None]:
+def _dns_probe(
+    resolve_name: str,
+    *,
+    timeout_s: float = DNS_PROBE_TIMEOUT_SECONDS,
+) -> tuple[str | None, float | None, str | None]:
     start = time.perf_counter()
-    try:
-        infos = socket.getaddrinfo(resolve_name, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-    except OSError as exc:
-        return None, None, str(exc)
+
+    # getaddrinfo has no timeout parameter; run it on a daemon thread so a
+    # blackholed resolver cannot hang `pinghue --check` forever.
+    outcome: list[list[Any] | Exception] = []
+
+    def worker() -> None:
+        try:
+            outcome.append(
+                socket.getaddrinfo(resolve_name, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            )
+        except Exception as exc:  # noqa: BLE001 - doctor reports exact environment failures
+            outcome.append(exc)
+
+    thread = threading.Thread(target=worker, name="pinghue-doctor-dns", daemon=True)
+    thread.start()
+    thread.join(timeout_s)
+
+    if not outcome:
+        return None, None, f"getaddrinfo timed out after {timeout_s:g}s"
+
+    result = outcome[0]
+    if isinstance(result, Exception):
+        return None, None, str(result)
+    infos = result
 
     if not infos:
         return None, None, "getaddrinfo: no addresses returned"
 
     elapsed_ms = float(round((time.perf_counter() - start) * 1000))
     family, *_rest, sockaddr = infos[0]
-    address = cast(str, sockaddr[0])
+    address = sockaddr[0]
     protocol = "ipv6" if family == socket.AF_INET6 else "ipv4"
     return f"{address} ({protocol})", elapsed_ms, None
 
@@ -156,7 +182,7 @@ def _write_root_warning(lines: list[str], *, use_color: bool) -> None:
             ),
             "        Prefer one of:",
             '          sudo sysctl -w net.ipv4.ping_group_range="<gid> <gid>"',
-            '          sudo setcap cap_net_raw+ep "$(command -v pinghue)"',
+            "          pinghue -p 443 example.com   # TCP mode, no privileges",
             "",
         ]
     )
@@ -175,11 +201,12 @@ def _write_linux_fix(lines: list[str], *, egid: int) -> None:
             "                 | sudo tee /etc/sysctl.d/99-pinghue.conf",
             "               # Use 0 2147483647 only if every local group should have ICMP.",
             "",
-            "          B) Grant the binary CAP_NET_RAW (must redo after upgrades):",
-            '               sudo setcap cap_net_raw+ep "$(command -v pinghue)"',
-            "",
-            "          C) Skip ICMP — use TCP mode instead:",
+            "          B) Skip ICMP — use TCP mode instead:",
             "               pinghue -p 443 example.com",
+            "",
+            "          Note: setcap cap_net_raw does not help here — the pinghue",
+            "          command is a Python launcher script, and Linux ignores file",
+            "          capabilities on interpreter scripts.",
             "",
         ]
     )

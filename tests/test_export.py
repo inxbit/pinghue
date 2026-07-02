@@ -415,3 +415,19 @@ def test_write_output_json_preserves_existing_file_on_write_failure(
     assert output_path.read_text(encoding="utf-8") == "previous\n"
     # Randomized temp names match `out.json.<random>.tmp`; no leftover.
     assert list(tmp_path.glob(f"{output_path.name}.*.tmp")) == []
+
+
+def test_write_output_json_dash_writes_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    _write(Path("-"))
+
+    document = json.loads(capsys.readouterr().out)
+    assert document["schema_version"] == 1
+    # "-" means stdout, never a literal file named "-".
+    assert not (tmp_path / "-").exists()
+    assert list(tmp_path.iterdir()) == []

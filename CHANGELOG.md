@@ -6,6 +6,31 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 3.0.0 - 2026-07-02
+
+### Breaking
+
+- `--fail-on-any-down`/`--fail-on-all-down` now exit `3` instead of `2`, so a down target is distinguishable from an argparse usage error (which also exits `2`). Automation checking for exit `2` must be updated. Requires a major version bump.
+- Removed the `-4`/`-6` short aliases; use `--ipv4`/`--ipv6`. Options that look like negative numbers made argparse swallow negative values (`-c -3` reported "expected one argument" instead of the real validation message), so the aliases cannot be kept even as deprecated stubs. Targets starting with `-` are now rejected as invalid, so stale `-4`/`-6` usage fails fast instead of being probed as a hostname. Requires a major version bump.
+
+### Security
+
+- Capped DNS failover to the first 8 resolved addresses per target, so a hostname resolving to many dead addresses can no longer stretch one probe cycle to `addresses × timeout` while holding a concurrency slot.
+- Split the GitHub release step of the publish workflow into its own job, so no single job holds PyPI trusted-publishing (`id-token`) and repository `contents: write` together.
+- Hash-pinned the dependency-audit toolchain (`requirements-audit.txt`, installed with `--require-hashes`), matching the build pipeline.
+
+### Fixed
+
+- `pinghue --check` no longer hangs forever when the DNS resolver blackholes queries; the diagnostic lookup now times out after 5 seconds and reports a warning.
+- The process no longer stalls on exit (up to 5 minutes) when a DNS lookup is stuck past its 5-second budget; resolver calls run on abandonable daemon threads instead of asyncio's default executor.
+- Host files with a UTF-8 BOM (common for Windows-authored files) parse correctly instead of failing with a control-character error; invalid UTF-8 now reports a clear error instead of a raw codec message.
+- `python -m pinghue` works (added `__main__.py`).
+- Corrected Linux ICMP remediation guidance: `setcap cap_net_raw` on the `pinghue` launcher script is a no-op because Linux ignores file capabilities on interpreter scripts; doctor, README, and Homebrew caveats now recommend `ping_group_range` or TCP mode.
+
+### Changed
+
+- `--output -` writes the JSON run summary to stdout instead of creating a literal file named `-`.
+
 ## 2.1.0 - 2026-05-31
 
 ### Security

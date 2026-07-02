@@ -1,6 +1,7 @@
 import asyncio
 import errno
 import socket
+import threading
 from typing import Any
 
 import pytest
@@ -96,11 +97,7 @@ async def test_resolve_target_numeric_rejects_hostname() -> None:
 async def test_resolve_target_returns_dns_error_when_no_addresses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeLoop:
-        async def getaddrinfo(self, *_: object, **__: object) -> list[object]:
-            return []
-
-    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_, **__: [])
 
     resolved = await resolve_target("example.com", AddressFamily.AUTO)
 
@@ -111,15 +108,15 @@ async def test_resolve_target_returns_dns_error_when_no_addresses(
 async def test_resolve_target_preserves_all_getaddrinfo_addresses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeLoop:
-        async def getaddrinfo(self, *_: object, **__: object) -> list[object]:
-            return [
-                (socket.AF_INET6, 0, 0, "", ("2001:db8::1", 0)),
-                (socket.AF_INET, 0, 0, "", ("192.0.2.10", 0)),
-                (socket.AF_INET, 0, 0, "", ("192.0.2.10", 0)),
-            ]
-
-    monkeypatch.setattr(asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [
+            (socket.AF_INET6, 0, 0, "", ("2001:db8::1", 0)),
+            (socket.AF_INET, 0, 0, "", ("192.0.2.10", 0)),
+            (socket.AF_INET, 0, 0, "", ("192.0.2.10", 0)),
+        ],
+    )
 
     resolved = await resolve_target("service.example", AddressFamily.AUTO)
 
@@ -286,3 +283,70 @@ async def test_icmp_probe_reports_error_when_icmplib_unavailable(
 
     assert sample.status == SampleStatus.ERROR
     assert "no icmplib" in (sample.error or "")
+
+
+async def test_resolve_target_caps_failover_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [
+            (socket.AF_INET, 0, 0, "", (f"192.0.2.{index}", 0)) for index in range(20)
+        ],
+    )
+
+    resolved = await resolve_target("many.example", AddressFamily.AUTO)
+
+    assert resolved.address == "192.0.2.0"
+    assert len(resolved.addresses) == probes.MAX_FAILOVER_ADDRESSES
+    assert resolved.addresses == tuple(f"192.0.2.{index}" for index in range(8))
+
+
+async def test_resolve_target_stuck_resolver_is_abandoned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+
+    def blocking_getaddrinfo(*_: object, **__: object) -> list[object]:
+        release.wait(5.0)
+        return []
+
+    monkeypatch.setattr(socket, "getaddrinfo", blocking_getaddrinfo)
+
+    # The daemon-thread lookup must be abandonable: wait_for times out even
+    # though the resolver call is still blocked in its thread.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            resolve_target("stuck.example", AddressFamily.AUTO), timeout=0.05
+        )
+    release.set()
+
+
+async def test_resolve_target_bounds_abandoned_resolver_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+    monkeypatch.setattr(probes, "_dns_thread_slots", threading.BoundedSemaphore(2))
+
+    def blocking_getaddrinfo(*_: object, **__: object) -> list[object]:
+        release.wait(5.0)
+        return []
+
+    monkeypatch.setattr(socket, "getaddrinfo", blocking_getaddrinfo)
+
+    try:
+        for index in range(2):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    resolve_target(f"stuck{index}.example", AddressFamily.AUTO),
+                    timeout=0.05,
+                )
+
+        resolved = await resolve_target("stuck2.example", AddressFamily.AUTO)
+
+        assert resolved.address is None
+        assert resolved.error is not None
+        assert "resolver worker limit reached" in resolved.error
+    finally:
+        release.set()
