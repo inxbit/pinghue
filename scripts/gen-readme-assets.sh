@@ -50,7 +50,7 @@ Set Padding 22
 Set BorderRadius 16
 Set Framerate 24
 Hide
-Type "export PATH=${bindir}:\$PATH"
+Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor PATH=${bindir}:\$PATH"
 Enter
 Type "clear"
 Enter
@@ -74,7 +74,7 @@ Set Padding 22
 Set BorderRadius 16
 Set Framerate 12
 Hide
-Type "export PATH=${bindir}:\$PATH"
+Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor PATH=${bindir}:\$PATH"
 Enter
 Type "clear"
 Enter

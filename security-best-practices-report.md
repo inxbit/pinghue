@@ -61,7 +61,7 @@ Previously relevant medium-risk classes are now controlled:
 - Probe concurrency is bounded through `asyncio.Semaphore`, and DNS resolution has its own lower semaphore cap plus a bounded lookup timeout.
 - JSON host metadata defaults to the non-identifying `local` label through `--host-label` in `src/pinghue/cli.py:111`.
 - JSON output is written through a randomized `NamedTemporaryFile` (O_EXCL, mode 0600) in the destination directory, rejects symlink/special-device output paths by default, and refuses to replace existing regular files unless `--overwrite` is set.
-- Doctor guidance recommends group-specific `ping_group_range` before capability-based fallback in `src/pinghue/doctor.py:152`.
+- Doctor guidance recommends group-specific `ping_group_range` or TCP mode instead of file capabilities on Python launcher scripts in `src/pinghue/doctor.py:152`.
 - CI uses read-only repository permissions and non-persisted checkout credentials in `.github/workflows/ci.yml:9`.
 - Publish workflow uses pinned action SHAs, tag/version verification, hash-pinned build tooling, scoped publish permissions, artifact attestations, and release concurrency in `.github/workflows/publish.yml:11`.
 - Dependency audit runs weekly and on relevant PRs in `.github/workflows/dependency-audit.yml:1`; hosted repository hardening drift is checked weekly in `.github/workflows/repository-hardening.yml:1`.
@@ -88,12 +88,12 @@ Previously relevant medium-risk classes are now controlled:
 - Repository sink search: reviewed matches for shell execution, dynamic evaluation, serialization, file I/O, sockets, secrets, privilege commands, and release workflow permissions.
 - Local SAST/secrets scan of modified runtime, workflow, packaging, and hardening files: no issues identified.
 - `.venv/bin/ruff check .`: all checks passed.
-- `.venv/bin/mypy src`: no issues in 13 source files.
-- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 178 passed with coverage above the configured 80% floor.
+- `.venv/bin/mypy src`: no issues in 14 source files.
+- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 194 passed with 87.24% coverage, above the configured 80% floor.
 - `.venv/bin/pip-audit --skip-editable .`: no known vulnerabilities found.
-- `env SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation --outdir /private/tmp/pinghue-2.1.0-dist-final`: built `pinghue-2.1.0.tar.gz` and `pinghue-2.1.0-py3-none-any.whl`.
-- `.venv/bin/twine check /private/tmp/pinghue-2.1.0-dist-final/*`: wheel and sdist passed.
-- `.venv/bin/pinghue --version`: `pinghue 2.1.0`.
+- `SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation`: built `pinghue-3.0.0.tar.gz` and `pinghue-3.0.0-py3-none-any.whl`.
+- `.venv/bin/twine check dist/*`: wheel and sdist passed.
+- `PYTHONPATH=src .venv/bin/python -m pinghue --version`: `pinghue 3.0.0`.
 - `ruby -c packaging/homebrew/pinghue.rb`: formula syntax passed.
 - `scripts/check-github-hardening.sh inxbit/pinghue`: hosted hardening checks passed.
 
