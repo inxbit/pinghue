@@ -112,7 +112,7 @@ pyparsing==3.3.2
     # via pip-requirements-parser
 pyproject-hooks==1.2.0
     # via build
-pytest==9.0.3
+pytest==9.1.1
     # via
     #   pinghue (pyproject.toml)
     #   pytest-asyncio
