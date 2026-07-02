@@ -24,7 +24,7 @@ def test_publish_workflow_has_attestations_and_concurrency() -> None:
     assert "concurrency:" in workflow
     assert "attestations: write" in workflow
     assert (
-        "actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32"
+        "actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373"
         in workflow
     )
     assert "subject-path: dist/*" in workflow
