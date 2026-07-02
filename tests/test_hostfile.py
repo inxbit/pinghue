@@ -92,3 +92,18 @@ def test_parse_host_file_rejects_fifo_without_hanging(tmp_path: Path) -> None:
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def test_parse_host_file_strips_utf8_bom(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_bytes(b"\xef\xbb\xbf1.1.1.1\nexample.com\n")
+
+    assert parse_host_file(path) == ["1.1.1.1", "example.com"]
+
+
+def test_parse_host_file_rejects_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_bytes(b"\xff\xfe1.1.1.1\n")
+
+    with pytest.raises(ValueError, match="not valid UTF-8"):
+        parse_host_file(path)

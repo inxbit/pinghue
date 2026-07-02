@@ -9,6 +9,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.events import Click, Key
 from textual.widgets import DataTable, Footer, Header, Static
 
@@ -288,7 +289,10 @@ class PinghueTextualApp(App[None]):
             self._probe_executor = None
 
     def _refresh_table(self) -> None:
-        table = self.query_one("#targets", DataTable)
+        try:
+            table = self.query_one("#targets", DataTable)
+        except NoMatches:
+            return
         column_widths = compute_table_layout(
             width=max(self.size.width, 1),
             targets=self.targets,

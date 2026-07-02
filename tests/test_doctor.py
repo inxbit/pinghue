@@ -1,4 +1,5 @@
 import io
+import threading
 
 import pytest
 
@@ -209,3 +210,22 @@ def test_run_check_sanitizes_dns_diagnostics(monkeypatch: pytest.MonkeyPatch) ->
     assert dns_error not in text
     assert r'\x1b]52;c;QUJD\x07bad' in text
     assert r"\x1b[31mboom" in text
+
+
+def test_dns_probe_times_out_when_resolver_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+
+    def blocking_getaddrinfo(*_: object, **__: object) -> list[object]:
+        release.wait(5.0)
+        return []
+
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", blocking_getaddrinfo)
+
+    address, elapsed_ms, error = doctor._dns_probe("stuck.example", timeout_s=0.05)
+    release.set()
+
+    assert address is None
+    assert elapsed_ms is None
+    assert error is not None and "timed out" in error
