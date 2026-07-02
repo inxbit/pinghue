@@ -150,7 +150,7 @@ ruff==0.15.20
     # via pinghue (pyproject.toml)
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
-textual==8.2.7
+textual==8.2.8
     # via pinghue (pyproject.toml)
 tomli==2.4.1
     # via pip-audit
