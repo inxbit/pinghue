@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>404 — pinghue</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/svg+xml" href="/assets/pinghue-favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .lost {
+      max-width: 640px;
+      margin: 12vh auto 0;
+      padding: 0 1.5rem;
+    }
+    .lost pre {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.1rem 1.3rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      margin: 0 0 1.6rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="lost">
+    <p class="eyebrow"><span class="glyph red">· · ·</span> host state: down</p>
+    <h1>404 — <span class="hue-word">not found</span>.</h1>
+    <pre><code><span class="prompt">$</span> pinghue this-page
+<span class="out">this-page</span> <span class="c-red">resolve failed: NXDOMAIN</span></code></pre>
+    <p><a href="/">Reset and go back to pinghue.com →</a></p>
+  </main>
+</body>
+</html>

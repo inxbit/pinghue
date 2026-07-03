@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pinghue.com">Website</a> ·
   <a href="#install">Install</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#modes">Modes</a> ·
