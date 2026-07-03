@@ -26,6 +26,27 @@
     });
   });
 
+  /* ------------------------------------------------ scale strip reveal */
+
+  const strip = document.querySelector("[data-scale]");
+  if (strip && "IntersectionObserver" in window) {
+    strip.querySelectorAll(".scale-cell").forEach((cell, i) => {
+      cell.style.setProperty("--i", i);
+    });
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            strip.classList.add("in-view");
+            io.disconnect();
+          }
+        });
+      },
+      { threshold: 0.35 }
+    );
+    io.observe(strip);
+  }
+
   /* ------------------------------------------------ terminal simulation */
 
   const root = document.querySelector("[data-terminal]");

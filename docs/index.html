@@ -3,23 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pinghue — colored concurrent ping monitor for maintenance windows</title>
-  <meta name="description" content="pinghue is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. A dense terminal view for many hosts at once, and structured JSON evidence when the window closes.">
+  <title>pinghue - colored concurrent ping monitor for maintenance windows</title>
+  <meta name="description" content="pinghue is a colored, concurrent ICMP/TCP ping monitor for maintenance windows. One dense terminal view for many hosts at once, and structured JSON evidence when the window closes.">
   <link rel="canonical" href="https://pinghue.com/">
   <link rel="icon" type="image/svg+xml" href="assets/pinghue-favicon.svg">
 
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pinghue.com/">
-  <meta property="og:title" content="pinghue — colored concurrent ping monitor for maintenance windows">
+  <meta property="og:title" content="pinghue - colored concurrent ping monitor for maintenance windows">
   <meta property="og:description" content="Watch the whole window. Dense terminal view for many hosts at once, ICMP and TCP, with schema-versioned JSON evidence on exit.">
   <meta property="og:image" content="https://pinghue.com/assets/pinghue-screenshot.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="pinghue — colored concurrent ping monitor for maintenance windows">
+  <meta name="twitter:title" content="pinghue - colored concurrent ping monitor for maintenance windows">
   <meta name="twitter:image" content="https://pinghue.com/assets/pinghue-screenshot.png">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/jetbrains-mono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -44,11 +43,12 @@
   <!-- ============================== hero ============================== -->
   <section class="hero">
     <div class="hero-copy">
-      <p class="eyebrow"><span class="glyph green">▁▃▅</span> for the 02:00 change window</p>
-      <h1>Watch the <span class="hue-word">whole&nbsp;window</span>.</h1>
+      <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
+      <h1>Watch the whole&nbsp;window.</h1>
+      <div class="h1-rule" role="presentation"></div>
       <p class="lede">
         <strong>pinghue</strong> is a colored, concurrent ICMP/TCP ping monitor.
-        One dense terminal view for many hosts at once — and structured JSON
+        One dense terminal view for many hosts at once, and structured JSON
         evidence when the window closes.
       </p>
 
@@ -56,21 +56,12 @@
         <code id="hero-install">uv tool install pinghue</code>
         <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy install command">Copy</button>
       </div>
-      <p class="install-alt">or <code>brew install inxbit/tap/pinghue</code></p>
-
-      <ul class="chips" aria-label="Facts">
-        <li>v3.0.0</li>
-        <li class="c-green">ICMP / TCP</li>
-        <li class="c-blue">JSON schema v1</li>
-        <li>macOS + Linux</li>
-        <li>Python 3.10–3.13</li>
-      </ul>
     </div>
 
     <figure class="terminal" data-terminal aria-label="Simulated pinghue maintenance-window run">
       <figcaption class="term-bar">
         <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="term-title">pinghue — 8 targets — ICMP — interval 1.0s</span>
+        <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
         <span class="term-clock" data-clock>00:00</span>
       </figcaption>
       <div class="term-body" role="img" aria-label="Terminal table of eight hosts with latency, loss, jitter, state, and colored history bars. db-primary turns intermittent after a latency spike; backup-nas goes down with red loss markers; the other hosts stay healthy in green.">
@@ -91,39 +82,37 @@
 
   <!-- ============================== why ============================== -->
   <section class="section" id="why">
-    <p class="eyebrow"><span class="glyph green">▄▅▆</span> why pinghue</p>
-    <h2>Built for the window, not the dashboard.</h2>
-    <div class="grid-3">
-      <article class="card">
-        <h3>Dense at-a-glance view</h3>
-        <p>Many hosts in one readable table — per-host latency, loss, jitter, and a live history bar.</p>
-      </article>
-      <article class="card">
-        <h3>ICMP &amp; TCP</h3>
-        <p>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</p>
-      </article>
-      <article class="card">
-        <h3>Evidence-ready JSON</h3>
-        <p><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</p>
-      </article>
-      <article class="card">
-        <h3>Whole-run accuracy</h3>
-        <p>Host states reflect everything that happened in the window, not just the last few probes.</p>
-      </article>
-      <article class="card">
-        <h3>Scriptable</h3>
-        <p><code>--no-tui</code>, <code>--count</code>, <code>--duration</code>, and fail-on-down exit codes for automation.</p>
-      </article>
-      <article class="card">
-        <h3>Local &amp; safe</h3>
-        <p>No server, no daemon, no credentials. Runs where you run: macOS and Linux.</p>
-      </article>
-    </div>
+    <h2>Every host in one table.</h2>
+    <dl class="ledger">
+      <div class="ledger-item">
+        <dt>dense view</dt>
+        <dd>Many hosts in one readable table: per-host latency, loss, jitter, and a live history bar.</dd>
+      </div>
+      <div class="ledger-item">
+        <dt>icmp / tcp</dt>
+        <dd>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</dd>
+      </div>
+      <div class="ledger-item">
+        <dt>json evidence</dt>
+        <dd><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</dd>
+      </div>
+      <div class="ledger-item">
+        <dt>whole-run states</dt>
+        <dd>Host states reflect everything that happened in the window, not just the last few probes.</dd>
+      </div>
+      <div class="ledger-item">
+        <dt>scriptable</dt>
+        <dd><code>--no-tui</code>, <code>--count</code>, <code>--duration</code>, and fail-on-down exit codes for automation.</dd>
+      </div>
+      <div class="ledger-item">
+        <dt>local &amp; safe</dt>
+        <dd>No server, no daemon, no credentials. Runs where you run: macOS and Linux.</dd>
+      </div>
+    </dl>
   </section>
 
   <!-- ============================== modes ============================== -->
   <section class="section" id="modes">
-    <p class="eyebrow"><span class="glyph blue">▂▄▂</span> three ways to run it</p>
     <h2>TUI when you watch. Lines when you script.</h2>
     <div class="modes">
       <article class="mode">
@@ -134,7 +123,7 @@
       <article class="mode">
         <h3><span class="mode-tag c-blue">TCP</span> no privileges needed</h3>
         <pre><code><span class="prompt">$</span> pinghue -p 443 example.com api.internal</code></pre>
-        <p>Connect checks against any port, 1–65535. Refused connections get their own amber marker.</p>
+        <p>Connect checks against any port, 1 to 65535. Refused connections get their own amber marker.</p>
       </article>
       <article class="mode">
         <h3><span class="mode-tag c-amber">--no-tui</span> for cron and CI</h3>
@@ -147,13 +136,12 @@
 
   <!-- ============================== fixed scale ============================== -->
   <section class="section" id="scale">
-    <p class="eyebrow"><span class="glyph green">▁▂▃▄▅▆▇█</span> the fixed scale</p>
-    <h2>History bars that never lie.</h2>
+    <h2>One fixed scale, every run.</h2>
     <p class="section-lede">
-      Latency maps to a fixed glyph scale — it never rescales, so rows stay comparable
+      Latency maps to a fixed glyph scale. It never rescales, so rows stay comparable
       across hosts, and across runs.
     </p>
-    <div class="scale-strip" role="table" aria-label="Latency to glyph mapping">
+    <div class="scale-strip" role="table" aria-label="Latency to glyph mapping" data-scale>
       <div class="scale-cell" role="row"><span class="glyph green" role="cell">▁</span><span role="cell">≤1ms</span></div>
       <div class="scale-cell" role="row"><span class="glyph green" role="cell">▂</span><span role="cell">≤3ms</span></div>
       <div class="scale-cell" role="row"><span class="glyph green" role="cell">▃</span><span role="cell">≤10ms</span></div>
@@ -166,14 +154,13 @@
       <div class="scale-cell" role="row"><span class="glyph amber" role="cell">!</span><span role="cell">TCP refused</span></div>
     </div>
     <p class="scale-note">
-      A host that blips once stays <span class="c-amber">intermittent</span> until you reset it —
-      a maintenance-window report should reflect everything that happened, not only the final moments.
+      A host that blips once stays <span class="c-amber">intermittent</span> until you reset it.
+      A maintenance-window report should reflect everything that happened, not only the final moments.
     </p>
   </section>
 
   <!-- ============================== evidence ============================== -->
   <section class="section" id="evidence">
-    <p class="eyebrow"><span class="glyph blue">{ }</span> evidence, not vibes</p>
     <h2>Close the window with a report.</h2>
     <div class="evidence">
       <pre class="json"><code><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json
@@ -187,7 +174,7 @@
   ]
 <span class="jk">}</span></code></pre>
       <ul class="evidence-points">
-        <li><b>Contract, not accident.</b> JSON uses <code>schema_version: 1</code> — breaking changes require a new schema version.</li>
+        <li><b>Versioned contract.</b> JSON uses <code>schema_version: 1</code>. Breaking changes require a new schema version.</li>
         <li><b>Whole-run stats.</b> <code>stats</code> covers every probe in the run; <code>samples</code> is the recent tail.</li>
         <li><b>Private by default.</b> Output files are written <code>0600</code>, and existing files are never replaced without <code>--overwrite</code>.</li>
       </ul>
@@ -196,7 +183,7 @@
 
   <!-- ============================== not ============================== -->
   <section class="section" id="not">
-    <p class="eyebrow"><span class="glyph red">·&nbsp;·&nbsp;·</span> what pinghue is not</p>
+    <p class="kicker"><span class="glyph red">· · ·</span> # what pinghue is not</p>
     <h2>Small on purpose.</h2>
     <ul class="not-list">
       <li>Not a Prometheus, Smokeping, Zabbix, or NMS replacement.</li>
@@ -205,38 +192,37 @@
       <li>Not a packet capture or traceroute tool.</li>
       <li>Not a service that accepts remote network requests.</li>
     </ul>
-    <p class="not-note">It is a focused local tool for maintenance windows, migrations, and quick reachability checks — nothing more, on purpose.</p>
+    <p class="not-note">A focused local tool for maintenance windows, migrations, and quick reachability checks. Nothing more, on purpose.</p>
   </section>
 
   <!-- ============================== install ============================== -->
   <section class="section" id="install">
-    <p class="eyebrow"><span class="glyph green">▅▅▅</span> install</p>
     <h2>Sixty seconds to a live table.</h2>
-    <div class="grid-install">
-      <article class="pkg">
-        <h3>uv</h3>
-        <pre><code>uv tool install pinghue</code></pre>
+    <div class="install-panel">
+      <div class="install-row">
+        <span class="install-name">uv</span>
+        <code>uv tool install pinghue</code>
         <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv command">Copy</button>
-      </article>
-      <article class="pkg">
-        <h3>pipx</h3>
-        <pre><code>pipx install pinghue</code></pre>
+      </div>
+      <div class="install-row">
+        <span class="install-name">pipx</span>
+        <code>pipx install pinghue</code>
         <button class="copy-btn" type="button" data-copy="pipx install pinghue" aria-label="Copy pipx command">Copy</button>
-      </article>
-      <article class="pkg">
-        <h3>Homebrew</h3>
-        <pre><code>brew install inxbit/tap/pinghue</code></pre>
+      </div>
+      <div class="install-row">
+        <span class="install-name">brew</span>
+        <code>brew install inxbit/tap/pinghue</code>
         <button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew command">Copy</button>
-      </article>
-      <article class="pkg">
-        <h3>pip</h3>
-        <pre><code>python -m pip install pinghue</code></pre>
+      </div>
+      <div class="install-row">
+        <span class="install-name">pip</span>
+        <code>python -m pip install pinghue</code>
         <button class="copy-btn" type="button" data-copy="python -m pip install pinghue" aria-label="Copy pip command">Copy</button>
-      </article>
+      </div>
     </div>
     <p class="install-note">
-      Then run the environment doctor: <code>pinghue --check</code>.
-      On Linux, ICMP may need a one-line <code>ping_group_range</code> fix — or just use TCP mode.
+      macOS and Linux, Python 3.10 to 3.13. Then run the environment doctor: <code>pinghue --check</code>.
+      On Linux, ICMP may need a one-line <code>ping_group_range</code> fix, or just use TCP mode.
     </p>
   </section>
 

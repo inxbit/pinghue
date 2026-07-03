@@ -15,8 +15,14 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(existsSync('docs/assets/pinghue-hero.svg'), true);
   assert.equal(existsSync('docs/assets/pinghue-screenshot.png'), true);
 
+  assert.equal(existsSync('docs/fonts/archivo-var-latin.woff2'), true);
+  assert.equal(existsSync('docs/fonts/jetbrains-mono-var-latin.woff2'), true);
+
   const html = read('docs/index.html');
-  assert.match(html, /<title>pinghue — colored concurrent ping monitor for maintenance windows<\/title>/);
+  assert.match(html, /<title>pinghue - colored concurrent ping monitor for maintenance windows<\/title>/);
+  // Visible copy carries no em/en dashes (design contract).
+  assert.doesNotMatch(html, /[—–]/);
+  assert.doesNotMatch(read('docs/404.html'), /[—–]/);
   assert.match(html, /Watch the/);
   assert.match(html, /uv tool install pinghue/);
   assert.match(html, /brew install inxbit\/tap\/pinghue/);
@@ -30,6 +36,10 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.match(html, /What pinghue is not/i);
 
   const css = read('docs/styles.css');
+  // Self-hosted variable fonts, no third-party font CDN.
+  assert.match(css, /@font-face/);
+  assert.match(css, /Archivo/);
+  assert.doesNotMatch(html, /fonts\.googleapis\.com/);
   // Slate + Signal palette from the README is the site palette.
   assert.match(css, /#101418/);
   assert.match(css, /#7ee787/);

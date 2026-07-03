@@ -1,5 +1,23 @@
-/* pinghue.com — Slate + Signal.
-   The palette is the product's own: signal colors carry state meaning only. */
+/* pinghue.com - Slate + Signal.
+   The palette is the product's own: signal colors carry state meaning only.
+   Type: Archivo (variable, width axis) + JetBrains Mono (variable), self-hosted. */
+
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url("fonts/archivo-var-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-var-latin.woff2") format("woff2");
+}
 
 :root {
   --bg: #101418;
@@ -13,11 +31,13 @@
   --red: #ff7b72;
   --blue: #58a6ff;
 
-  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 
   --maxw: 1120px;
+  /* radius system: containers 12, nested elements 8 */
   --radius: 12px;
+  --radius-inner: 8px;
 }
 
 * { box-sizing: border-box; }
@@ -34,8 +54,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-code, pre, .term-table, .term-footer, .term-bar, .glyph {
+code, pre, .term-table, .term-footer, .term-bar, .glyph, .kicker {
   font-family: var(--mono);
+}
+
+h1, h2, h3 {
+  font-stretch: 112%;
+  text-wrap: balance;
 }
 
 a { color: var(--blue); text-decoration: none; }
@@ -102,7 +127,7 @@ a:hover { text-decoration: underline; }
   color: var(--text);
   border: 1px solid var(--border);
   padding: 0.35rem 0.85rem;
-  border-radius: 8px;
+  border-radius: var(--radius-inner);
   background: var(--panel);
 }
 .nav .nav-gh:hover { border-color: var(--muted); }
@@ -119,34 +144,34 @@ a:hover { text-decoration: underline; }
   align-items: center;
 }
 
-.eyebrow {
+.kicker {
   color: var(--muted);
   font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   margin: 0 0 1rem;
 }
-.eyebrow .glyph { letter-spacing: 0; margin-right: 0.5rem; }
+.kicker .glyph { margin-right: 0.4rem; }
 
 h1 {
   font-size: clamp(2.4rem, 5.2vw, 3.7rem);
   line-height: 1.06;
   letter-spacing: -0.03em;
   font-weight: 700;
-  margin: 0 0 1.1rem;
+  margin: 0 0 0.9rem;
 }
-.hue-word {
-  background: linear-gradient(90deg, var(--green) 0%, var(--amber) 45%, var(--red) 80%, var(--blue) 110%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+
+.h1-rule {
+  width: 9.5rem;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--green) 0%, var(--amber) 38%, var(--red) 68%, var(--blue) 100%);
+  margin: 0 0 1.3rem;
 }
 
 .lede {
   color: var(--muted);
   font-size: 1.12rem;
   max-width: 34rem;
+  text-wrap: pretty;
   margin: 0 0 1.8rem;
 }
 .lede strong { color: var(--text); }
@@ -161,7 +186,7 @@ h1 {
   flex: 1;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-inner);
   padding: 0.7rem 1rem;
   color: var(--green);
   font-size: 0.95rem;
@@ -176,39 +201,13 @@ h1 {
   color: var(--text);
   background: var(--header);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-inner);
   padding: 0 0.9rem;
   cursor: pointer;
 }
 .copy-btn:hover { border-color: var(--muted); }
+.copy-btn:active { transform: scale(0.97); }
 .copy-btn.copied { color: var(--green); border-color: var(--green); }
-
-.install-alt {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin: 0.6rem 0 1.6rem;
-}
-.install-alt code { color: var(--text); }
-
-.chips {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0;
-  margin: 0;
-}
-.chips li {
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--muted);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 0.3rem 0.7rem;
-}
-.chips .c-green { color: var(--green); }
-.chips .c-blue { color: var(--blue); }
 
 /* ---------------------------------------------------------------- terminal */
 
@@ -313,6 +312,7 @@ h2 {
 .section-lede {
   color: var(--muted);
   max-width: 40rem;
+  text-wrap: pretty;
   margin: -0.6rem 0 1.8rem;
 }
 
@@ -327,34 +327,31 @@ h2 {
 .c-red { color: var(--red); }
 .c-blue { color: var(--blue); }
 
-/* ---------------------------------------------------------------- why grid */
+/* ---------------------------------------------------------------- why ledger */
 
-.grid-3 {
+.ledger {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.3rem 1.4rem;
-}
-.card h3 {
-  font-size: 1.02rem;
-  font-weight: 600;
-  margin: 0 0 0.5rem;
-}
-.card p {
-  color: var(--muted);
-  font-size: 0.94rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem 3.5rem;
   margin: 0;
 }
-.card code {
+
+.ledger-item dt {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--green);
+  margin: 0 0 0.35rem;
+}
+.ledger-item dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.98rem;
+  max-width: 32rem;
+}
+.ledger-item dd code {
   font-size: 0.85em;
   color: var(--text);
-  background: var(--header);
+  background: var(--panel);
   border-radius: 4px;
   padding: 0.05em 0.35em;
 }
@@ -393,7 +390,7 @@ h2 {
 .mode pre {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-inner);
   padding: 0.8rem 1rem;
   margin: 0 0 0.9rem;
   overflow-x: auto;
@@ -425,6 +422,7 @@ h2 {
   display: block;
   font-size: 1.5rem;
   line-height: 1.2;
+  transform-origin: bottom;
 }
 .scale-cell span:last-child {
   font-family: var(--mono);
@@ -432,9 +430,22 @@ h2 {
   color: var(--muted);
 }
 
+/* The strip depicts latency bars: glyphs rise from the baseline once, on first view. */
+@media (prefers-reduced-motion: no-preference) {
+  .scale-strip.in-view .scale-cell .glyph {
+    animation: bar-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 55ms);
+  }
+  @keyframes bar-rise {
+    from { transform: scaleY(0.25); opacity: 0.4; }
+    to { transform: scaleY(1); opacity: 1; }
+  }
+}
+
 .scale-note {
   color: var(--muted);
   max-width: 44rem;
+  text-wrap: pretty;
   margin: 0;
 }
 
@@ -469,13 +480,11 @@ h2 {
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 1rem;
+  gap: 1.4rem;
 }
 .evidence-points li {
   color: var(--muted);
   font-size: 0.95rem;
-  border-left: 2px solid var(--border);
-  padding-left: 1rem;
 }
 .evidence-points b { color: var(--text); display: block; }
 .evidence-points code { color: var(--text); font-size: 0.88em; }
@@ -487,59 +496,69 @@ h2 {
   padding: 0;
   margin: 0 0 1.2rem;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.7rem;
   max-width: 44rem;
 }
 .not-list li {
   color: var(--muted);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--red);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 0.65rem 1rem;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
+  padding-left: 1.4rem;
+  position: relative;
+}
+.not-list li::before {
+  content: "·";
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--red);
+  position: absolute;
+  left: 0.2rem;
 }
 .not-note {
   color: var(--muted);
   max-width: 44rem;
+  text-wrap: pretty;
   margin: 0;
 }
 
 /* ---------------------------------------------------------------- install */
 
-.grid-install {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.pkg {
+.install-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.1rem 1.2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  min-width: 0;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.3rem;
+  max-width: 44rem;
 }
-.pkg h3 { margin: 0; font-size: 0.95rem; font-weight: 600; }
-.pkg pre {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.7rem 0.9rem;
-  margin: 0;
+
+.install-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-inner);
+}
+.install-row:hover { background: var(--header); }
+.install-name {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.install-row code {
+  font-size: 0.88rem;
+  color: var(--green);
+  white-space: nowrap;
   overflow-x: auto;
-  font-size: 0.78rem;
 }
-.pkg pre code { color: var(--green); }
-.pkg .copy-btn { align-self: flex-start; padding: 0.3rem 0.8rem; }
+.install-row .copy-btn { padding: 0.3rem 0.8rem; }
 
 .install-note {
   color: var(--muted);
   margin: 1.4rem 0 0;
   max-width: 44rem;
+  text-wrap: pretty;
 }
 .install-note code { color: var(--text); }
 
@@ -577,7 +596,7 @@ h2 {
 
 @media (prefers-reduced-motion: no-preference) {
   .hero-copy, .terminal {
-    animation: rise 0.6s ease-out both;
+    animation: rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
   .terminal { animation-delay: 0.12s; }
   @keyframes rise {
@@ -590,8 +609,7 @@ h2 {
 
 @media (max-width: 980px) {
   .hero { grid-template-columns: 1fr; padding-top: 2.2rem; }
-  .grid-3, .modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .grid-install { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .evidence { grid-template-columns: 1fr; }
   .scale-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
@@ -600,7 +618,9 @@ h2 {
   body { font-size: 16px; }
   .nav nav { gap: 0.9rem; }
   .nav nav a:not(.nav-gh) { display: none; }
-  .grid-3, .modes, .grid-install { grid-template-columns: 1fr; }
+  .ledger { grid-template-columns: 1fr; gap: 1.6rem; }
+  .modes { grid-template-columns: 1fr; }
   .scale-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .install-row { grid-template-columns: 3.2rem minmax(0, 1fr) auto; gap: 0.5rem; }
   .term-table { font-size: 0.7rem; }
 }
