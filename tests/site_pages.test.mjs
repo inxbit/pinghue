@@ -37,9 +37,15 @@ test('GitHub Pages site has the expected static contract', () => {
   // Only the local first-party script runs on the page.
   const scriptSrcs = [...html.matchAll(/<script[^>]*\bsrc="([^"]*)"/g)].map((m) => m[1]);
   assert.deepEqual(scriptSrcs, ['script.js']);
-  // Both pages ship a self-only Content-Security-Policy.
-  assert.match(html, /http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'/);
-  assert.match(read('docs/404.html'), /http-equiv="Content-Security-Policy" content="default-src 'none'/);
+  // Both pages ship the identical strict self-only Content-Security-Policy.
+  const csp = 'default-src \'none\'; script-src \'self\'; style-src \'self\'; img-src \'self\'; font-src \'self\'; base-uri \'none\'; form-action \'none\'';
+  const cspTag = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  assert.equal(html.includes(cspTag), true);
+  const notFound = read('docs/404.html');
+  assert.equal(notFound.includes(cspTag), true);
+  // No inline style/script blocks anywhere, so 'unsafe-inline' is never needed.
+  assert.doesNotMatch(html, /<style/);
+  assert.doesNotMatch(notFound, /<style/);
   assert.match(html, /href="https:\/\/github\.com\/inxbit\/pinghue"/);
   assert.match(html, /href="https:\/\/pypi\.org\/project\/pinghue\/"/);
   assert.match(html, /https:\/\/pinghue\.com\/assets\/pinghue-screenshot\.png/);
