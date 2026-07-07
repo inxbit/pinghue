@@ -10,8 +10,11 @@ on:
       - ".github/workflows/repository-hardening.yml"
       - "scripts/check-github-hardening.sh"
 
+# pages: read lets the drift check read the hosted Pages configuration
+# (custom domain, HTTPS enforcement, certificate state).
 permissions:
   contents: read
+  pages: read
 
 jobs:
   hosted-drift:
