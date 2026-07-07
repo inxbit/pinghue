@@ -1,4 +1,6 @@
+import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -91,6 +93,56 @@ def test_main_reports_output_write_errors_without_traceback(
     captured = capsys.readouterr()
     assert "output file already exists" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+
+        exit_code = main(
+            ["-p", str(port), "127.0.0.1", "-c", "1", "--no-tui", "--output", "-"]
+        )
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
+    assert document["schema_version"] == 1
+    # The per-probe line moves to stderr so stdout stays machine-parseable.
+    assert "127.0.0.1" in captured.err
+
+
+def test_main_warns_when_tui_mode_writes_json_to_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    assert main(["--output", "-", "1.1.1.1"]) == 0
+    assert "use --no-tui for machine-readable capture" in capsys.readouterr().err
+
+
+def test_main_does_not_warn_for_output_dash_with_no_tui(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    assert main(["--output", "-", "--no-tui", "1.1.1.1"]) == 0
+    assert capsys.readouterr().err == ""
 
 
 def test_parse_args_numeric_sets_family_from_ip_literal() -> None:

@@ -26,6 +26,20 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.match(html, /Watch the/);
   assert.match(html, /uv tool install pinghue/);
   assert.match(html, /brew install inxbit\/tap\/pinghue/);
+  // Copyable install commands are pinned exactly; a poisoned command fails the deploy.
+  const copyCommands = [...html.matchAll(/data-copy="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(new Set(copyCommands), new Set([
+    'uv tool install pinghue',
+    'pipx install pinghue',
+    'brew install inxbit/tap/pinghue',
+    'python -m pip install pinghue',
+  ]));
+  // Only the local first-party script runs on the page.
+  const scriptSrcs = [...html.matchAll(/<script[^>]*\bsrc="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(scriptSrcs, ['script.js']);
+  // Both pages ship a self-only Content-Security-Policy.
+  assert.match(html, /http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'/);
+  assert.match(read('docs/404.html'), /http-equiv="Content-Security-Policy" content="default-src 'none'/);
   assert.match(html, /href="https:\/\/github\.com\/inxbit\/pinghue"/);
   assert.match(html, /href="https:\/\/pypi\.org\/project\/pinghue\/"/);
   assert.match(html, /https:\/\/pinghue\.com\/assets\/pinghue-screenshot\.png/);
