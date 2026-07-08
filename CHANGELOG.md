@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 3.0.1 - 2026-07-08
+
 ### Changed
 
 - Combining `--output -` with the TUI now prints a stderr warning pointing at `--no-tui`, since the JSON document lands on stdout after the TUI exits.
