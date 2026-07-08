@@ -1,9 +1,16 @@
 import json
+import re
 from pathlib import Path
 
 
 def read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
+
+
+def package_version() -> str:
+    match = re.search(r'^version = "([^"]+)"$', read("pyproject.toml"), re.MULTILINE)
+    assert match is not None
+    return match.group(1)
 
 
 def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
@@ -217,6 +224,7 @@ def test_changelog_has_dated_1_0_release_section() -> None:
 
 
 def test_release_version_surfaces_match_package_version() -> None:
+    version = package_version()
     pyproject = read("pyproject.toml")
     readme = read("README.md")
     example = json.loads(read("examples/pinghue-output-example.json"))
@@ -225,12 +233,38 @@ def test_release_version_surfaces_match_package_version() -> None:
 
     # The demo (GIF) and screenshot (PNG) are real TUI captures, so the version
     # they show is rendered from the package itself and needs no text surface here.
-    assert 'version = "3.0.1"' in pyproject
-    assert "Current version: `3.0.1`." in readme
-    assert example["pinghue_version"] == "3.0.1"
-    assert "v3.0.1" in hero
-    assert "pinghue-3.0.1.tar.gz" in formula
+    assert f'version = "{version}"' in pyproject
+    assert f"Current version: `{version}`." in readme
+    assert example["pinghue_version"] == version
+    assert f"v{version}" in hero
+    assert f"pinghue-{version}.tar.gz" in formula
     assert "pinghue-2.1.0.tar.gz" not in formula
+
+
+def test_release_text_surfaces_do_not_reference_stale_current_version() -> None:
+    text_surfaces = [
+        "README.md",
+        "SECURITY.md",
+        "security-best-practices-report.md",
+        "examples/pinghue-output-example.json",
+        "docs/index.html",
+        "docs/assets/pinghue-hero.svg",
+        "docs/assets/pinghue-favicon.svg",
+        "packaging/homebrew/pinghue.rb",
+    ]
+    stale_tokens = [
+        'version = "3.0.0"',
+        "Current version: `3.0.0`",
+        '"pinghue_version": "3.0.0"',
+        "pinghue 3.0.0",
+        "pinghue-3.0.0",
+        "v3.0.0",
+    ]
+
+    for path in text_surfaces:
+        text = read(path)
+        for token in stale_tokens:
+            assert token not in text, f"{path} still contains {token}"
 
 
 def test_security_policy_matches_stable_support_line() -> None:

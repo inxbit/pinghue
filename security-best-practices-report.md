@@ -65,7 +65,7 @@ Previously relevant medium-risk classes are now controlled:
 - CI uses read-only repository permissions and non-persisted checkout credentials in `.github/workflows/ci.yml:9`.
 - Publish workflow uses pinned action SHAs, tag/version verification, hash-pinned build tooling, scoped publish permissions, artifact attestations, and release concurrency in `.github/workflows/publish.yml:11`.
 - Dependency audit runs weekly and on relevant PRs in `.github/workflows/dependency-audit.yml:1`; hosted repository hardening drift is checked weekly in `.github/workflows/repository-hardening.yml:1`.
-- `MANIFEST.in` excludes `.github` and `scripts` from published sdists while retaining user-facing docs and schemas in `MANIFEST.in:1`.
+- `MANIFEST.in` excludes `.github` and `packaging` from published sdists while retaining the launcher script, user-facing docs, examples, schemas, and release reports in `MANIFEST.in:1`.
 - Homebrew resources are SHA256-pinned, and the formula test verifies a real local TCP success path with `--fail-on-down` in `packaging/homebrew/pinghue.rb:20` and `packaging/homebrew/pinghue.rb:106`.
 
 ## Best-practice checklist
@@ -86,14 +86,16 @@ Previously relevant medium-risk classes are now controlled:
 ## Validation
 
 - Repository sink search: reviewed matches for shell execution, dynamic evaluation, serialization, file I/O, sockets, secrets, privilege commands, and release workflow permissions.
-- Local SAST/secrets scan of modified runtime, workflow, packaging, and hardening files: no issues identified.
+- Security diff scan of modified runtime, workflow, site, packaging, and hardening files: no issues identified.
 - `.venv/bin/ruff check .`: all checks passed.
 - `.venv/bin/mypy src`: no issues in 14 source files.
-- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 194 passed with 87.24% coverage, above the configured 80% floor.
+- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 199 passed with 87.81% coverage, above the configured 80% floor.
+- `node --test tests/site_pages.test.mjs`: site contract test passed.
 - `.venv/bin/pip-audit --skip-editable .`: no known vulnerabilities found.
-- `SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation`: built `pinghue-3.0.0.tar.gz` and `pinghue-3.0.0-py3-none-any.whl`.
-- `.venv/bin/twine check dist/*`: wheel and sdist passed.
-- `PYTHONPATH=src .venv/bin/python -m pinghue --version`: `pinghue 3.0.0`.
+- `SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation`: built `pinghue-3.0.1.tar.gz` and `pinghue-3.0.1-py3-none-any.whl`.
+- `.venv/bin/twine check` on the built and published artifacts: wheel and sdist passed.
+- `.venv/bin/python -m pinghue --version`: `pinghue 3.0.1`.
+- `.venv/bin/pinghue --version`: `pinghue 3.0.1`.
 - `ruby -c packaging/homebrew/pinghue.rb`: formula syntax passed.
 - `scripts/check-github-hardening.sh inxbit/pinghue`: hosted hardening checks passed.
 
