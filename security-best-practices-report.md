@@ -89,13 +89,13 @@ Previously relevant medium-risk classes are now controlled:
 - Security diff scan of modified runtime, workflow, site, packaging, and hardening files: no issues identified.
 - `.venv/bin/ruff check .`: all checks passed.
 - `.venv/bin/mypy src`: no issues in 14 source files.
-- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 200 passed with 87.81% coverage, above the configured 80% floor.
+- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 202 passed with 87.81% coverage, above the configured 80% floor.
 - `node --test tests/site_pages.test.mjs`: site contract test passed.
 - `.venv/bin/pip-audit --skip-editable .`: no known vulnerabilities found.
-- `SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation`: built `pinghue-3.0.1.tar.gz` and `pinghue-3.0.1-py3-none-any.whl`.
+- `SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation`: built `pinghue-4.0.0.tar.gz` and `pinghue-4.0.0-py3-none-any.whl`.
 - `.venv/bin/twine check` on the built and published artifacts: wheel and sdist passed.
-- `.venv/bin/python -m pinghue --version`: `pinghue 3.0.1`.
-- `.venv/bin/pinghue --version`: `pinghue 3.0.1`.
+- `.venv/bin/python -m pinghue --version`: `pinghue 4.0.0`.
+- `.venv/bin/pinghue --version`: `pinghue 4.0.0`.
 - `ruby -c packaging/homebrew/pinghue.rb`: formula syntax passed.
 - `scripts/check-github-hardening.sh inxbit/pinghue`: hosted hardening checks passed.
 
