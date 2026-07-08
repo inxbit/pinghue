@@ -6,6 +6,10 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Breaking
+
+- `--output -` now requires `--no-tui` and exits `2` (usage error) otherwise. The TUI owns stdout while it runs, so the combination could not produce machine-readable output; the `3.0.1` stderr warning for it is removed along with the behavior. Requires a major version bump.
+
 ## 3.0.1 - 2026-07-08
 
 ### Changed

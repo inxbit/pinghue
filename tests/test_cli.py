@@ -115,22 +115,32 @@ def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
     assert "127.0.0.1" in captured.err
 
 
-def test_main_warns_when_tui_mode_writes_json_to_stdout(
-    monkeypatch: pytest.MonkeyPatch,
+def test_parse_args_rejects_output_dash_without_no_tui(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    async def fake_run(*_: object, **__: object) -> int:
-        return 0
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--output", "-", "1.1.1.1"])
 
-    import pinghue.runner as runner
-
-    monkeypatch.setattr(runner, "run", fake_run)
-
-    assert main(["--output", "-", "1.1.1.1"]) == 0
-    assert "use --no-tui for machine-readable capture" in capsys.readouterr().err
+    assert excinfo.value.code == 2
+    assert "--output - requires --no-tui" in capsys.readouterr().err
 
 
-def test_main_does_not_warn_for_output_dash_with_no_tui(
+def test_parse_args_accepts_output_dash_with_no_tui() -> None:
+    args = parse_args(["--output", "-", "--no-tui", "1.1.1.1"])
+
+    assert str(args.output) == "-"
+    assert args.no_tui is True
+
+
+def test_parse_args_allows_check_with_output_dash() -> None:
+    # --check ignores --output entirely; the --no-tui requirement only
+    # applies to probe runs.
+    args = parse_args(["--check", "--output", "-"])
+
+    assert args.check is True
+
+
+def test_main_runs_output_dash_with_no_tui_without_stderr_noise(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:

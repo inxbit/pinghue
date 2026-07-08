@@ -295,6 +295,9 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
     if not args.check and not args.targets:
         parser.error("at least one target is required unless --check is used")
 
+    if not args.check and not args.no_tui and args.output is not None and str(args.output) == "-":
+        parser.error("--output - requires --no-tui; the TUI owns stdout while it runs")
+
     args.fail_on_down = args.fail_on_all_down
 
     return args
@@ -306,13 +309,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         resolve_name = args.resolve_name or (args.targets[0] if args.targets else None)
         return run_check(quiet=args.quiet, resolve_name=resolve_name)
-
-    if not args.no_tui and args.output is not None and str(args.output) == "-":
-        print(
-            "pinghue: warning: --output - writes the JSON document to stdout after "
-            "the TUI exits; use --no-tui for machine-readable capture",
-            file=sys.stderr,
-        )
 
     from pinghue.runner import run
 
