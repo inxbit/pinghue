@@ -225,11 +225,11 @@ def test_release_version_surfaces_match_package_version() -> None:
 
     # The demo (GIF) and screenshot (PNG) are real TUI captures, so the version
     # they show is rendered from the package itself and needs no text surface here.
-    assert 'version = "3.0.0"' in pyproject
-    assert "Current version: `3.0.0`." in readme
-    assert example["pinghue_version"] == "3.0.0"
-    assert "v3.0.0" in hero
-    assert "pinghue-3.0.0.tar.gz" in formula
+    assert 'version = "3.0.1"' in pyproject
+    assert "Current version: `3.0.1`." in readme
+    assert example["pinghue_version"] == "3.0.1"
+    assert "v3.0.1" in hero
+    assert "pinghue-3.0.1.tar.gz" in formula
     assert "pinghue-2.1.0.tar.gz" not in formula
 
 
