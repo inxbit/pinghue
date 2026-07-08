@@ -89,7 +89,7 @@ Previously relevant medium-risk classes are now controlled:
 - Security diff scan of modified runtime, workflow, site, packaging, and hardening files: no issues identified.
 - `.venv/bin/ruff check .`: all checks passed.
 - `.venv/bin/mypy src`: no issues in 14 source files.
-- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 199 passed with 87.81% coverage, above the configured 80% floor.
+- `.venv/bin/pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80`: 200 passed with 87.81% coverage, above the configured 80% floor.
 - `node --test tests/site_pages.test.mjs`: site contract test passed.
 - `.venv/bin/pip-audit --skip-editable .`: no known vulnerabilities found.
 - `SOURCE_DATE_EPOCH=0 .venv/bin/python -m build --no-isolation`: built `pinghue-3.0.1.tar.gz` and `pinghue-3.0.1-py3-none-any.whl`.

@@ -1,5 +1,6 @@
 import json
 import re
+import struct
 from pathlib import Path
 
 
@@ -11,6 +12,66 @@ def package_version() -> str:
     match = re.search(r'^version = "([^"]+)"$', read("pyproject.toml"), re.MULTILINE)
     assert match is not None
     return match.group(1)
+
+
+def png_text_chunks(path: str) -> dict[str, str]:
+    data = Path(path).read_bytes()
+    signature = b"\x89PNG\r\n\x1a\n"
+    assert data.startswith(signature)
+    chunks: dict[str, str] = {}
+    position = len(signature)
+    while position < len(data):
+        length = struct.unpack(">I", data[position : position + 4])[0]
+        kind = data[position + 4 : position + 8]
+        payload = data[position + 8 : position + 8 + length]
+        if kind == b"tEXt":
+            key, value = payload.split(b"\0", 1)
+            chunks[key.decode("latin-1")] = value.decode("latin-1")
+        position += 12 + length
+    return chunks
+
+
+def gif_comments(path: str) -> list[str]:
+    data = Path(path).read_bytes()
+    assert data.startswith((b"GIF87a", b"GIF89a"))
+    comments: list[str] = []
+    position = 13
+    packed = data[10]
+    if packed & 0x80:
+        position += 3 * (2 ** ((packed & 0x07) + 1))
+    while position < len(data):
+        introducer = data[position]
+        if introducer == 0x3B:
+            break
+        if introducer == 0x21 and data[position + 1] == 0xFE:
+            position += 2
+            comment = bytearray()
+            while data[position] != 0:
+                size = data[position]
+                position += 1
+                comment.extend(data[position : position + size])
+                position += size
+            comments.append(comment.decode("latin-1"))
+            position += 1
+            continue
+        if introducer == 0x21:
+            position += 2
+            while data[position] != 0:
+                position += 1 + data[position]
+            position += 1
+            continue
+        if introducer == 0x2C:
+            position += 10
+            image_packed = data[position - 1]
+            if image_packed & 0x80:
+                position += 3 * (2 ** ((image_packed & 0x07) + 1))
+            position += 1
+            while data[position] != 0:
+                position += 1 + data[position]
+            position += 1
+            continue
+        raise AssertionError(f"unexpected GIF block 0x{introducer:02x} at byte {position}")
+    return comments
 
 
 def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
@@ -176,6 +237,13 @@ def test_readme_artwork_uses_packaged_real_assets() -> None:
     assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
 
 
+def test_readme_artwork_captures_are_current_package_version() -> None:
+    expected = f"pinghue {package_version()}"
+
+    assert f"pinghue-version={expected}" in gif_comments("docs/assets/pinghue-demo.gif")
+    assert png_text_chunks("docs/assets/pinghue-screenshot.png")["pinghue-version"] == expected
+
+
 def test_release_checklist_revalidates_release_security_gates() -> None:
     checklist = read("docs/release-checklist.md")
 
@@ -242,29 +310,34 @@ def test_release_version_surfaces_match_package_version() -> None:
 
 
 def test_release_text_surfaces_do_not_reference_stale_current_version() -> None:
+    version = package_version()
     text_surfaces = [
+        "pyproject.toml",
         "README.md",
         "SECURITY.md",
         "security-best-practices-report.md",
+        "CONTRIBUTING.md",
         "examples/pinghue-output-example.json",
         "docs/index.html",
         "docs/assets/pinghue-hero.svg",
         "docs/assets/pinghue-favicon.svg",
         "packaging/homebrew/pinghue.rb",
     ]
-    stale_tokens = [
-        'version = "3.0.0"',
-        "Current version: `3.0.0`",
-        '"pinghue_version": "3.0.0"',
-        "pinghue 3.0.0",
-        "pinghue-3.0.0",
-        "v3.0.0",
+    current_version_patterns = [
+        re.compile(r'version = "(\d+\.\d+\.\d+)"'),
+        re.compile(r"Current version: `(\d+\.\d+\.\d+)`"),
+        re.compile(r'"pinghue_version": "(\d+\.\d+\.\d+)"'),
+        re.compile(r"pinghue-(\d+\.\d+\.\d+)"),
+        re.compile(r"`pinghue (\d+\.\d+\.\d+)`"),
+        re.compile(r"pinghue v(\d+\.\d+\.\d+)"),
+        re.compile(r"v(\d+\.\d+\.\d+)"),
     ]
 
     for path in text_surfaces:
         text = read(path)
-        for token in stale_tokens:
-            assert token not in text, f"{path} still contains {token}"
+        for pattern in current_version_patterns:
+            for match in pattern.finditer(text):
+                assert match.group(1) == version, f"{path} still contains {match.group(0)}"
 
 
 def test_security_policy_matches_stable_support_line() -> None:

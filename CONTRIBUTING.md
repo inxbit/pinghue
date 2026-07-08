@@ -22,6 +22,9 @@ brew install vhs ffmpeg
 scripts/gen-readme-assets.sh
 ```
 
+The generator verifies the local `pinghue --version` value against
+`pyproject.toml` and embeds that version in the generated GIF/PNG metadata.
+
 The hero image (`docs/assets/pinghue-hero.svg`) is hand-authored.
 
 ## Commit and PR Policy
