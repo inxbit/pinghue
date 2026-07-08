@@ -6,6 +6,14 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Changed
+
+- Combining `--output -` with the TUI now prints a stderr warning pointing at `--no-tui`, since the JSON document lands on stdout after the TUI exits.
+
+### Fixed
+
+- `--no-tui --output -` no longer interleaves per-probe lines with the JSON document on stdout; the per-probe lines move to stderr so stdout stays machine-parseable.
+
 ## 3.0.0 - 2026-07-02
 
 ### Breaking

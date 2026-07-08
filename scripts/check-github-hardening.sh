@@ -178,8 +178,27 @@ require_pypi_environment() {
   fi
 }
 
+require_pages_site() {
+  local expected_domain
+  expected_domain="$(tr -d '[:space:]' < "${script_dir}/../docs/CNAME")"
+
+  local pages_state
+  pages_state="$(
+    gh api "repos/${repo}/pages" \
+      --jq '[.build_type, .cname // "", (.https_enforced | tostring), .https_certificate.state // ""] | join("|")'
+  )"
+
+  local expected_state="workflow|${expected_domain}|true|approved"
+  if [[ "${pages_state}" != "${expected_state}" ]]; then
+    printf 'pages site drifted (build_type|cname|https_enforced|certificate): got "%s", expected "%s"\n' \
+      "${pages_state}" "${expected_state}" >&2
+    exit 1
+  fi
+}
+
 require_ruleset "protect main" "branch" "${settings_dir}/main-ruleset.json"
 require_ruleset "protect release tags" "tag" "${settings_dir}/release-tag-ruleset.json"
 require_pypi_environment
+require_pages_site
 
 printf 'repository hardening checks passed for %s\n' "${repo}"

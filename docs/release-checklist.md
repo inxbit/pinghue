@@ -42,6 +42,7 @@ Re-verify hosted hardening before every release, even when no repository setting
 - The `pypi` environment still requires manual approval and is limited to `v*.*.*` tag deployments.
 - PyPI trusted publishing still points at owner `inxbit`, repository `pinghue`, workflow `publish.yml`, and environment `pypi`.
 - The publish workflow still uses GitHub artifact attestations for `dist/*`.
+- The GitHub Pages custom domain still points at `pinghue.com`, the certificate is approved with HTTPS enforced (`scripts/check-github-hardening.sh` verifies this), and the DNS records at the provider still match the GitHub Pages A/AAAA/CNAME set.
 
 Sigstore wheel signing is intentionally deferred for this single-maintainer project. Current releases rely on signed Git tags, PyPI trusted publishing, and GitHub artifact attestations for provenance. Revisit Sigstore wheel signing before adding additional maintainers or changing the release trust model.
 

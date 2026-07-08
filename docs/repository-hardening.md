@@ -56,6 +56,10 @@ Check the hosted settings for drift:
 scripts/check-github-hardening.sh inxbit/pinghue
 ```
 
+The drift check covers the branch and tag rulesets, the `pypi` environment,
+and the GitHub Pages site (workflow build type, custom domain matching
+`docs/CNAME`, HTTPS enforcement, and certificate state).
+
 `.github/workflows/repository-hardening.yml` runs the same drift check on a
 weekly schedule and whenever repository-hardening files change.
 

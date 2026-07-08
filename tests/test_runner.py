@@ -1,4 +1,5 @@
 import asyncio
+import io
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +42,29 @@ def build_args(**overrides: object) -> SimpleNamespace:
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_print_sample_routes_both_branches_to_given_stream() -> None:
+    stream = io.StringIO()
+    target = TargetRun(
+        target="1.1.1.1",
+        resolved_address="1.1.1.1",
+        resolved_family=AddressFamily.IPV4,
+    )
+    sample = ProbeSample(
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        latency_ms=2.0,
+        status=SampleStatus.OK,
+    )
+
+    runner.print_sample(target, sample, stream=stream)
+    failed = TargetRun(target="bad.example", error="resolution failed")
+    runner.print_sample(failed, None, stream=stream)
+
+    lines = stream.getvalue().splitlines()
+    assert len(lines) == 2
+    assert "1.1.1.1 ok latency=2.00ms" in lines[0]
+    assert "bad.example dns_failure error=resolution failed" in lines[1]
 
 
 async def test_run_writes_configured_host_label(

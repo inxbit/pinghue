@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import TextIO
 
 from pinghue.config import RunConfig
 from pinghue.display import sanitize_display
@@ -297,12 +299,16 @@ async def probe_target_loop(
             immediate_event.clear()
 
 
-def print_sample(target: TargetRun, sample: ProbeSample | None) -> None:
+def print_sample(
+    target: TargetRun, sample: ProbeSample | None, *, stream: TextIO | None = None
+) -> None:
+    out = sys.stdout if stream is None else stream
     target_text = sanitize_display(target.target)
     if sample is None:
         print(
             f"{datetime.now(timezone.utc).isoformat()} "
-            f"{target_text} dns_failure error={sanitize_display(target.error or '')}"
+            f"{target_text} dns_failure error={sanitize_display(target.error or '')}",
+            file=out,
         )
         return
 
@@ -310,7 +316,8 @@ def print_sample(target: TargetRun, sample: ProbeSample | None) -> None:
     error = "" if sample.error is None else f" error={sanitize_display(sample.error)}"
     print(
         f"{sample.timestamp.isoformat()} {target_text} "
-        f"{sample.status.value} latency={latency}{error}"
+        f"{sample.status.value} latency={latency}{error}",
+        file=out,
     )
 
 
@@ -357,6 +364,9 @@ async def run_no_tui(
     exit_reason = "completed"
     iteration = 0
     executor = _icmp_executor(args, mode)
+    # With `--output -` the JSON document owns stdout; per-probe lines move to
+    # stderr so the exported document stays machine-parseable.
+    sample_stream = sys.stderr if args.output is not None and str(args.output) == "-" else None
 
     try:
         targets = await resolve_runs(args)
@@ -379,7 +389,7 @@ async def run_no_tui(
 
             for target in targets:
                 sample = next(sample_by_target)
-                print_sample(target, sample)
+                print_sample(target, sample, stream=sample_stream)
 
             if args.count is not None and iteration >= args.count:
                 break

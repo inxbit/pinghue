@@ -307,6 +307,13 @@ def main(argv: list[str] | None = None) -> int:
         resolve_name = args.resolve_name or (args.targets[0] if args.targets else None)
         return run_check(quiet=args.quiet, resolve_name=resolve_name)
 
+    if not args.no_tui and args.output is not None and str(args.output) == "-":
+        print(
+            "pinghue: warning: --output - writes the JSON document to stdout after "
+            "the TUI exits; use --no-tui for machine-readable capture",
+            file=sys.stderr,
+        )
+
     from pinghue.runner import run
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
