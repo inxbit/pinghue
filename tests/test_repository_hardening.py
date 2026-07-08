@@ -341,8 +341,10 @@ def test_release_text_surfaces_do_not_reference_stale_current_version() -> None:
 
 
 def test_security_policy_matches_stable_support_line() -> None:
+    major = package_version().split(".", 1)[0]
     security = read("SECURITY.md")
+    supported_major_lines = re.findall(r"`(\d+)\.x`\s+\|\s+Yes", security)
 
-    assert "`3.x` | Yes" in security
-    assert "`2.x` | Yes" not in security
-    assert "`1.x` | Yes" not in security
+    assert f"`{major}.x` | Yes" in security
+    assert f"`<{major}.0` | No" in security
+    assert supported_major_lines == [major]
