@@ -1,4 +1,7 @@
-.venv/
+# .venv may be a symlink to .venv.nosync (keeps iCloud Drive from flagging
+# virtualenv files hidden, which makes Python skip .pth files).
+.venv
+.venv.nosync/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
