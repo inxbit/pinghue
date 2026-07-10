@@ -119,7 +119,7 @@ def test_requirements_audit_is_hash_pinned() -> None:
     requirements = read("requirements-audit.txt")
 
     assert "pip-audit==" in requirements
-    assert "setuptools==82.0.1" in requirements
+    assert "setuptools==83.0.0" in requirements
     assert "wheel==0.47.0" in requirements
     assert "--hash=sha256:" in requirements
 
@@ -129,7 +129,7 @@ def test_requirements_build_is_hash_pinned() -> None:
     requirements = read("requirements-build.txt")
 
     assert "build==1.5.0" in requirements
-    assert "setuptools==82.0.1" in requirements
+    assert "setuptools==83.0.0" in requirements
     assert "wheel==0.47.0" in requirements
     assert "--hash=sha256:" in requirements
 
