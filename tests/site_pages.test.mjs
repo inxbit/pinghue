@@ -24,6 +24,19 @@ test('GitHub Pages site has the expected static contract', () => {
 
   const html = read('docs/index.html');
   const css = read('docs/styles.css');
+  assert.match(css, /--nav-height:\s*64px/);
+  assert.match(css, /--radius-shell:\s*24px/);
+  assert.match(css, /--radius-core:\s*18px/);
+  assert.match(css, /\.terminal-shell/);
+  assert.match(css, /\.proof-rail/);
+  assert.match(css, /\.mode-cascade/);
+  assert.match(css, /\.signal-runway/);
+  assert.match(css, /\.media-shell/);
+  assert.match(css, /\.js \.reveal-ready/);
+  assert.match(css, /prefers-reduced-motion:\s*reduce/);
+  assert.match(css, /scroll-behavior:\s*auto/);
+  assert.doesNotMatch(css, /height:\s*100vh/);
+  assert.doesNotMatch(css, /rgba\(0,\s*0,\s*0,\s*0\.45\)/);
   const title = 'PingHue - concurrent ICMP and TCP ping monitor';
   const description = 'Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.';
 
