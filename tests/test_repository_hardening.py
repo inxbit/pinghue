@@ -171,7 +171,7 @@ def test_requirements_audit_is_hash_pinned() -> None:
     requirements = read("requirements-audit.txt")
 
     assert "pip-audit==" in requirements
-    assert "setuptools==82.0.1" in requirements
+    assert "setuptools==83.0.0" in requirements
     assert "wheel==0.47.0" in requirements
     assert "--hash=sha256:" in requirements
 
@@ -181,7 +181,7 @@ def test_requirements_build_is_hash_pinned() -> None:
     requirements = read("requirements-build.txt")
 
     assert "build==1.5.0" in requirements
-    assert "setuptools==82.0.1" in requirements
+    assert "setuptools==83.0.0" in requirements
     assert "wheel==0.47.0" in requirements
     assert "--hash=sha256:" in requirements
 
@@ -190,8 +190,8 @@ def test_build_backend_metadata_support_and_lock_stay_aligned() -> None:
     pyproject = read("pyproject.toml")
     requirements = read("requirements-build.txt")
 
-    assert 'requires = ["setuptools==82.0.1", "wheel==0.47.0"]' in pyproject
-    assert "setuptools==82.0.1" in requirements
+    assert 'requires = ["setuptools==83.0.0", "wheel==0.47.0"]' in pyproject
+    assert "setuptools==83.0.0" in requirements
     assert "wheel==0.47.0" in requirements
 
 
