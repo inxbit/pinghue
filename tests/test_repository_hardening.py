@@ -183,6 +183,27 @@ def test_requirements_audit_covers_supported_python_floor() -> None:
     assert "typing-extensions==" in requirements
 
 
+def test_development_requirements_cover_supported_python_floor() -> None:
+    requirements = read("requirements.txt")
+
+    assert "--python-version 3.10" in requirements
+    assert re.search(
+        r"^backports-tarfile==\S+ ; .*python_full_version < '3\.12'",
+        requirements,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^rpds-py==\S+ ; python_full_version < '3\.11' \\$",
+        requirements,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^rpds-py==\S+ ; python_full_version >= '3\.11' \\$",
+        requirements,
+        re.MULTILINE,
+    )
+
+
 def test_requirements_build_is_hash_pinned() -> None:
     # L14: the build backend is pinned with sha256 hashes for --require-hashes.
     requirements = read("requirements-build.txt")
@@ -492,7 +513,9 @@ def test_example_output_contains_a_possible_retained_sample_tail() -> None:
         if sent == len(samples):
             reconstructed = [
                 ProbeSample(
-                    timestamp=datetime.fromisoformat(sample["timestamp"]),
+                    timestamp=datetime.fromisoformat(
+                        sample["timestamp"].replace("Z", "+00:00")
+                    ),
                     latency_ms=sample["latency_ms"],
                     status=SampleStatus(sample["status"]),
                     error=sample["error"],
