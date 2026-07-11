@@ -57,13 +57,15 @@
 
   <!-- ============================== hero ============================== -->
   <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-copy" data-reveal>
-      <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
-      <h1 id="hero-title">
-        <span class="hero-line">Watch the whole</span>
-        <span class="hero-line">window.</span>
-      </h1>
-      <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
+    <div class="hero-copy">
+      <div class="hero-message" data-reveal>
+        <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
+        <h1 id="hero-title">
+          <span class="hero-line">Watch the</span>
+          <span class="hero-line">whole window.</span>
+        </h1>
+        <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
+      </div>
       <div class="install-line">
         <code id="hero-install">uv tool install pinghue</code>
         <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy install command">Copy</button>
@@ -76,9 +78,10 @@
           <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
           <span class="term-clock" data-clock>00:04</span>
         </figcaption>
-        <div class="term-body" role="img" aria-label="Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run.">
-          <table class="term-table" aria-hidden="true">
-            <thead><tr><th>HOST</th><th>LAST</th><th>AVG</th><th>LOSS</th><th>JITTER</th><th>STATE</th><th class="th-hist">HISTORY</th></tr></thead>
+        <div class="term-body">
+          <table class="term-table">
+            <caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run.</caption>
+            <thead><tr><th scope="col">HOST</th><th scope="col">LAST</th><th scope="col">AVG</th><th scope="col">LOSS</th><th scope="col">JITTER</th><th scope="col">STATE</th><th scope="col" class="th-hist">HISTORY</th></tr></thead>
             <tbody data-rows>
               <tr data-static-row><td class="t-host">edge-router-1</td><td class="t-num">9.1ms</td><td class="t-num">9.4ms</td><td class="t-num">0%</td><td class="t-num">0.2ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▃▃▃▃</span></td></tr>
               <tr data-static-row><td class="t-host">edge-router-2</td><td class="t-num">12.4ms</td><td class="t-num">11.8ms</td><td class="t-num">0%</td><td class="t-num">0.3ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
@@ -216,7 +219,7 @@
 
   <!-- ============================== not ============================== -->
   <section class="section scope-section" id="not" data-reveal>
-    <p class="kicker"><span class="glyph">· · ·</span> # what pinghue is not</p>
+    <p class="kicker"># what pinghue is not</p>
     <h2>Small on purpose.</h2>
     <ul class="not-list">
       <li>Not a Prometheus, Smokeping, Zabbix, or NMS replacement.</li>

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 
@@ -92,7 +92,7 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(attributeCount(terminal[0], 'data-clock'), 1);
   assert.equal(attributeCount(html, 'data-static-row'), 8);
   assert.equal(attributeCount(terminal[0], 'data-static-row'), 8);
-  assert.match(html, /aria-label="Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run\."/);
+  assert.match(html, /<caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run\.<\/caption>/);
 
   assert.equal(attributeCount(html, 'data-copy-status'), 1);
   assert.match(html, /role="status"[^>]*aria-live="polite"[^>]*data-copy-status/);
@@ -114,7 +114,7 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal((html.match(/class="signal-step"/g) || []).length, 10);
 
   assert.equal(attributeCount(html, 'data-reveal'), 10);
-  for (const className of ['hero-copy', 'terminal-shell', 'proof-rail', 'product-proof']) {
+  for (const className of ['hero-message', 'terminal-shell', 'proof-rail', 'product-proof']) {
     assert.match(
       html,
       new RegExp('<(?:div|section)(?=[^>]*class="[^"]*' + className + '[^"]*")(?=[^>]*\\sdata-reveal(?:\\s|>))[^>]*>'),
@@ -248,15 +248,18 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
     signalReference.test(gradient)
   ));
 
-  // The identity wordmark is the sole decorative use of the signal palette.
-  assert.equal(signalGradients.length, 1);
+  // The wordmark and committed identity ribbon are the only decorative signal gradients.
+  assert.equal(signalGradients.length, 2);
   const wordmarkRule = cssRuleBody(css, '.wm-hue');
+  const ribbonRule = cssRuleBody(css, '.hue-ribbon');
   assert.match(wordmarkRule, /linear-gradient/);
-  assert.equal(wordmarkRule.includes(signalGradients[0]), true);
+  assert.match(ribbonRule, /linear-gradient/);
+  assert.equal(signalGradients.every((gradient) => (
+    wordmarkRule.includes(gradient) || ribbonRule.includes(gradient)
+  )), true);
 
   for (const selector of [
     'body',
-    '.hue-ribbon',
     '.ledger-item dt',
     '.install-line code',
     '.install-row code',
@@ -276,7 +279,7 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
   assert.ok(scopeSection);
   assert.doesNotMatch(scopeSection[0], /class="glyph (?:green|amber|red|blue)"/);
 
-  const heroTitle = /<h1 id="hero-title">\s*<span class="hero-line">Watch the whole<\/span>\s*<span class="hero-line">window\.<\/span>\s*<\/h1>/;
+  const heroTitle = /<h1 id="hero-title">\s*<span class="hero-line">Watch the<\/span>\s*<span class="hero-line">whole window\.<\/span>\s*<\/h1>/;
   assert.match(html, heroTitle);
   assert.equal((html.match(/class="hero-line"/g) || []).length, 2);
   assert.match(cssRuleBody(css, '.hero-line'), /display:\s*block/);
@@ -309,6 +312,105 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
   assert.match(
     css,
     /@media\s*\(max-width:\s*767px\)[\s\S]*?\.hero h1\s*\{[^}]*font-size:\s*clamp\(2\.15rem,\s*10\.5vw,\s*4\.5rem\)/,
+  );
+});
+
+test('hero uses distinct desktop columns and keeps install outside reveal choreography', () => {
+  const html = read('docs/index.html');
+  const css = stripCssComments(read('docs/styles.css'));
+  const hero = html.match(/<section class="hero"[\s\S]*?<\/section>/);
+  assert.ok(hero);
+  assert.match(hero[0], /<div class="hero-copy">\s*<div class="hero-message" data-reveal>/);
+  assert.match(hero[0], /<\/div>\s*<div class="install-line">/);
+  assert.doesNotMatch(hero[0], /<div class="hero-copy" data-reveal>/);
+  assert.match(cssRuleBody(css, '.hero'), /grid-template-columns:\s*minmax\(0,\s*0\.92fr\)\s+minmax\(0,\s*1\.58fr\)/);
+  assert.match(cssRuleBody(css, '.hero-copy'), /grid-column:\s*1/);
+  assert.match(cssRuleBody(css, '.terminal-shell'), /grid-column:\s*2/);
+  assert.match(cssRuleBody(css, '.hero h1'), /font-size:\s*clamp\(2\.75rem,\s*4\.25vw,\s*4rem\)/);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.hero\s*\{[^}]*grid-template-columns:\s*1fr/,
+  );
+});
+
+test('copy controls require JavaScript and mobile no-JS navigation stays one-row scrollable', () => {
+  const css = stripCssComments(read('docs/styles.css'));
+  assert.match(cssRuleBody(css, '.copy-btn'), /display:\s*none/);
+  assert.match(cssRuleBody(css, '.js .copy-btn'), /display:\s*inline-grid/);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav-shell\s*\{[^}]*height:\s*var\(--nav-height\)[^}]*overflow:\s*hidden/,
+  );
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav-links\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/,
+  );
+});
+
+test('all public navigation and footer links meet the 44px target contract', () => {
+  const css = stripCssComments(read('docs/styles.css'));
+  for (const selector of ['.wordmark', '.nav-links a', '.footer nav a']) {
+    const rule = cssRuleBody(css, selector);
+    assert.match(rule, /min-width:\s*44px/, selector);
+    assert.match(rule, /min-height:\s*44px/, selector);
+  }
+  const notFound = read('docs/404.html');
+  assert.match(notFound, /class="wordmark lost-wordmark" href="\/" aria-label="PingHue home"/);
+});
+
+test('hero terminal exposes a real table without a live-region flood', () => {
+  const html = read('docs/index.html');
+  const terminal = html.match(/<figure(?=[^>]*\sdata-terminal(?:\s|>))[^>]*>[\s\S]*?<\/figure>/);
+  assert.ok(terminal);
+  assert.match(terminal[0], /<table class="term-table">/);
+  assert.match(terminal[0], /<caption class="visually-hidden">/);
+  assert.equal((terminal[0].match(/<th scope="col"/g) || []).length, 7);
+  assert.doesNotMatch(terminal[0], /role="img"/);
+  assert.doesNotMatch(terminal[0], /<table[^>]*aria-hidden/);
+  assert.doesNotMatch(terminal[0], /aria-live/);
+});
+
+test('social card signal uses the real fixed green and amber scale', () => {
+  const socialCard = read('scripts/site-social-card.html');
+  assert.match(
+    socialCard,
+    /<div class="signal"><span class="green">▁▂▃▄▅<\/span><span class="amber">▆▇█<\/span><\/div>/,
+  );
+  assert.match(socialCard, /\.signal \.green\s*\{[^}]*color:\s*#7ee787/);
+  assert.match(socialCard, /\.signal \.amber\s*\{[^}]*color:\s*#f2cc60/);
+  assert.doesNotMatch(socialCard, /\.signal\s*\{[^}]*color:\s*#7ee787/);
+});
+
+test('social card generator validates a same-directory temporary file before atomic replacement', () => {
+  const generator = read('scripts/gen-site-social-card.sh');
+  const mktempIndex = generator.indexOf('mktemp "$output_dir/');
+  const validateIndex = generator.indexOf('python3 - "$temp_output"');
+  const moveIndex = generator.indexOf('mv -f -- "$temp_output" "$output"');
+  assert.notEqual(mktempIndex, -1);
+  assert.match(generator, /temp_stub="\$\(mktemp "\$output_dir\/\.pinghue-social-card\.tmp\.XXXXXX"\)"/);
+  assert.match(generator, /temp_output="\$\{temp_stub\}\.png"/);
+  assert.equal(validateIndex > mktempIndex, true);
+  assert.equal(moveIndex > validateIndex, true);
+  assert.match(generator, /trap cleanup EXIT HUP INT TERM/);
+  assert.doesNotMatch(generator, /--screenshot="\$output"/);
+});
+
+test('scope kicker and ambient surface stay operational and locally textured', () => {
+  const html = read('docs/index.html');
+  const css = stripCssComments(read('docs/styles.css'));
+  const scopeSection = html.match(/<section(?=[^>]*\sid="not")[^>]*>[\s\S]*?<\/section>/);
+  assert.ok(scopeSection);
+  assert.match(scopeSection[0], /<p class="kicker"># what pinghue is not<\/p>/);
+  assert.doesNotMatch(scopeSection[0], /· · ·/);
+  assert.doesNotMatch(cssRuleBody(css, 'body'), /radial-gradient/);
+  assert.match(cssRuleBody(css, 'body::before'), /slate-texture\.jpg/);
+});
+
+test('published docs tree excludes local workflow artifacts', () => {
+  const publishedPaths = readdirSync('docs', { recursive: true }).map(String);
+  assert.deepEqual(
+    publishedPaths.filter((path) => path.includes('2026-07-11-pinghue-signal-theatre')),
+    [],
   );
 });
 
