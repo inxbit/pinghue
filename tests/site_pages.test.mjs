@@ -20,7 +20,27 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(existsSync('docs/fonts/jetbrains-mono-var-latin.woff2'), true);
 
   const html = read('docs/index.html');
-  assert.match(html, /<title>pinghue - colored concurrent ping monitor for maintenance windows<\/title>/);
+  const title = 'PingHue - concurrent ICMP and TCP ping monitor';
+  const description = 'Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.';
+
+  assert.equal(html.includes('<title>' + title + '</title>'), true);
+  assert.equal(html.includes('<meta name="description" content="' + description + '">'), true);
+  assert.equal(html.includes('<meta property="og:title" content="' + title + '">'), true);
+  assert.equal(html.includes('<meta property="og:description" content="' + description + '">'), true);
+  assert.equal(html.includes('<meta name="twitter:title" content="' + title + '">'), true);
+  assert.equal(html.includes('<meta name="twitter:description" content="' + description + '">'), true);
+
+  assert.equal(
+    read('docs/robots.txt'),
+    'User-agent: *\nAllow: /\nSitemap: https://pinghue.com/sitemap.xml\n',
+  );
+  assert.equal(
+    read('docs/sitemap.xml'),
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+      '  <url><loc>https://pinghue.com/</loc></url>\n' +
+      '</urlset>\n',
+  );
   // Visible copy carries no em/en dashes (design contract).
   assert.doesNotMatch(html, /[—–]/);
   assert.doesNotMatch(read('docs/404.html'), /[—–]/);
