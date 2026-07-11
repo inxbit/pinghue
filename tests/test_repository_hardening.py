@@ -176,6 +176,13 @@ def test_requirements_audit_is_hash_pinned() -> None:
     assert "--hash=sha256:" in requirements
 
 
+def test_requirements_audit_covers_supported_python_floor() -> None:
+    requirements = read("requirements-audit.txt")
+
+    assert "--python-version 3.10" in requirements
+    assert "typing-extensions==" in requirements
+
+
 def test_requirements_build_is_hash_pinned() -> None:
     # L14: the build backend is pinned with sha256 hashes for --require-hashes.
     requirements = read("requirements-build.txt")
