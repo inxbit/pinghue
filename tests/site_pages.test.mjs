@@ -30,6 +30,30 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(html.includes('<meta name="twitter:title" content="' + title + '">'), true);
   assert.equal(html.includes('<meta name="twitter:description" content="' + description + '">'), true);
 
+  for (const id of ['why', 'modes', 'scale', 'evidence', 'not', 'install']) {
+    assert.match(html, new RegExp('id="' + id + '"'));
+  }
+
+  assert.match(html, /data-nav\b/);
+  assert.match(html, /data-nav-toggle\b/);
+  assert.match(html, /aria-controls="site-menu"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /id="site-menu"[^>]*data-nav-panel/);
+  assert.match(html, /data-nav-close\b/);
+  assert.match(html, /role="status"[^>]*aria-live="polite"[^>]*data-copy-status/);
+  assert.match(html, /Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes\./);
+  assert.match(html, /class="proof-rail"/);
+  assert.match(html, /Up to 1024/);
+  assert.match(html, /Schema version 1/);
+  assert.match(html, /No server or daemon/);
+  assert.ok((html.match(/data-static-row/g) || []).length >= 6);
+  assert.match(html, /src="assets\/pinghue-screenshot\.png"/);
+  assert.match(html, /width="1600" height="560" loading="lazy" decoding="async"/);
+  assert.match(html, /class="mode mode-primary"/);
+  assert.match(html, /class="signal-runway"/);
+  assert.match(html, /data-reveal/g);
+  assert.ok((html.match(/class="kicker"/g) || []).length <= 2);
+
   assert.equal(
     read('docs/robots.txt'),
     'User-agent: *\nAllow: /\nSitemap: https://pinghue.com/sitemap.xml\n',
