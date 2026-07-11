@@ -13,8 +13,6 @@ on:
       - "docs/**"
       - "tests/site_pages.test.mjs"
       - ".github/workflows/pages.yml"
-  workflow_dispatch:
-
 permissions:
   contents: read
 

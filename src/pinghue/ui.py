@@ -88,7 +88,7 @@ def issue_styles(
     elif target.status != TargetStatus.HEALTHY:
         styles["state"] = RED
 
-    if stats.loss_pct > 0:
+    if stats.received < stats.sent:
         styles["loss"] = RED
 
     if stats.jitter_ms is not None and stats.jitter_ms > jitter_threshold_ms:
@@ -97,13 +97,13 @@ def issue_styles(
     latest = target.samples[-1] if target.samples else None
     if latest and latest.status != SampleStatus.OK:
         styles["last"] = RED
-    elif latest and latest.latency_ms is not None and latest.latency_ms >= slow_latency_ms:
+    elif latest and latest.latency_ms is not None and latest.latency_ms > slow_latency_ms:
         styles["last"] = AMBER
 
-    if stats.avg_ms is not None and stats.avg_ms >= slow_latency_ms:
+    if stats.avg_ms is not None and stats.avg_ms > slow_latency_ms:
         styles["avg"] = AMBER
 
-    if stats.max_ms is not None and stats.max_ms >= slow_latency_ms:
+    if stats.max_ms is not None and stats.max_ms > slow_latency_ms:
         styles["max"] = AMBER
 
     return styles
@@ -156,10 +156,13 @@ def format_state_cell(status: TargetStatus) -> Text:
 
 
 def _history_sample_style(sample: ProbeSample, *, slow_latency_ms: float) -> str:
+    if sample.status == SampleStatus.REFUSED:
+        return AMBER
+
     if sample.status != SampleStatus.OK or sample.latency_ms is None:
         return RED
 
-    if sample.latency_ms >= slow_latency_ms:
+    if sample.latency_ms > slow_latency_ms:
         return AMBER
 
     return GREEN
@@ -185,16 +188,25 @@ def format_history_cell(
     return text
 
 
-def format_history_legend() -> Text:
+def format_history_legend(style: str = "bar") -> Text:
     """Return the bottom legend for history glyphs."""
+    if style == "none":
+        return Text("")
+
     text = Text("history: ", style=MUTED)
-    text.append("▁▂▃ ", style=GREEN)
+    if style == "dots":
+        text.append("• ", style=GREEN)
+    else:
+        text.append("▁▂▃ ", style=GREEN)
     text.append("ok  ", style=MUTED)
-    text.append("▆▇█ ", style=AMBER)
+    if style == "dots":
+        text.append("• ", style=AMBER)
+    else:
+        text.append("▆▇█ ", style=AMBER)
     text.append("slow  ", style=MUTED)
     text.append("·", style=RED)
     text.append(" loss/down  ", style=MUTED)
-    text.append("!", style=RED)
+    text.append("!", style=AMBER)
     text.append(" tcp refused", style=MUTED)
     return text
 

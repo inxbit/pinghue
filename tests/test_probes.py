@@ -39,6 +39,48 @@ async def test_tcp_probe_reports_success(monkeypatch: pytest.MonkeyPatch) -> Non
     assert sample.latency_ms is not None
 
 
+async def test_tcp_probe_reports_success_when_connection_reset_during_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ResettingWriter(FakeWriter):
+        async def wait_closed(self) -> None:
+            raise ConnectionResetError("peer reset during close")
+
+    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
+        return object(), ResettingWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None
+
+
+async def test_tcp_probe_preserves_success_when_cancelled_during_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_started = asyncio.Event()
+
+    class BlockingWriter(FakeWriter):
+        async def wait_closed(self) -> None:
+            close_started.set()
+            await asyncio.Event().wait()
+
+    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
+        return object(), BlockingWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+
+    probe = asyncio.create_task(tcp_probe("127.0.0.1", 443, timeout_s=1.0))
+    await close_started.wait()
+    probe.cancel()
+    sample = await probe
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None
+
+
 async def test_tcp_probe_reports_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     async def open_connection(*_: object) -> tuple[object, FakeWriter]:
         raise ConnectionRefusedError("connection refused")
@@ -194,11 +236,17 @@ class _FakeLoop:
         return future
 
 
-def _install_backend(monkeypatch: pytest.MonkeyPatch, backend: probes._IcmpBackend) -> _FakeLoop:
+def _install_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: probes._IcmpBackend,
+    *,
+    install_executor_loop: bool = False,
+) -> _FakeLoop:
     loop = _FakeLoop()
     monkeypatch.setattr(probes, "_icmp_backend", backend, raising=False)
     monkeypatch.setattr(probes, "_icmp_import_error", None, raising=False)
-    monkeypatch.setattr(asyncio, "get_running_loop", lambda: loop)
+    if install_executor_loop:
+        monkeypatch.setattr(asyncio, "get_running_loop", lambda: loop)
     return loop
 
 
@@ -210,7 +258,7 @@ async def test_icmp_probe_reports_success_via_supplied_executor(
         v4_factory=lambda *_: _FakeSocket(reply=_FakeReply(time=1000.0042)),
         v6_factory=lambda *_: pytest.fail("IPv4 address must use the IPv4 socket"),
     )
-    loop = _install_backend(monkeypatch, backend)
+    loop = _install_backend(monkeypatch, backend, install_executor_loop=True)
 
     sample = await icmp_probe(
         "1.1.1.1",
@@ -222,6 +270,129 @@ async def test_icmp_probe_reports_success_via_supplied_executor(
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms == 4.2
     assert loop.executor is executor
+
+
+async def test_icmp_probe_runs_cancellable_blocking_echo_on_daemon_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _make_backend(
+        v4_factory=lambda *_: pytest.fail("blocking echo is replaced below"),
+        v6_factory=lambda *_: pytest.fail("blocking echo is replaced below"),
+    )
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    worker_is_daemon: list[bool] = []
+
+    def blocking_echo(*_: object, **__: object) -> float:
+        worker_is_daemon.append(threading.current_thread().daemon)
+        started.set()
+        try:
+            release.wait(timeout=1.0)
+            return 1.0
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(probes, "_get_icmp_backend", lambda: backend)
+    monkeypatch.setattr(probes, "_run_icmp_echo", blocking_echo)
+
+    task = asyncio.create_task(
+        icmp_probe("1.1.1.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
+    )
+    try:
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert started.is_set()
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+
+    assert finished.wait(timeout=1.0)
+    assert worker_is_daemon == [True]
+
+
+async def test_daemon_worker_pool_reuses_an_idle_thread() -> None:
+    pool = probes._DaemonWorkerPool(max_workers=2, name="pinghue-test")
+    worker_ids: list[int | None] = []
+
+    def record_worker() -> None:
+        worker_ids.append(threading.current_thread().ident)
+
+    await pool.run(record_worker)
+    await pool.run(record_worker)
+
+    assert len(set(worker_ids)) == 1
+
+
+async def test_daemon_worker_pool_runs_concurrent_submissions_concurrently() -> None:
+    pool = probes._DaemonWorkerPool(max_workers=2, name="pinghue-test")
+    lock = threading.Lock()
+    both_started = threading.Event()
+    started = 0
+
+    def wait_for_peer() -> bool:
+        nonlocal started
+        with lock:
+            started += 1
+            if started == 2:
+                both_started.set()
+        return both_started.wait(timeout=0.25)
+
+    results = await asyncio.gather(pool.run(wait_for_peer), pool.run(wait_for_peer))
+
+    assert results == [True, True]
+
+
+async def test_daemon_worker_pool_recovers_capacity_after_thread_start_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = probes._DaemonWorkerPool(max_workers=1, name="pinghue-test")
+    real_thread = threading.Thread
+
+    class FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("thread creation failed")
+
+    monkeypatch.setattr(threading, "Thread", FailingThread)
+    with pytest.raises(RuntimeError, match="thread creation failed"):
+        await pool.run(lambda: 1)
+
+    monkeypatch.setattr(threading, "Thread", real_thread)
+    assert await pool.run(lambda: 2) == 2
+
+
+async def test_daemon_thread_start_failure_releases_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slots = threading.BoundedSemaphore(1)
+
+    class FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("thread creation failed")
+
+    monkeypatch.setattr(threading, "Thread", FailingThread)
+
+    with pytest.raises(RuntimeError, match="thread creation failed"):
+        await probes._run_daemon_thread(
+            lambda: None,
+            name="pinghue-test",
+            slots=slots,
+            unavailable_error="no worker available",
+        )
+
+    assert slots.acquire(blocking=False)
+    slots.release()
 
 
 async def test_icmp_probe_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None:

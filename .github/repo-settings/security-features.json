@@ -1,0 +1,12 @@
+{
+  "private_vulnerability_reporting": {
+    "enabled": true
+  },
+  "vulnerability_alerts": {
+    "enabled": true
+  },
+  "automated_security_fixes": {
+    "enabled": true,
+    "paused": false
+  }
+}

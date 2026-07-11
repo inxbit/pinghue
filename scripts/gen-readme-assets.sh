@@ -50,7 +50,7 @@ Set Padding 22
 Set BorderRadius 16
 Set Framerate 24
 Hide
-Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor PATH=${bindir}:\$PATH"
+Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor"
 Enter
 Type "clear"
 Enter
@@ -61,7 +61,7 @@ Sleep 1500ms
 Down@120ms 6
 Sleep 12s
 TAPE
-vhs "${tmp}/demo.tape"
+PATH="${bindir}:${PATH}" vhs "${tmp}/demo.tape"
 
 # --- dense screenshot: many hosts, addresses shown; the still is the last frame ---
 cat > "${tmp}/shot.tape" <<TAPE
@@ -74,7 +74,7 @@ Set Padding 22
 Set BorderRadius 16
 Set Framerate 12
 Hide
-Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor PATH=${bindir}:\$PATH"
+Type "unset NO_COLOR; export TERM=xterm-256color COLORTERM=truecolor"
 Enter
 Type "clear"
 Enter
@@ -86,7 +86,7 @@ Type "a"
 Down@90ms 15
 Sleep 19s
 TAPE
-vhs "${tmp}/shot.tape"
+PATH="${bindir}:${PATH}" vhs "${tmp}/shot.tape"
 ffmpeg -y -loglevel error -sseof -0.5 -i "${tmp}/shot.gif" -update 1 -frames:v 1 "${assets}/pinghue-screenshot.png"
 python3 - "${expected_version}" "${assets}/pinghue-demo.gif" "${assets}/pinghue-screenshot.png" <<'PY'
 import binascii

@@ -42,6 +42,30 @@ def test_doctor_linux_blocked_prints_fix_block(monkeypatch: pytest.MonkeyPatch) 
     assert "Not ready for ICMP. TCP mode works. See fixes above." in text
 
 
+def test_doctor_macos_root_warning_avoids_linux_only_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(doctor.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(doctor.platform, "mac_ver", lambda: ("15.5", (), ""))
+    monkeypatch.setattr(doctor.platform, "release", lambda: "24.5.0")
+    monkeypatch.setattr(doctor.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _: ("93.184.215.14", 1.0, None))
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert exit_code == 0
+    assert "Running as root" in text
+    assert "Run pinghue as a regular user" in text
+    assert "ping_group_range" not in text
+    assert "Raw ICMP sockets" not in text
+    assert "ICMP datagram sockets available (root)" in text
+
+
 def test_doctor_reports_ipv6_icmp_unavailable_without_failing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

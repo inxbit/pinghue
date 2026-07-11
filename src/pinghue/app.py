@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,8 +14,10 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from pinghue import __version__
 from pinghue.config import RunConfig
-from pinghue.models import ProbeMode, TargetRun, TargetStatus
+from pinghue.models import ProbeMode, SampleWindow, TargetRun, TargetStatus
 from pinghue.runner import (
+    _monotonic_time,
+    apply_retained_sample_budget,
     probe_once,
     probe_target_loop,
     resolve_run_target,
@@ -31,7 +32,7 @@ from pinghue.ui import (
     sync_target_table,
 )
 
-SLOW_LATENCY_MS = 300.0
+SLOW_LATENCY_MS = 100.0
 UI_REFRESH_INTERVAL = 0.5
 
 
@@ -96,14 +97,15 @@ class PinghueTextualApp(App[None]):
         self.targets: list[TargetRun] = []
         self.started_at = datetime.now(timezone.utc)
         self.ended_at = self.started_at
+        self._deadline_at = (
+            None
+            if args.duration is None
+            else _monotonic_time() + args.duration
+        )
         self.exit_reason = "user_quit"
         self.show_address = False
         self._semaphore = asyncio.Semaphore(args.concurrency)
-        self._probe_executor = (
-            ThreadPoolExecutor(max_workers=args.concurrency)
-            if mode == ProbeMode.ICMP
-            else None
-        )
+        self._probe_executor = None
         self._stop_event = asyncio.Event()
         self._probe_tasks: list[asyncio.Task[None]] = []
         self._resolution_task: asyncio.Task[None] | None = None
@@ -119,7 +121,11 @@ class PinghueTextualApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield DataTable(id="targets")
-        yield Static(format_history_legend(), id="history-legend")
+        if self.args_config.history_style != "none":
+            yield Static(
+                format_history_legend(self.args_config.history_style),
+                id="history-legend",
+            )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -129,6 +135,7 @@ class PinghueTextualApp(App[None]):
             TargetRun(target=target, status=TargetStatus.RESOLVING)
             for target in self.args_config.targets
         ]
+        apply_retained_sample_budget(self.targets)
         self._column_widths = compute_table_layout(
             width=max(self.size.width, 1),
             targets=self.targets,
@@ -155,6 +162,10 @@ class PinghueTextualApp(App[None]):
         try:
             for task in asyncio.as_completed(self._resolution_target_tasks):
                 index, resolved = await task
+                resolved.samples = SampleWindow(
+                    resolved.samples,
+                    maxlen=self.targets[index].samples.maxlen,
+                )
                 self.targets[index] = resolved
                 self._refresh_table()
         except asyncio.CancelledError:
@@ -228,12 +239,18 @@ class PinghueTextualApp(App[None]):
         await asyncio.gather(task, return_exceptions=True)
 
     async def _wait_for_deadline(self) -> None:
-        duration = self.args_config.duration
-        if duration is None:
+        deadline_at = self._deadline_at
+        if deadline_at is None:
+            return
+
+        remaining = max(0.0, deadline_at - _monotonic_time())
+        if remaining == 0:
+            if not self._stop_event.is_set():
+                await self._finish("deadline")
             return
 
         try:
-            await asyncio.wait_for(self._stop_event.wait(), timeout=duration)
+            await asyncio.wait_for(self._stop_event.wait(), timeout=remaining)
         except asyncio.TimeoutError:
             await self._finish("deadline")
 
@@ -283,10 +300,6 @@ class PinghueTextualApp(App[None]):
         await self._stop_probe_tasks()
         await self._stop_background_task(self._deadline_task)
         await self._stop_background_task(self._completion_task)
-        if self._probe_executor is not None:
-            # Don't block teardown joining in-flight pings; drop queued probes.
-            self._probe_executor.shutdown(wait=False, cancel_futures=True)
-            self._probe_executor = None
 
     def _refresh_table(self) -> None:
         try:

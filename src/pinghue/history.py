@@ -45,12 +45,12 @@ def render_history(samples: Sequence[ProbeSample], *, width: int, style: str) ->
     visible = visible_history_samples(samples, width=width)
 
     if style == "dots":
-        return "".join("•" if sample.status == SampleStatus.OK else "·" for sample in visible)
-
-    if style == "sparkline":
         return "".join(
-            history_symbol(sample) if sample.status == SampleStatus.OK else "·"
+            "•" if sample.status == SampleStatus.OK else history_symbol(sample)
             for sample in visible
         )
+
+    if style == "sparkline":
+        return "".join(history_symbol(sample) for sample in visible)
 
     return "".join(history_symbol(sample) for sample in visible)

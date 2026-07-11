@@ -48,7 +48,7 @@
         "samples_window": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum number of most-recent probe samples retained per target in its samples array. Per-target stats are computed over all probes (stats.sent), which can exceed this value on long runs."
+          "description": "Maximum number of most-recent probe samples retained per target in its samples array. This value is reduced uniformly for large target sets to enforce the run-wide retention budget. Per-target stats are computed over all probes (stats.sent), which can exceed this value on long runs."
         },
         "probe": {
           "$ref": "#/$defs/probe_config"

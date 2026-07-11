@@ -3,9 +3,9 @@
   "pinghue_version": "4.0.0",
   "run": {
     "started_at": "2026-05-14T18:32:11.420Z",
-    "ended_at": "2026-05-14T18:35:11.890Z",
+    "ended_at": "2026-05-14T18:32:11.500Z",
     "host": "local",
-    "exit_reason": "user_quit",
+    "exit_reason": "completed",
     "samples_window": 1000,
     "probe": {
       "mode": "icmp",
@@ -23,13 +23,13 @@
       "status": "healthy",
       "error": null,
       "stats": {
-        "sent": 180,
-        "received": 180,
+        "sent": 1,
+        "received": 1,
         "loss_pct": 0.0,
-        "min_ms": 7.8,
-        "avg_ms": 9.4,
-        "max_ms": 18.2,
-        "jitter_ms": 1.1
+        "min_ms": 9.2,
+        "avg_ms": 9.2,
+        "max_ms": 9.2,
+        "jitter_ms": null
       },
       "samples": [
         {

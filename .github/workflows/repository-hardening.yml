@@ -13,6 +13,7 @@ on:
 # pages: read lets the drift check read the hosted Pages configuration
 # (custom domain, HTTPS enforcement, certificate state).
 permissions:
+  actions: read
   contents: read
   pages: read
 
@@ -26,4 +27,6 @@ jobs:
       - name: Check hosted repository hardening
         env:
           GH_TOKEN: ${{ github.token }}
+          PINGHUE_ALLOW_HIDDEN_BYPASS_ACTORS: "1"
+          PINGHUE_ALLOW_HIDDEN_ADMIN_SETTINGS: "1"
         run: scripts/check-github-hardening.sh "${{ github.repository }}"

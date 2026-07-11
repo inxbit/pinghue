@@ -41,6 +41,17 @@ def test_render_history_uses_visible_width_from_tail() -> None:
     assert render_history(samples, width=3, style="none") == ""
 
 
+def test_simplified_history_styles_keep_tcp_refused_distinct() -> None:
+    samples = [
+        make_sample(SampleStatus.OK, 10.0),
+        make_sample(SampleStatus.REFUSED),
+        make_sample(SampleStatus.TIMEOUT),
+    ]
+
+    assert render_history(samples, width=3, style="dots") == "•!·"
+    assert render_history(samples, width=3, style="sparkline") == "▃!·"
+
+
 def test_render_history_accepts_bounded_sample_history() -> None:
     from pinghue.models import SampleWindow
 

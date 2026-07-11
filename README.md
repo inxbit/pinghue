@@ -98,7 +98,8 @@ pinghue --host-label maintenance-window --output maintenance.json 1.1.1.1
 Host files are plain text. Blank lines and `#` comments are ignored. Inline comments
 on host lines are also ignored (`host.example  # comment`).
 Host files must be non-symlink regular files, at most 1 MiB, and at most 5,000
-lines. Each target string is capped at 253 characters.
+lines. A run accepts at most 5,000 unique targets in total, and each target string
+is capped at 253 characters.
 
 ```text
 # edge and core checks
@@ -139,6 +140,8 @@ The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and
 `pinghue` treats CLI flags and JSON exports as compatibility contracts. `schema_version: 1` is the JSON v1 contract: additive fields are non-breaking, but removing fields, changing field types, changing enum values, or changing required-field behavior requires a new schema version.
 
 CLI removals, flag renames, and incompatible behavior changes are deprecated for at least one minor release before removal. Deprecated flags continue to parse during that window and release notes identify the replacement. Patch releases do not intentionally break CLI or JSON consumers.
+
+A narrowly scoped safety or security limit may be enforced without that deprecation window when preserving the old behavior would leave a material resource-exhaustion or integrity risk. The exception must be identified in the release notes and, when it changes accepted CLI behavior, ships only in a major release.
 
 Starting with `1.0.0`, release versions follow semantic versioning: patch releases are bug fixes, minor releases may add compatible behavior, and major releases are reserved for breaking CLI or JSON changes.
 
@@ -192,12 +195,12 @@ pinghue [OPTIONS] [TARGET ...]
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. |
-| `--overwrite` | off | Allow `--output` to replace an existing regular file. |
+| `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file in place. The rewrite is type-safe but not crash-atomic. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
-| `--no-samples` | off | Omit per-probe samples from JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP mode uses a dedicated thread pool sized to this limit. |
+| `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
+| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP daemon workers are bounded by this limit. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
-| `--fail-threshold COUNT` | `3` | Classify a host as down after this many consecutive failed probes. |
+| `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
 | `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
 | `--fail-on-all-down` | off | Exit `3` only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
@@ -212,7 +215,7 @@ pinghue [OPTIONS] [TARGET ...]
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Run completed (and no `--fail-on-*` condition triggered). Interrupting a run with Ctrl-C still evaluates the fail conditions, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. |
+| `0` | Run completed (and no `--fail-on-*` condition triggered). In `--no-tui` mode, interrupting a run with Ctrl-C still evaluates the fail conditions, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. In the TUI, use `q`, which records `user_quit`. |
 | `1` | Runtime error (for example the `--output` file could not be written), or `--check` found the environment not ICMP-ready. |
 | `2` | Usage error: unknown flag or invalid value. |
 | `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
@@ -233,7 +236,7 @@ pinghue [OPTIONS] [TARGET ...]
 The default history style is a fixed-scale colored bar:
 
 - Green bar: successful probe.
-- Amber bar: successful probe at or above the slow-latency threshold.
+- Amber bar: successful probe above the slow-latency threshold.
 - Red `.` / `·`: timeout, loss, or down state.
 - Amber `!`: TCP refused.
 
@@ -256,7 +259,7 @@ Use `--history-style dots`, `--history-style sparkline`, or `--history-style non
 
 ## Host States
 
-`pinghue` classifies each host from the **whole run**, not just the most recent probes. `down` requires `--fail-threshold` consecutive failures; any packet loss, or jitter above `--jitter-threshold`, marks a host `intermittent`. Because loss and jitter are cumulative over the run, a host that blips once and then recovers stays `intermittent` (not `healthy`) until you reset it (`r` or `R` in the TUI). This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
+`pinghue` classifies each host from the **whole run**, not just the most recent probes. Once a host has replied successfully, `down` requires `--fail-threshold` consecutive failures. A run with no successful replies is `down` immediately, even if it ends before the threshold. Any packet loss, or any observed jitter above `--jitter-threshold`, latches the host as `intermittent` until you reset it (`r` or `R` in the TUI). The reported `jitter_ms` remains the current decaying RFC 3550 estimate, so it can later fall below the threshold while the whole-run status stays `intermittent`. This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
 
 ## Slate + Signal Palette
 
@@ -304,7 +307,9 @@ The broader range `0 2147483647` also works, but enables unprivileged ICMP for e
 
 ## JSON Output
 
-`--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. This is the breaking `2.0.0` CLI change for scripts that previously reused the same output file. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
+`--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. Symlinks, sockets, multiply linked regular files, and other unsupported special nodes are never replaced. Existing character devices and FIFOs are written directly only when they can be opened safely as the same node. This is the breaking `2.0.0` CLI change for scripts that previously reused the same output file. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
+
+New report creation is no-clobber and first tries to hard-link a complete temporary report into place atomically. On filesystems without hardlink support (for example exFAT and some FUSE mounts), it falls back to an exclusive create and copy: ordinary errors and handled interrupts remove that fallback file, but an abrupt process or system failure can leave a partial new report. Explicitly overwriting an existing regular file uses a descriptor-verified in-place rewrite so a path race cannot replace a symlink, socket, FIFO, or device node; that path is also not crash-atomic. Evidence workflows should accept a report only after PingHue exits successfully and the JSON parses, then rotate it as a separate step.
 
 ```sh
 pinghue -f hosts.txt --duration 180 --output maintenance.json
@@ -323,7 +328,7 @@ Every output document includes:
 - per-target stats
 - optional per-probe samples
 
-Per-target `stats` (sent, received, loss, latency, jitter) are computed over **every** probe in the run, so `stats.sent` reflects the whole run. The per-target `samples` array retains only the most recent `run.samples_window` probes (currently 1000). On long runs `stats.sent` therefore exceeds `len(samples)` — that is expected windowing, not a truncated file. When reconciling evidence, treat `samples` as the recent tail and `stats` as authoritative for the full run; `--no-samples` omits the array entirely.
+Per-target `stats` (sent, received, loss, latency, jitter) are computed over **every** probe in the run, so `stats.sent` reflects the whole run. The per-target `samples` array retains only the most recent `run.samples_window` probes. The window is at most 1000 per target and is reduced uniformly when needed to keep the run-wide retained tail within 100,000 samples. On long runs `stats.sent` therefore exceeds `len(samples)` — that is expected windowing, not a truncated file. When reconciling evidence, treat `samples` as the recent tail and `stats` as authoritative for the full run; `--no-samples` emits an empty array for every target.
 
 The `run.host` field defaults to `local` to avoid leaking workstation hostnames. Use `--host-label` when a report needs an operator-selected system or maintenance-window label. Operator-visible target, host-label, and error text is escaped outside printable ASCII so terminal controls and visually deceptive Unicode are represented literally.
 
@@ -348,26 +353,22 @@ Published release channels:
 4. PyPI trusted publishing through a protected `pypi` environment
 5. Homebrew tap: `inxbit/tap` from `inxbit/homebrew-tap`
 
-The release workflow is tag-driven:
+The release workflow is tag-driven, but only after the release PR has merged.
+Create the signed annotated tag from the merged public `main` commit:
 
 ```sh
-git tag -s vX.Y.Z -m "Release vX.Y.Z"
+git fetch --prune origin
+git tag -s vX.Y.Z -m "Release vX.Y.Z" "$(git rev-parse origin/main)"
+git tag -v vX.Y.Z
 git push origin vX.Y.Z
 ```
 
 ## Development
 
-```sh
-pytest
-pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
-ruff check .
-mypy src
-pip-audit
-SOURCE_DATE_EPOCH=0 python -m build --no-isolation
-twine check dist/*
-```
-
-Run the development commands from a clone installed with `python -m pip install -e ".[dev]"`. The `pytest --cov` line reports line and branch coverage; CI enforces a coverage floor.
+Contributor setup, hash-pinned dependency audits, tests, and build verification
+are documented in the repository's
+[CONTRIBUTING.md](https://github.com/inxbit/pinghue/blob/main/CONTRIBUTING.md).
+Those maintainer tools are intentionally not part of the installed package.
 
 ## License
 

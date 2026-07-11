@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -7,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from pinghue.cli import CONCURRENCY_MAXIMUM, HOST_LABEL_MAXIMUM, TARGET_MAXIMUM, main, parse_args
+from pinghue.cli import (
+    CONCURRENCY_MAXIMUM,
+    HOST_LABEL_MAXIMUM,
+    TARGET_COUNT_MAXIMUM,
+    TARGET_MAXIMUM,
+    main,
+    parse_args,
+)
 
 
 def test_parse_args_defaults_to_icmp_auto_family_and_tui() -> None:
@@ -28,6 +36,23 @@ def test_parse_args_tcp_count_and_no_tui() -> None:
     assert args.port == 443
     assert args.count == 2
     assert args.no_tui is True
+
+
+def test_help_explains_that_no_samples_emits_empty_arrays(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--help"])
+
+    assert excinfo.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "emit empty per-target samples arrays" in help_text
+    normalized_help = re.sub(
+        r"(?<=\w)-\s+(?=\w)",
+        "-",
+        " ".join(help_text.split()),
+    )
+    assert "rewrite an existing single-link regular file in place" in normalized_help
 
 
 def test_parse_args_rejects_too_fast_interval() -> None:
@@ -54,6 +79,13 @@ def test_parse_args_rejects_non_finite_float_values(option: str, value: str) -> 
 def test_parse_args_rejects_overlong_target() -> None:
     with pytest.raises(SystemExit):
         parse_args(["a" * (TARGET_MAXIMUM + 1)])
+
+
+def test_parse_args_rejects_too_many_combined_targets() -> None:
+    targets = [f"host-{index}" for index in range(TARGET_COUNT_MAXIMUM + 1)]
+
+    with pytest.raises(SystemExit):
+        parse_args(targets)
 
 
 def test_parse_args_rejects_overlong_check_resolve_name() -> None:

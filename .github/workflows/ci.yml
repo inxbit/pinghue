@@ -31,19 +31,76 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install package
-        run: python -m pip install -e ".[dev]"
+      - name: Install dependencies and package
+        run: |
+          python -m pip install --require-hashes -r requirements-build.txt
+          python -m pip install --require-hashes -r requirements.txt
+          python -m pip install --no-deps --no-build-isolation -e .
       - name: Ruff
         run: ruff check .
       - name: Mypy
         run: mypy src
       - name: Tests
         run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
-      - name: Install build backend (hash-pinned)
-        run: python -m pip install --require-hashes -r requirements-build.txt
       - name: Build
         run: python -m build --no-isolation
         env:
           SOURCE_DATE_EPOCH: "0"
+      - name: Normalize source distribution
+        run: python scripts/normalize-sdist.py dist/*.tar.gz
+        env:
+          SOURCE_DATE_EPOCH: "0"
       - name: Check package
         run: twine check dist/*
+
+  reproducible-build:
+    name: Reproducible distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install build backend (hash-pinned)
+        run: python -m pip install --require-hashes -r requirements-build.txt
+      - name: Prepare independent source trees
+        run: |
+          mkdir -p "${RUNNER_TEMP}/source-one" "${RUNNER_TEMP}/source-two"
+          git archive --format=tar --output "${RUNNER_TEMP}/source.tar" HEAD
+          tar -xf "${RUNNER_TEMP}/source.tar" -C "${RUNNER_TEMP}/source-one"
+          tar -xf "${RUNNER_TEMP}/source.tar" -C "${RUNNER_TEMP}/source-two"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          for path in Path(os.environ["RUNNER_TEMP"], "source-two").rglob("*"):
+              if path.is_symlink() or not path.is_file():
+                  continue
+              os.utime(path, (1_234_567_890, 1_234_567_890))
+          PY
+      - name: Build first distribution set
+        run: python -m build --no-isolation --outdir "${RUNNER_TEMP}/dist-one"
+        working-directory: ${{ runner.temp }}/source-one
+        env:
+          SOURCE_DATE_EPOCH: "0"
+      - name: Normalize first source distribution
+        run: python scripts/normalize-sdist.py "${RUNNER_TEMP}"/dist-one/*.tar.gz
+        working-directory: ${{ runner.temp }}/source-one
+        env:
+          SOURCE_DATE_EPOCH: "0"
+      - name: Build second distribution set
+        run: python -m build --no-isolation --outdir "${RUNNER_TEMP}/dist-two"
+        working-directory: ${{ runner.temp }}/source-two
+        env:
+          SOURCE_DATE_EPOCH: "0"
+      - name: Normalize second source distribution
+        run: python scripts/normalize-sdist.py "${RUNNER_TEMP}"/dist-two/*.tar.gz
+        working-directory: ${{ runner.temp }}/source-two
+        env:
+          SOURCE_DATE_EPOCH: "0"
+      - name: Compare distribution bytes
+        run: |
+          cmp "${RUNNER_TEMP}"/dist-one/*.whl "${RUNNER_TEMP}"/dist-two/*.whl
+          cmp "${RUNNER_TEMP}"/dist-one/*.tar.gz "${RUNNER_TEMP}"/dist-two/*.tar.gz

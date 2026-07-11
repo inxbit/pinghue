@@ -6,6 +6,7 @@ from typing import Any
 import pinghue.app as app_module
 from pinghue.app import PinghueTextualApp
 from pinghue.models import (
+    MAX_TOTAL_RETAINED_SAMPLES,
     AddressFamily,
     ProbeMode,
     ProbeSample,
@@ -17,6 +18,119 @@ from pinghue.models import (
 
 def test_tui_app_class_is_module_scoped() -> None:
     assert PinghueTextualApp.__module__ == "pinghue.app"
+
+
+def test_tui_omits_history_legend_when_history_is_disabled() -> None:
+    app = PinghueTextualApp(
+        args=build_args(history_style="none"),
+        mode=ProbeMode.ICMP,
+    )
+
+    assert all(getattr(widget, "id", None) != "history-legend" for widget in app.compose())
+
+
+def test_tui_slow_latency_threshold_matches_the_fixed_scale() -> None:
+    assert app_module.SLOW_LATENCY_MS == 100.0
+
+
+async def test_tui_duration_includes_time_elapsed_before_deadline_task(
+    monkeypatch,
+) -> None:
+    now = 100.0
+    waits: list[float] = []
+    reasons: list[str] = []
+
+    monkeypatch.setattr(app_module, "_monotonic_time", lambda: now, raising=False)
+    app = PinghueTextualApp(
+        args=build_args(duration=10.0),
+        mode=ProbeMode.ICMP,
+    )
+    now = 103.0
+
+    async def fake_wait_for(awaitable: Any, *, timeout: float) -> None:
+        awaitable.close()
+        waits.append(timeout)
+        raise asyncio.TimeoutError
+
+    async def fake_finish(reason: str) -> None:
+        reasons.append(reason)
+
+    monkeypatch.setattr(app_module.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(app, "_finish", fake_finish)
+
+    await app._wait_for_deadline()
+
+    assert waits == [7.0]
+    assert reasons == ["deadline"]
+
+
+def test_tui_icmp_uses_daemon_bridge_without_dedicated_executor(monkeypatch) -> None:
+    def no_dedicated_executor(*_: object, **__: object) -> object:
+        raise AssertionError("ICMP probes must use the daemon-thread bridge")
+
+    monkeypatch.setattr(app_module, "ThreadPoolExecutor", no_dedicated_executor, raising=False)
+
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+
+    assert app._probe_executor is None
+
+
+async def test_tui_resolution_preserves_aggregate_sample_budget(monkeypatch) -> None:
+    target_count = 200
+    app = PinghueTextualApp(
+        args=build_args(targets=[f"192.0.2.{index}" for index in range(target_count)]),
+        mode=ProbeMode.ICMP,
+    )
+    app.targets = [
+        TargetRun(target, status=TargetStatus.RESOLVING)
+        for target in app.args_config.targets
+    ]
+    app_module.apply_retained_sample_budget(app.targets)
+
+    async def fake_resolve_one(index: int, target: str) -> tuple[int, TargetRun]:
+        return index, TargetRun(target, resolved_address=target)
+
+    monkeypatch.setattr(app, "_resolve_one_target", fake_resolve_one)
+    monkeypatch.setattr(app, "_refresh_table", lambda: None)
+    monkeypatch.setattr(app, "_start_probe_tasks", lambda: None)
+
+    await app._resolve_targets()
+
+    assert {target.samples.maxlen for target in app.targets} == {
+        MAX_TOTAL_RETAINED_SAMPLES // target_count
+    }
+
+
+async def test_tui_preserves_aggregate_budget_during_partial_resolution(
+    monkeypatch,
+) -> None:
+    target_count = 200
+    app = PinghueTextualApp(
+        args=build_args(targets=[f"host-{index}" for index in range(target_count)]),
+        mode=ProbeMode.ICMP,
+    )
+    table = FakeTable()
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "host-0":
+            return TargetRun(target, resolved_address="192.0.2.1")
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
+    monkeypatch.setattr(app, "set_interval", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module, "resolve_run_target", fake_resolve_run_target)
+
+    await app.on_mount()
+    for _ in range(100):
+        if app.targets[0].resolved_address is not None:
+            break
+        await asyncio.sleep(0)
+
+    expected_window = MAX_TOTAL_RETAINED_SAMPLES // target_count
+    assert app.targets[0].resolved_address == "192.0.2.1"
+    assert {target.samples.maxlen for target in app.targets} == {expected_window}
+    await app.on_unmount()
 
 
 def build_args(**overrides: object) -> SimpleNamespace:

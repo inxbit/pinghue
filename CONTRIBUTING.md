@@ -47,19 +47,28 @@ git config gpg.format ssh
 ## Required Checks Before Merge
 
 ```sh
-pytest
+python -m pip install --require-hashes -r requirements-build.txt
+python -m pip install --require-hashes -r requirements.txt
+python -m pip install --no-deps --no-build-isolation -e .
+pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
 ruff check .
 mypy src
-python -m build
+pip-audit --strict --disable-pip -r requirements.txt
+pip-audit --strict --disable-pip -r requirements-build.txt
+pip-audit --strict --disable-pip -r requirements-audit.txt
+rm -rf build dist src/*.egg-info
+SOURCE_DATE_EPOCH=0 python -m build --no-isolation
+SOURCE_DATE_EPOCH=0 python scripts/normalize-sdist.py dist/*.tar.gz
 twine check dist/*
 ```
 
 ## Release Policy
 
-Releases are tag-driven. The publish workflow requires:
+Releases are tag-driven. Release policy requires:
 
 - a signed release tag
-- GitHub Actions CI passing
+- GitHub Actions CI passing for the exact merged `main` commit before tagging
+- release-workflow validation rerun against the exact tagged commit
 - PyPI trusted publishing configured for `inxbit/pinghue`
 - a protected `pypi` GitHub environment
 

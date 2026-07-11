@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib.machinery
 import importlib.util
 import json
@@ -81,6 +82,9 @@ def test_launcher_uses_editable_direct_url_for_missing_early_import(
         )
         assert entrypoint() == 123
     finally:
+        for name in list(launcher.sys.modules):
+            if name == "pinghue" or name.startswith("pinghue."):
+                launcher.sys.modules.pop(name)
         launcher.sys.modules.update(removed_modules)
 
 
@@ -107,3 +111,183 @@ def test_launcher_shows_clear_error_for_unrecoverable_import_failure(
 
     assert exit_code == 1
     assert "pinghue: unable to start:" in captured.err
+
+
+def test_launcher_shows_clear_error_when_direct_url_metadata_is_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    launcher = _load_launcher_module()
+
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _file_name: None),
+    )
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    monkeypatch.setattr(launcher, "_direct_import_main", _raise_missing_pinghue)
+
+    exit_code = launcher.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert (
+        "pinghue: unable to start: pinghue package metadata is not available"
+        in captured.err
+    )
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "metadata_error",
+    [
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        OSError("metadata read failed"),
+    ],
+)
+def test_launcher_shows_clear_error_when_direct_url_metadata_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    metadata_error: Exception,
+) -> None:
+    launcher = _load_launcher_module()
+
+    def unreadable_metadata(_file_name: str) -> None:
+        raise metadata_error
+
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=unreadable_metadata),
+    )
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    monkeypatch.setattr(launcher, "_direct_import_main", _raise_missing_pinghue)
+
+    assert launcher.main() == 1
+    captured = capsys.readouterr()
+    assert "pinghue package metadata is not available" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("dir_info", [None, [], "editable", {"editable": "yes"}])
+def test_launcher_shows_clear_error_for_malformed_editable_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dir_info: object,
+) -> None:
+    launcher = _load_launcher_module()
+    payload = json.dumps({"dir_info": dir_info, "url": "file:///tmp/pinghue"})
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _file_name: payload),
+    )
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    monkeypatch.setattr(launcher, "_direct_import_main", _raise_missing_pinghue)
+
+    assert launcher.main() == 1
+    captured = capsys.readouterr()
+    assert "pinghue: unable to start:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file://untrusted.example/tmp/pinghue",
+        "file:///tmp/%00pinghue",
+        "https://example.com/pinghue",
+    ],
+)
+def test_launcher_rejects_unsafe_editable_source_urls_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    url: str,
+) -> None:
+    launcher = _load_launcher_module()
+    monkeypatch.setattr(launcher.sys, "path", list(launcher.sys.path))
+    payload = json.dumps({"dir_info": {"editable": True}, "url": url})
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _file_name: payload),
+    )
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    monkeypatch.setattr(launcher, "_direct_import_main", _raise_missing_pinghue)
+
+    assert launcher.main() == 1
+    captured = capsys.readouterr()
+    assert "unexpected editable source URL" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_launcher_removes_failed_candidate_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = _load_launcher_module()
+    payload = json.dumps(
+        {"dir_info": {"editable": True}, "url": "file:///missing/pinghue"}
+    )
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _file_name: payload),
+    )
+    original_import = builtins.__import__
+
+    def missing_pinghue_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pinghue.cli":
+            raise ModuleNotFoundError("No module named", name="pinghue")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_pinghue_import)
+    original_path = list(launcher.sys.path)
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    with pytest.raises(RuntimeError, match="could not resolve"):
+        launcher._load_main_entrypoint(importer=_raise_missing_pinghue)
+
+    assert launcher.sys.path == original_path
+
+
+def test_launcher_does_not_mask_a_missing_dependency_inside_pinghue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = _load_launcher_module()
+    payload = json.dumps(
+        {"dir_info": {"editable": True}, "url": "file:///missing/pinghue"}
+    )
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _file_name: payload),
+    )
+    original_import = builtins.__import__
+
+    def missing_dependency_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pinghue.cli":
+            raise ModuleNotFoundError("No module named", name="textual")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_dependency_import)
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        launcher._load_main_entrypoint(importer=_raise_missing_pinghue)
+
+    assert exc_info.value.name == "textual"
