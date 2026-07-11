@@ -13,7 +13,7 @@ from pathlib import Path
 from pinghue import __version__
 from pinghue.display import sanitize_display
 from pinghue.doctor import run_check
-from pinghue.hostfile import TARGET_MAXIMUM, parse_host_file
+from pinghue.hostfile import TARGET_COUNT_MAXIMUM, TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 
 INTERVAL_MINIMUM = 0.1
@@ -81,7 +81,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="allow --output to replace an existing regular file",
+        help="allow --output to rewrite an existing single-link regular file in place",
     )
     parser.add_argument(
         "--output-mode",
@@ -95,7 +95,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-samples",
         action="store_true",
-        help="omit per-probe samples from JSON output",
+        help="emit empty per-target samples arrays in JSON output",
     )
     parser.add_argument(
         "--concurrency",
@@ -104,7 +104,7 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "maximum concurrent probes, 1-"
             f"{CONCURRENCY_MAXIMUM} "
-            "(ICMP uses a dedicated pool sized to this limit)"
+            "(ICMP daemon workers are bounded by this limit)"
         ),
     )
     parser.add_argument("--jitter-threshold", type=float, default=50.0, metavar="MS")
@@ -258,6 +258,8 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
         parser.error(sanitize_display(str(exc)))
 
     args.targets = dedupe_targets([target.strip() for target in (*args.targets, *file_targets)])
+    if len(args.targets) > TARGET_COUNT_MAXIMUM:
+        parser.error(f"target count must not exceed {TARGET_COUNT_MAXIMUM}")
     for target in args.targets:
         _validate_text_length(parser, "target", target, maximum=TARGET_MAXIMUM)
         if target.startswith("-"):

@@ -174,18 +174,26 @@ def _write_header(lines: list[str]) -> None:
 
 
 def _write_root_warning(lines: list[str], *, use_color: bool) -> None:
-    lines.extend(
-        [
-            (
-                f"{_status(WARN, use_color=use_color)}  Running as root. "
-                "ICMP will work, but this is not recommended."
-            ),
-            "        Prefer one of:",
-            '          sudo sysctl -w net.ipv4.ping_group_range="<gid> <gid>"',
-            "          pinghue -p 443 example.com   # TCP mode, no privileges",
-            "",
-        ]
+    lines.append(
+        f"{_status(WARN, use_color=use_color)}  Running as root. "
+        "ICMP will work, but this is not recommended."
     )
+    if platform.system() == "Linux":
+        lines.extend(
+            [
+                "        Prefer one of:",
+                '          sudo sysctl -w net.ipv4.ping_group_range="<gid> <gid>"',
+                "          pinghue -p 443 example.com   # TCP mode, no privileges",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "        Run pinghue as a regular user; ICMP does not require root here.",
+                "        Or use: pinghue -p 443 example.com",
+            ]
+        )
+    lines.append("")
 
 
 def _write_linux_fix(lines: list[str], *, egid: int) -> None:
@@ -239,7 +247,8 @@ def run_check(
         icmp_ready = loopback_error is None
         if is_root:
             lines.append(
-                f"  {_status(OK, use_color=use_color)}    Raw ICMP sockets available (root)"
+                f"  {_status(OK, use_color=use_color)}    "
+                "ICMP datagram sockets available (root)"
             )
         else:
             lines.append(

@@ -65,7 +65,7 @@
         <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
         <span class="term-clock" data-clock>00:00</span>
       </figcaption>
-      <div class="term-body" role="img" aria-label="Terminal table of eight hosts with latency, loss, jitter, state, and colored history bars. db-primary turns intermittent after a latency spike; backup-nas goes down with red loss markers; the other hosts stay healthy in green.">
+      <div class="term-body" role="img" aria-label="Terminal table of eight hosts with latency, loss, jitter, state, and colored history bars. db-primary turns intermittent after a latency spike; api-gw becomes intermittent after one lost probe; backup-nas goes down with red loss markers; the other hosts stay healthy in green.">
         <table class="term-table" aria-hidden="true">
           <thead>
             <tr><th>HOST</th><th>LAST</th><th>AVG</th><th>LOSS</th><th>JITTER</th><th>STATE</th><th class="th-hist">HISTORY</th></tr>
@@ -167,11 +167,11 @@
       <pre class="json"><code><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json
 <span class="jk">{</span>
   <span class="jq">"schema_version"</span>: <span class="jn">1</span>,
-  <span class="jq">"pinghue_version"</span>: <span class="js">"4.0.0"</span>,
-  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="js">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="js">"duration"</span>, <span class="jc">…</span> },
+  <span class="jq">"pinghue_version"</span>: <span class="js">"5.0.0"</span>,
+  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="js">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="js">"deadline"</span>, <span class="jc">…</span> },
   <span class="jq">"targets"</span>: [
-    { <span class="jq">"target"</span>: <span class="js">"db-primary"</span>, <span class="jq">"state"</span>: <span class="js c-amber">"intermittent"</span>,
-      <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.1</span>, <span class="jc">…</span> } }
+    { <span class="jq">"target"</span>: <span class="js">"db-primary"</span>, <span class="jq">"status"</span>: <span class="js c-amber">"intermittent"</span>,
+      <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.11</span>, <span class="jc">…</span> } }
   ]
 <span class="jk">}</span></code></pre>
       <ul class="evidence-points">

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools==83.0.0", "wheel==0.47.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pinghue"
-version = "4.0.0"
+version = "5.0.0"
 description = "Colored, concurrent ICMP/TCP ping monitor for the terminal"
 readme = "README.md"
 requires-python = ">=3.10"

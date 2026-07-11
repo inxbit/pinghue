@@ -10,6 +10,14 @@ from enum import Enum
 from typing import cast, overload
 
 MAX_TARGET_SAMPLES = 1_000
+MAX_TOTAL_RETAINED_SAMPLES = 100_000
+
+
+def retained_samples_per_target(target_count: int) -> int:
+    """Return a uniform per-target window within the aggregate sample budget."""
+    if target_count <= 0:
+        return MAX_TARGET_SAMPLES
+    return min(MAX_TARGET_SAMPLES, max(1, MAX_TOTAL_RETAINED_SAMPLES // target_count))
 
 
 class StringEnum(str, Enum):
@@ -83,14 +91,20 @@ class _RunningSampleStats:
     def clear(self) -> None:
         self.sent = 0
         self.received = 0
+        self.consecutive_failures = 0
         self.latency_mean = 0.0
         self.latency_jitter = 0.0
+        self.latency_jitter_max = 0.0
         self.latency_previous: float | None = None
         self.latency_min: float | None = None
         self.latency_max: float | None = None
 
     def add(self, sample: ProbeSample) -> None:
         self.sent += 1
+        if sample.status == SampleStatus.OK:
+            self.consecutive_failures = 0
+        else:
+            self.consecutive_failures += 1
         if sample.status != SampleStatus.OK or sample.latency_ms is None:
             return
 
@@ -103,6 +117,10 @@ class _RunningSampleStats:
         if self.latency_previous is not None:
             difference = abs(latency - self.latency_previous)
             self.latency_jitter += (difference - self.latency_jitter) / 16.0
+            self.latency_jitter_max = max(
+                self.latency_jitter_max,
+                self.latency_jitter,
+            )
         self.latency_previous = latency
         self.latency_min = (
             latency if self.latency_min is None else min(self.latency_min, latency)
@@ -138,7 +156,8 @@ class _RunningSampleStats:
                 jitter_ms=None,
             )
 
-        jitter_ms = round(self.latency_jitter, 2) if received >= 2 else None
+        jitter = self.jitter_ms()
+        jitter_ms = round(jitter, 2) if jitter is not None else None
 
         return SummaryStats(
             sent=sent,
@@ -149,6 +168,14 @@ class _RunningSampleStats:
             max_ms=round(self.latency_max, 2),
             jitter_ms=jitter_ms,
         )
+
+    def jitter_ms(self) -> float | None:
+        """Return the current unrounded RFC 3550 jitter estimate."""
+        return self.latency_jitter if self.received >= 2 else None
+
+    def maximum_jitter_ms(self) -> float | None:
+        """Return the peak unrounded jitter observed during this run."""
+        return self.latency_jitter_max if self.received >= 2 else None
 
 
 class SampleWindow(Sequence[ProbeSample]):
@@ -176,6 +203,10 @@ class SampleWindow(Sequence[ProbeSample]):
 
     def summary(self) -> SummaryStats:
         return self._stats.summary()
+
+    @property
+    def consecutive_failures(self) -> int:
+        return self._stats.consecutive_failures
 
     def __iter__(self) -> Iterator[ProbeSample]:
         return iter(self._items)
@@ -214,7 +245,12 @@ class TargetRun:
     status: TargetStatus = TargetStatus.ERROR
     error: str | None = None
     samples: SampleWindow = field(default_factory=SampleWindow)
-    _last_resolve_time: float = field(default=0.0, init=False, repr=False, compare=False)
+    _last_resolve_time: float | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(cast(object, self.samples), SampleWindow):
@@ -273,21 +309,32 @@ def classify_samples(
     if not samples:
         return TargetStatus.DOWN
 
-    tail = samples[-fail_threshold:] if fail_threshold > 0 else samples[-1:]
-    if len(tail) >= fail_threshold and all(sample.status != SampleStatus.OK for sample in tail):
+    if isinstance(samples, SampleWindow):
+        running_stats = samples._stats
+    else:
+        running_stats = _RunningSampleStats()
+        for sample in samples:
+            running_stats.add(sample)
+
+    effective_fail_threshold = max(1, fail_threshold)
+    failure_threshold_reached = (
+        running_stats.consecutive_failures >= effective_fail_threshold
+    )
+    if failure_threshold_reached:
         return TargetStatus.DOWN
 
-    summary = summarize_samples(samples)
+    summary = running_stats.summary()
     # A window with no successful samples is down, even when the run is shorter
     # than fail_threshold (so the consecutive-failure check above cannot fire).
     # INTERMITTENT requires at least one successful response.
     if summary.received == 0:
         return TargetStatus.DOWN
 
-    if summary.loss_pct > 0:
+    if summary.received < summary.sent:
         return TargetStatus.INTERMITTENT
 
-    if summary.jitter_ms is not None and summary.jitter_ms > jitter_threshold_ms:
+    jitter_ms = running_stats.maximum_jitter_ms()
+    if jitter_ms is not None and jitter_ms > jitter_threshold_ms:
         return TargetStatus.INTERMITTENT
 
     return TargetStatus.HEALTHY

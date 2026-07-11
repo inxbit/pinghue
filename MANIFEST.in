@@ -2,7 +2,6 @@ include README.md
 include LICENSE
 include CHANGELOG.md
 include SECURITY.md
-include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
 include pinghue-threat-model.md
 include security-best-practices-report.md
@@ -12,4 +11,10 @@ include scripts/pinghue
 recursive-include schemas *.json
 recursive-include examples *.json
 recursive-include docs *.md *.svg *.gif *.png
+exclude CONTRIBUTING.md
+exclude docs/release-checklist.md
+exclude docs/repository-hardening.md
 recursive-include tests *.py
+exclude tests/test_repository_hardening.py
+exclude tests/test_github_hardening_apply.py
+exclude tests/test_normalize_sdist.py

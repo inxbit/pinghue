@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import errno
 import ipaddress
+import queue
 import socket
 import threading
 import time
@@ -14,13 +15,15 @@ from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
-from typing import Any
+from typing import Any, TypeVar
 
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
 MAX_FAILOVER_ADDRESSES = 8
 MAX_DNS_DAEMON_THREADS = 16
+MAX_ICMP_DAEMON_THREADS = 1_024
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
+_T = TypeVar("_T")
 
 UNREACHABLE_ERRNOS = {
     value
@@ -57,6 +60,94 @@ class _IcmpBackend:
 
 _icmp_backend: _IcmpBackend | None = None
 _icmp_import_error: ImportError | None = None
+
+
+@dataclass(frozen=True)
+class _DaemonWorkItem:
+    loop: asyncio.AbstractEventLoop
+    future: asyncio.Future[Any]
+    function: Callable[[], Any]
+
+
+class _DaemonWorkerPool:
+    """Run blocking calls on a lazily created, bounded set of daemon threads."""
+
+    def __init__(self, *, max_workers: int, name: str) -> None:
+        if max_workers <= 0:
+            raise ValueError("max_workers must be greater than zero")
+        self._max_workers = max_workers
+        self._name = name
+        self._work_queue: queue.SimpleQueue[_DaemonWorkItem] = queue.SimpleQueue()
+        self._lock = threading.Lock()
+        self._worker_count = 0
+        self._outstanding_work_count = 0
+        self._next_worker_id = 0
+
+    async def run(self, function: Callable[[], _T]) -> _T:
+        """Schedule blocking work and await its result on the calling loop."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[_T] = loop.create_future()
+
+        worker_id: int | None = None
+        with self._lock:
+            self._outstanding_work_count += 1
+            required_workers = min(self._outstanding_work_count, self._max_workers)
+            if self._worker_count < required_workers:
+                self._worker_count += 1
+                self._next_worker_id += 1
+                worker_id = self._next_worker_id
+
+        if worker_id is not None:
+            try:
+                threading.Thread(
+                    target=self._worker,
+                    name=f"{self._name}-{worker_id}",
+                    daemon=True,
+                ).start()
+            except BaseException:
+                with self._lock:
+                    self._worker_count -= 1
+                    self._outstanding_work_count -= 1
+                raise
+
+        self._work_queue.put(
+            _DaemonWorkItem(loop=loop, future=future, function=function)
+        )
+        return await future
+
+    @staticmethod
+    def _deliver_result(future: asyncio.Future[Any], result: Any) -> None:
+        if not future.done():
+            future.set_result(result)
+
+    @staticmethod
+    def _deliver_exception(
+        future: asyncio.Future[Any], exception: BaseException
+    ) -> None:
+        if not future.done():
+            future.set_exception(exception)
+
+    def _worker(self) -> None:
+        while True:
+            item = self._work_queue.get()
+
+            try:
+                result = item.function()
+            except BaseException as exc:  # noqa: BLE001 - delivered on the caller's loop
+                callback = partial(self._deliver_exception, item.future, exc)
+            else:
+                callback = partial(self._deliver_result, item.future, result)
+
+            with self._lock:
+                self._outstanding_work_count -= 1
+            with contextlib.suppress(RuntimeError):
+                item.loop.call_soon_threadsafe(callback)
+
+
+_icmp_worker_pool = _DaemonWorkerPool(
+    max_workers=MAX_ICMP_DAEMON_THREADS,
+    name="pinghue-icmp",
+)
 
 
 def _get_icmp_backend() -> _IcmpBackend:
@@ -115,6 +206,43 @@ def family_from_ip(address: str) -> AddressFamily:
     return _family_from_ip(address)
 
 
+async def _run_daemon_thread(
+    function: Callable[[], _T],
+    *,
+    name: str,
+    slots: threading.BoundedSemaphore,
+    unavailable_error: str,
+) -> _T:
+    """Run blocking work on a bounded daemon thread and await its result."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[_T] = loop.create_future()
+    if not slots.acquire(blocking=False):
+        raise OSError(unavailable_error)
+
+    def deliver(apply: Callable[[], None]) -> None:
+        if not future.done():
+            apply()
+
+    def worker() -> None:
+        try:
+            result = function()
+        except BaseException as exc:  # noqa: BLE001 - re-raised via the future
+            outcome = partial(future.set_exception, exc)
+        else:
+            outcome = partial(future.set_result, result)
+        finally:
+            slots.release()
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(deliver, outcome)
+
+    try:
+        threading.Thread(target=worker, name=name, daemon=True).start()
+    except BaseException:
+        slots.release()
+        raise
+    return await future
+
+
 async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     """Run getaddrinfo on a daemon thread.
 
@@ -124,32 +252,14 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     the libc timeouts would keep the finished process from exiting. A daemon
     thread is abandoned instead.
     """
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[list[Any]] = loop.create_future()
-    if not _dns_thread_slots.acquire(blocking=False):
-        raise OSError(
+    return await _run_daemon_thread(
+        partial(socket.getaddrinfo, target, None, family=family, type=socket.SOCK_STREAM),
+        name="pinghue-dns",
+        slots=_dns_thread_slots,
+        unavailable_error=(
             f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"
-        )
-
-    def deliver(apply: Callable[[], None]) -> None:
-        if not future.done():
-            apply()
-
-    def worker() -> None:
-        try:
-            result = socket.getaddrinfo(target, None, family=family, type=socket.SOCK_STREAM)
-        except BaseException as exc:  # noqa: BLE001 - re-raised via the future
-            outcome = partial(future.set_exception, exc)
-        else:
-            outcome = partial(future.set_result, result)
-        finally:
-            _dns_thread_slots.release()
-        # RuntimeError: loop already closed; the caller has moved on.
-        with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(deliver, outcome)
-
-    threading.Thread(target=worker, name="pinghue-dns", daemon=True).start()
-    return await future
+        ),
+    )
 
 
 async def resolve_target(
@@ -214,6 +324,7 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
             asyncio.open_connection(address, port),
             timeout=timeout_s,
         )
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
     except asyncio.TimeoutError:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except ConnectionRefusedError as exc:
@@ -238,9 +349,12 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
     finally:
         if writer is not None:
             writer.close()
-            await writer.wait_closed()
+            # Once connect() succeeds, teardown is no longer part of the probe
+            # result. Preserve the measured success when shutdown cancels a
+            # slow wait_closed(); cancellation before connect still propagates.
+            with contextlib.suppress(OSError, asyncio.CancelledError):
+                await writer.wait_closed()
 
-    latency_ms = round((time.perf_counter() - start) * 1000, 2)
     return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)
 
 
@@ -298,12 +412,18 @@ async def icmp_probe(
     except ValueError:
         ipv6 = address_family == AddressFamily.IPV6
 
-    loop = asyncio.get_running_loop()
+    run_echo = partial(
+        _run_icmp_echo,
+        backend,
+        address,
+        timeout_s=timeout_s,
+        ipv6=ipv6,
+    )
     try:
-        latency_ms = await loop.run_in_executor(
-            executor,
-            partial(_run_icmp_echo, backend, address, timeout_s=timeout_s, ipv6=ipv6),
-        )
+        if executor is None:
+            latency_ms = await _icmp_worker_pool.run(run_echo)
+        else:
+            latency_ms = await asyncio.get_running_loop().run_in_executor(executor, run_echo)
     except backend.timeout_error:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except backend.unreachable_errors as exc:

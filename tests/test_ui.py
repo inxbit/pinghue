@@ -1,8 +1,15 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from rich.text import Text
 
-from pinghue.models import ProbeSample, SampleStatus, TargetRun, TargetStatus
+from pinghue.models import (
+    ProbeSample,
+    SampleStatus,
+    SummaryStats,
+    TargetRun,
+    TargetStatus,
+)
 from pinghue.ui import (
     AMBER,
     COLUMN_KEYS,
@@ -57,6 +64,26 @@ def test_issue_styles_marks_latency_jitter_and_loss_independently() -> None:
     assert styles["state"] == AMBER
 
 
+def test_issue_styles_marks_loss_when_percentage_rounds_to_zero() -> None:
+    target = SimpleNamespace(
+        status=TargetStatus.INTERMITTENT,
+        samples=[sample(SampleStatus.OK, 10.0)],
+        stats=SummaryStats(
+            sent=20_001,
+            received=20_000,
+            loss_pct=0.0,
+            min_ms=10.0,
+            avg_ms=10.0,
+            max_ms=10.0,
+            jitter_ms=0.0,
+        ),
+    )
+
+    styles = issue_styles(target, jitter_threshold_ms=50.0, slow_latency_ms=300.0)
+
+    assert styles["loss"] == RED
+
+
 def test_format_numeric_cell_colors_only_affected_values() -> None:
     assert plain_and_style(format_numeric_cell("12.30", GREEN)) == ("12.30", GREEN)
     assert plain_and_style(format_numeric_cell("450.00", AMBER)) == ("450.00", AMBER)
@@ -99,9 +126,24 @@ def test_format_history_cell_colors_each_probe_segment() -> None:
     assert [span.style for span in history.spans] == [GREEN, AMBER, RED]
 
 
-def test_format_history_cell_marks_refused_red() -> None:
-    # L5: a consistently refused TCP target is classified DOWN, so its history
-    # glyph must render red to match the state badge.
+def test_slow_latency_boundary_matches_the_fixed_glyph_scale() -> None:
+    history = format_history_cell(
+        [
+            sample(SampleStatus.OK, 100.0),
+            sample(SampleStatus.OK, 100.01),
+        ],
+        width=10,
+        style="bar",
+        slow_latency_ms=100.0,
+    )
+
+    assert history.plain == "▅▆"
+    assert [span.style for span in history.spans] == [GREEN, AMBER]
+
+
+def test_format_history_cell_marks_refused_amber() -> None:
+    # A refusal is distinct from timeout/loss and uses the documented warning
+    # color even when repeated refusals eventually classify the target DOWN.
     history = format_history_cell(
         [sample(SampleStatus.REFUSED)],
         width=10,
@@ -110,7 +152,7 @@ def test_format_history_cell_marks_refused_red() -> None:
     )
 
     assert history.plain == "!"
-    assert [span.style for span in history.spans] == [RED]
+    assert [span.style for span in history.spans] == [AMBER]
 
 
 def test_format_history_legend_explains_probe_glyphs() -> None:
@@ -122,6 +164,18 @@ def test_format_history_legend_explains_probe_glyphs() -> None:
     assert "· loss/down" in legend.plain
     assert "! tcp refused" in legend.plain
     assert {span.style for span in legend.spans} >= {GREEN, AMBER, RED}
+
+
+def test_dot_history_legend_matches_dot_glyphs() -> None:
+    legend = format_history_legend("dots")
+
+    assert "•" in legend.plain
+    assert "▁▂▃" not in legend.plain
+    assert "!" in legend.plain
+
+
+def test_none_history_legend_is_empty() -> None:
+    assert format_history_legend("none").plain == ""
 
 
 def test_focus_table_restores_keyboard_navigation_target() -> None:

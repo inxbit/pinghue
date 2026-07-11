@@ -321,6 +321,162 @@ async def test_probe_once_attempts_dns_re_resolution_on_failure(
     assert target.resolved_address == "192.0.2.5"
 
 
+async def test_initial_resolution_starts_cooldown_and_prevents_immediate_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def initial_failure(*_: object, **__: object) -> ResolvedTarget:
+        return ResolvedTarget("service.example", None, None, "not found")
+
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: 5.0, raising=False)
+    monkeypatch.setattr(runner, "_resolve_target_bounded", initial_failure)
+    args = build_args(targets=["service.example"])
+
+    target = await runner.resolve_run_target("service.example", args)
+
+    assert target._last_resolve_time == 5.0
+
+    retry_calls = 0
+
+    async def unexpected_retry(*_: object, **__: object) -> ResolvedTarget:
+        nonlocal retry_calls
+        retry_calls += 1
+        return ResolvedTarget("service.example", None, None, "still missing")
+
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: 5.5, raising=False)
+    monkeypatch.setattr(runner, "_resolve_target_bounded", unexpected_retry)
+
+    sample_result = await runner.probe_once(
+        target,
+        args=args,
+        mode=ProbeMode.ICMP,
+        semaphore=asyncio.Semaphore(1),
+    )
+
+    assert sample_result is None
+    assert retry_calls == 0
+
+
+async def test_probe_once_refreshes_stale_dns_after_repeated_address_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = TargetRun(
+        target="service.example",
+        resolved_address="192.0.2.10",
+        resolved_family=AddressFamily.IPV4,
+        resolved_addresses=("192.0.2.10",),
+    )
+    target._last_resolve_time = 0.0
+    for _ in range(2):
+        target.apply_sample(
+            ProbeSample(
+                timestamp=datetime.now(timezone.utc),
+                latency_ms=None,
+                status=SampleStatus.TIMEOUT,
+            ),
+            fail_threshold=2,
+            jitter_threshold_ms=50.0,
+        )
+
+    resolution_calls = 0
+
+    async def refreshed_resolution(*_: object, **__: object) -> ResolvedTarget:
+        nonlocal resolution_calls
+        resolution_calls += 1
+        return ResolvedTarget(
+            "service.example",
+            "192.0.2.20",
+            AddressFamily.IPV4,
+            addresses=("192.0.2.20",),
+        )
+
+    probed_addresses: list[str] = []
+
+    async def successful_probe(address: str, **_: object) -> ProbeSample:
+        probed_addresses.append(address)
+        return ProbeSample(
+            timestamp=datetime.now(timezone.utc),
+            latency_ms=2.0,
+            status=SampleStatus.OK,
+        )
+
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: 11.0, raising=False)
+    monkeypatch.setattr(runner, "_resolve_target_bounded", refreshed_resolution)
+    monkeypatch.setattr(runner, "_probe_address", successful_probe)
+    args = build_args(fail_threshold=2, targets=["service.example"])
+
+    sample_result = await runner.probe_once(
+        target,
+        args=args,
+        mode=ProbeMode.ICMP,
+        semaphore=asyncio.Semaphore(1),
+    )
+
+    assert sample_result is not None
+    assert sample_result.status == SampleStatus.OK
+    assert resolution_calls == 1
+    assert probed_addresses == ["192.0.2.20"]
+    assert target.resolved_address == "192.0.2.20"
+
+
+async def test_failed_stale_dns_refresh_is_rate_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = TargetRun(
+        target="service.example",
+        resolved_address="192.0.2.10",
+        resolved_family=AddressFamily.IPV4,
+        resolved_addresses=("192.0.2.10",),
+    )
+    target._last_resolve_time = 0.0
+    for _ in range(2):
+        target.apply_sample(
+            ProbeSample(
+                timestamp=datetime.now(timezone.utc),
+                latency_ms=None,
+                status=SampleStatus.TIMEOUT,
+            ),
+            fail_threshold=2,
+            jitter_threshold_ms=50.0,
+        )
+
+    resolution_calls = 0
+
+    async def failed_resolution(*_: object, **__: object) -> ResolvedTarget:
+        nonlocal resolution_calls
+        resolution_calls += 1
+        return ResolvedTarget("service.example", None, None, "temporary DNS failure")
+
+    async def failed_probe(*_: object, **__: object) -> ProbeSample:
+        return ProbeSample(
+            timestamp=datetime.now(timezone.utc),
+            latency_ms=None,
+            status=SampleStatus.TIMEOUT,
+        )
+
+    # The lookup itself may spend a long time queued behind the resolver bound.
+    # Cooldown starts when that attempt completes, not when it entered the queue.
+    monotonic_times = iter([11.0, 30.0, 35.0])
+    monkeypatch.setattr(
+        runner,
+        "_monotonic_time",
+        lambda: next(monotonic_times),
+        raising=False,
+    )
+    monkeypatch.setattr(runner, "_resolve_target_bounded", failed_resolution)
+    monkeypatch.setattr(runner, "_probe_address", failed_probe)
+    args = build_args(fail_threshold=2, targets=["service.example"])
+
+    for _ in range(2):
+        await runner.probe_once(
+            target,
+            args=args,
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+        )
+
+    assert resolution_calls == 1
+
+
 async def test_probe_once_handles_unexpected_exceptions_gracefully(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

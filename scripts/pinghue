@@ -38,25 +38,56 @@ def _load_main_entrypoint(
     try:
         dist = metadata.distribution("pinghue")
         direct_url = dist.read_text("direct_url.json")
+        if direct_url is None:
+            raise FileNotFoundError
         payload = json.loads(direct_url)
-    except (FileNotFoundError, json.JSONDecodeError, metadata.PackageNotFoundError):
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        metadata.PackageNotFoundError,
+    ):
         raise RuntimeError("pinghue package metadata is not available") from None
 
-    if not payload.get("dir_info", {}).get("editable", False):
+    if not isinstance(payload, dict):
+        raise RuntimeError("unexpected pinghue package metadata")
+
+    dir_info = payload.get("dir_info")
+    if not isinstance(dir_info, dict):
+        raise RuntimeError("unexpected pinghue package metadata")
+
+    if dir_info.get("editable") is not True:
         raise RuntimeError("pinghue was not installed as editable")
 
     raw_url = payload.get("url")
-    if not isinstance(raw_url, str) or not raw_url.startswith("file://"):
+    if not isinstance(raw_url, str):
         raise RuntimeError("unexpected editable source URL in pinghue metadata")
 
-    source_root = Path(unquote(urlparse(raw_url).path))
+    parsed_url = urlparse(raw_url)
+    source_path = unquote(parsed_url.path)
+    if (
+        parsed_url.scheme != "file"
+        or parsed_url.netloc not in {"", "localhost"}
+        or not source_path.startswith("/")
+        or "\x00" in source_path
+    ):
+        raise RuntimeError("unexpected editable source URL in pinghue metadata")
+
+    source_root = Path(source_path)
     candidate_paths = [source_root / "src", source_root]
     for candidate in candidate_paths:
-        sys.path.insert(0, str(candidate))
+        candidate_text = str(candidate)
+        sys.path.insert(0, candidate_text)
         try:
             from pinghue.cli import main
-        except ModuleNotFoundError:
+        except ModuleNotFoundError as exc:
+            sys.path.remove(candidate_text)
+            if exc.name not in {"pinghue", "pinghue.cli"}:
+                raise
             continue
+        except BaseException:
+            sys.path.remove(candidate_text)
+            raise
         else:
             return main
 

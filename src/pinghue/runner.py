@@ -6,8 +6,8 @@ import asyncio
 import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable
-from concurrent.futures import Executor, ThreadPoolExecutor
+from collections.abc import Awaitable, Callable, Sequence
+from concurrent.futures import Executor
 from datetime import datetime, timezone
 from typing import TextIO
 
@@ -20,8 +20,10 @@ from pinghue.models import (
     ProbeMode,
     ProbeSample,
     SampleStatus,
+    SampleWindow,
     TargetRun,
     TargetStatus,
+    retained_samples_per_target,
 )
 from pinghue.probes import ResolvedTarget, family_from_ip, icmp_probe, resolve_target, tcp_probe
 
@@ -34,6 +36,10 @@ DNS_LOOKUP_TIMEOUT_SECONDS = 5.0
 
 _dns_semaphore: asyncio.Semaphore | None = None
 _dns_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _monotonic_time() -> float:
+    return time.monotonic()
 
 
 def _get_dns_semaphore() -> asyncio.Semaphore:
@@ -104,7 +110,7 @@ async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
     try:
         resolved = await _resolve_target_bounded(target, family, numeric=args.numeric)
     except Exception as exc:
-        return TargetRun(
+        run = TargetRun(
             target=target,
             resolved_address=None,
             resolved_family=None,
@@ -112,13 +118,32 @@ async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
             status=TargetStatus.DNS_FAILURE,
             error=str(exc),
         )
-    return target_run_from_resolution(resolved)
+    else:
+        run = target_run_from_resolution(resolved)
+    run._last_resolve_time = _monotonic_time()
+    return run
+
+
+def apply_retained_sample_budget(runs: list[TargetRun]) -> None:
+    """Apply the run-wide retained-sample budget uniformly to all targets."""
+    samples_window = retained_samples_per_target(len(runs))
+    for run in runs:
+        run.samples = SampleWindow(run.samples, maxlen=samples_window)
+
+
+def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
+    """Return ordered unresolved targets for interrupted/deadline output."""
+    runs = [TargetRun(target=target, status=TargetStatus.RESOLVING) for target in targets]
+    apply_retained_sample_budget(runs)
+    return runs
 
 
 async def resolve_runs(args: RunConfig) -> list[TargetRun]:
-    return await asyncio.gather(
+    runs = await asyncio.gather(
         *(resolve_run_target(target, args) for target in args.targets)
     )
+    apply_retained_sample_budget(runs)
+    return runs
 
 
 async def _probe_address(
@@ -147,9 +172,23 @@ async def probe_once(
     semaphore: asyncio.Semaphore,
     executor: Executor | None = None,
 ) -> ProbeSample | None:
-    if not target.resolved_address:
-        now = time.monotonic()
-        if now - target._last_resolve_time < DNS_RETRY_INTERVAL_SECONDS:
+    now = _monotonic_time()
+    last_resolve_time = target._last_resolve_time
+    resolve_cooldown_elapsed = (
+        last_resolve_time is None
+        or now - last_resolve_time >= DNS_RETRY_INTERVAL_SECONDS
+    )
+    needs_resolution = not target.resolved_address
+    refresh_stale_resolution = (
+        not needs_resolution
+        and not getattr(args, "numeric", False)
+        and target.status != TargetStatus.PERMISSION_DENIED
+        and target.samples.consecutive_failures >= args.fail_threshold
+        and resolve_cooldown_elapsed
+    )
+
+    if needs_resolution or refresh_stale_resolution:
+        if needs_resolution and not resolve_cooldown_elapsed:
             return None
         target._last_resolve_time = now
         family = AddressFamily(args.address_family)
@@ -157,21 +196,29 @@ async def probe_once(
             resolved = await _resolve_target_bounded(
                 target.target,
                 family,
-                numeric=args.numeric,
+                numeric=getattr(args, "numeric", False),
             )
             if resolved.error:
-                target.status = TargetStatus.DNS_FAILURE
-                target.error = resolved.error
-                return None
-            target.resolved_address = resolved.address
-            target.resolved_family = resolved.family
-            target.resolved_addresses = resolved.addresses
-            target.status = TargetStatus.DOWN
-            target.error = None
+                if needs_resolution:
+                    target.status = TargetStatus.DNS_FAILURE
+                    target.error = resolved.error
+                    return None
+            elif resolved.address is not None:
+                target.resolved_address = resolved.address
+                target.resolved_family = resolved.family
+                target.resolved_addresses = resolved.addresses
+                if needs_resolution:
+                    target.status = TargetStatus.DOWN
+                    target.error = None
         except Exception as exc:
-            target.status = TargetStatus.DNS_FAILURE
-            target.error = str(exc)
-            return None
+            if needs_resolution:
+                target.status = TargetStatus.DNS_FAILURE
+                target.error = str(exc)
+                return None
+        finally:
+            # Anchor the cooldown to completion so targets queued behind the
+            # resolver semaphore do not immediately issue another lookup.
+            target._last_resolve_time = _monotonic_time()
 
     primary = target.resolved_address
     if not primary:
@@ -182,6 +229,7 @@ async def probe_once(
         addresses.insert(0, primary)
 
     sample: ProbeSample | None = None
+    primary_failure: ProbeSample | None = None
 
     async with semaphore:
         for address in addresses:
@@ -199,6 +247,8 @@ async def probe_once(
                     status=SampleStatus.ERROR,
                     error=f"Unexpected probe error: {exc}",
                 )
+            if primary_failure is None:
+                primary_failure = sample
             if sample.status == SampleStatus.OK:
                 target.resolved_address = address
                 target.resolved_family = family_from_ip(address)
@@ -206,6 +256,8 @@ async def probe_once(
 
     if sample is None:
         return None
+    if sample.status != SampleStatus.OK and primary_failure is not None:
+        sample = primary_failure
 
     target.apply_sample(
         sample,
@@ -257,16 +309,26 @@ async def probe_target_loop(
 ) -> None:
     """Run one target's probe loop without blocking other targets or UI refresh."""
     if initial_delay > 0:
+        stop_wait = asyncio.create_task(stop_event.wait())
+        immediate_wait = asyncio.create_task(immediate_event.wait())
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=initial_delay)
+            await asyncio.wait(
+                (stop_wait, immediate_wait),
+                timeout=initial_delay,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            stop_wait.cancel()
+            immediate_wait.cancel()
+            await asyncio.gather(stop_wait, immediate_wait, return_exceptions=True)
+        if stop_event.is_set():
             return
-        except asyncio.TimeoutError:
-            pass
+        immediate_event.clear()
 
     probes_completed = 0
     probe_limit = getattr(args, "count", None)
     while not stop_event.is_set():
-        probe_started = time.monotonic()
+        probe_started = _monotonic_time()
         if probe_once_fn is None:
             await probe_once(
                 target,
@@ -289,7 +351,7 @@ async def probe_target_loop(
         # when probes are slow (e.g. timeout > interval against a dead host).
         wait_timeout = _iteration_sleep(
             interval=args.interval,
-            iteration_elapsed=time.monotonic() - probe_started,
+            iteration_elapsed=_monotonic_time() - probe_started,
         )
         try:
             await asyncio.wait_for(immediate_event.wait(), timeout=wait_timeout)
@@ -346,34 +408,141 @@ def _iteration_sleep(
     return sleep_for
 
 
-def _icmp_executor(args: RunConfig, mode: ProbeMode) -> ThreadPoolExecutor | None:
-    if mode != ProbeMode.ICMP:
-        return None
-    return ThreadPoolExecutor(max_workers=args.concurrency)
+async def _run_probe_batch(
+    probes: Sequence[Awaitable[ProbeSample | None]],
+    stop_event: asyncio.Event,
+    *,
+    deadline_at: float | None,
+) -> tuple[list[tuple[int, ProbeSample | None]], str | None]:
+    """Run one probe batch, cancelling it promptly at shutdown or deadline."""
+    loop = asyncio.get_running_loop()
+    tasks = [asyncio.ensure_future(probe) for probe in probes]
+    batch = asyncio.gather(*tasks)
+
+    def completed_results() -> list[tuple[int, ProbeSample | None]]:
+        return [
+            (index, task.result())
+            for index, task in enumerate(tasks)
+            if task.done() and not task.cancelled()
+        ]
+
+    if stop_event.is_set():
+        batch.cancel()
+        await asyncio.gather(batch, return_exceptions=True)
+        return completed_results(), "interrupted"
+    if deadline_at is not None and loop.time() >= deadline_at:
+        batch.cancel()
+        await asyncio.gather(batch, return_exceptions=True)
+        return completed_results(), "deadline"
+
+    stop_wait = asyncio.create_task(stop_event.wait())
+    try:
+        timeout = (
+            None
+            if deadline_at is None
+            else max(0.0, deadline_at - loop.time())
+        )
+        await asyncio.wait(
+            (batch, stop_wait),
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_event.is_set():
+            batch.cancel()
+            await asyncio.gather(batch, return_exceptions=True)
+            return completed_results(), "interrupted"
+        if deadline_at is not None and loop.time() >= deadline_at:
+            batch.cancel()
+            await asyncio.gather(batch, return_exceptions=True)
+            return completed_results(), "deadline"
+        if not batch.done():
+            batch.cancel()
+            await asyncio.gather(batch, return_exceptions=True)
+            return completed_results(), "deadline"
+        return list(enumerate(await batch)), None
+    finally:
+        stop_wait.cancel()
+        await asyncio.gather(stop_wait, return_exceptions=True)
+        if not batch.done():
+            batch.cancel()
+            await asyncio.gather(batch, return_exceptions=True)
+
+
+async def _resolve_runs_until_shutdown(
+    args: RunConfig,
+    stop_event: asyncio.Event,
+    *,
+    deadline_at: float | None,
+    pending_runs: list[TargetRun] | None = None,
+) -> tuple[list[TargetRun], str | None]:
+    """Resolve targets while honoring both process signals and run duration."""
+    unresolved = (
+        pending_runs if pending_runs is not None else _pending_target_runs(args.targets)
+    )
+    loop = asyncio.get_running_loop()
+    if stop_event.is_set():
+        return unresolved, "interrupted"
+    if deadline_at is not None and loop.time() >= deadline_at:
+        return unresolved, "deadline"
+
+    resolution = asyncio.create_task(resolve_runs(args))
+    stop_wait = asyncio.create_task(stop_event.wait())
+    try:
+        timeout = (
+            None
+            if deadline_at is None
+            else max(0.0, deadline_at - loop.time())
+        )
+        await asyncio.wait(
+            (resolution, stop_wait),
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_event.is_set():
+            return unresolved, "interrupted"
+        if deadline_at is not None and loop.time() >= deadline_at:
+            return unresolved, "deadline"
+        if not resolution.done():
+            return unresolved, "deadline"
+        return await resolution, None
+    finally:
+        stop_wait.cancel()
+        if not resolution.done():
+            resolution.cancel()
+        await asyncio.gather(stop_wait, resolution, return_exceptions=True)
 
 
 async def run_no_tui(
     args: RunConfig,
     mode: ProbeMode,
 ) -> tuple[list[TargetRun], str, datetime, datetime]:
+    loop = asyncio.get_running_loop()
+    deadline_at = None if args.duration is None else loop.time() + args.duration
     started_at = datetime.now(timezone.utc)
-    targets: list[TargetRun] = []
+    targets = _pending_target_runs(args.targets)
     semaphore = asyncio.Semaphore(args.concurrency)
     stop_event = asyncio.Event()
     cleanup_signal_handlers = install_stop_signal_handlers(stop_event)
     exit_reason = "completed"
     iteration = 0
-    executor = _icmp_executor(args, mode)
+    executor: Executor | None = None
     # With `--output -` the JSON document owns stdout; per-probe lines move to
     # stderr so the exported document stays machine-parseable.
     sample_stream = sys.stderr if args.output is not None and str(args.output) == "-" else None
 
     try:
-        targets = await resolve_runs(args)
+        targets, stop_reason = await _resolve_runs_until_shutdown(
+            args,
+            stop_event,
+            deadline_at=deadline_at,
+            pending_runs=targets,
+        )
+        if stop_reason is not None:
+            exit_reason = stop_reason
 
-        while True:
+        while stop_reason is None and not stop_event.is_set():
             iteration += 1
-            iteration_started_at = datetime.now(timezone.utc)
+            iteration_started_at = _monotonic_time()
             probes = [
                 probe_once(
                     target,
@@ -384,29 +553,29 @@ async def run_no_tui(
                 )
                 for target in targets
             ]
-            samples = await asyncio.gather(*probes) if probes else []
-            sample_by_target = iter(samples)
+            samples, stop_reason = await _run_probe_batch(
+                probes,
+                stop_event,
+                deadline_at=deadline_at,
+            )
 
-            for target in targets:
-                sample = next(sample_by_target)
-                print_sample(target, sample, stream=sample_stream)
+            for target_index, sample in samples:
+                print_sample(targets[target_index], sample, stream=sample_stream)
 
-            if args.count is not None and iteration >= args.count:
+            if stop_reason is not None:
+                exit_reason = stop_reason
                 break
 
             if stop_event.is_set():
                 exit_reason = "interrupted"
                 break
 
-            now = datetime.now(timezone.utc)
-            duration_elapsed = (now - started_at).total_seconds()
-            if args.duration is not None and duration_elapsed >= args.duration:
-                exit_reason = "deadline"
+            if args.count is not None and iteration >= args.count:
                 break
 
-            iteration_elapsed = (now - iteration_started_at).total_seconds()
+            iteration_elapsed = _monotonic_time() - iteration_started_at
             duration_remaining = (
-                None if args.duration is None else args.duration - duration_elapsed
+                None if deadline_at is None else max(0.0, deadline_at - loop.time())
             )
             sleep_for = _iteration_sleep(
                 interval=args.interval,
@@ -421,11 +590,6 @@ async def run_no_tui(
         exit_reason = "interrupted"
     finally:
         cleanup_signal_handlers()
-        if executor is not None:
-            # Don't block the event loop joining in-flight pings; drop queued
-            # probes. Lingering threads finish within timeout_s and their
-            # results are discarded.
-            executor.shutdown(wait=False, cancel_futures=True)
 
     ended_at = datetime.now(timezone.utc)
     return targets, exit_reason, started_at, ended_at

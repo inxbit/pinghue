@@ -4,6 +4,7 @@ from pinghue.models import (
     MAX_TARGET_SAMPLES,
     ProbeSample,
     SampleStatus,
+    SampleWindow,
     TargetRun,
     TargetStatus,
     classify_samples,
@@ -157,3 +158,90 @@ def test_target_sample_clear_resets_cached_statistics() -> None:
     assert target.stats.sent == 0
     assert target.stats.received == 0
     assert target.stats.avg_ms is None
+
+
+def test_failure_threshold_survives_retained_sample_eviction() -> None:
+    target = TargetRun("service.example", samples=SampleWindow(maxlen=2))
+    target.apply_sample(
+        sample(SampleStatus.OK, 10.0),
+        fail_threshold=3,
+        jitter_threshold_ms=50.0,
+    )
+
+    for _ in range(3):
+        target.apply_sample(
+            sample(SampleStatus.TIMEOUT),
+            fail_threshold=3,
+            jitter_threshold_ms=50.0,
+        )
+
+    assert len(target.samples) == 2
+    assert target.status == TargetStatus.DOWN
+
+
+def test_clearing_samples_resets_the_lifetime_failure_streak() -> None:
+    window = SampleWindow(maxlen=2)
+    window.append(sample(SampleStatus.TIMEOUT))
+    window.append(sample(SampleStatus.TIMEOUT))
+
+    window.clear()
+    assert window.consecutive_failures == 0
+    window.append(sample(SampleStatus.OK, 10.0))
+    window.append(sample(SampleStatus.TIMEOUT))
+
+    assert classify_samples(
+        window,
+        fail_threshold=2,
+        jitter_threshold_ms=50.0,
+    ) == TargetStatus.INTERMITTENT
+
+
+def test_any_lifetime_loss_remains_intermittent_when_percentage_rounds_to_zero() -> None:
+    target = TargetRun("service.example")
+    target.apply_sample(
+        sample(SampleStatus.TIMEOUT),
+        fail_threshold=3,
+        jitter_threshold_ms=50.0,
+    )
+    for _ in range(20_000):
+        target.apply_sample(
+            sample(SampleStatus.OK, 1.0),
+            fail_threshold=3,
+            jitter_threshold_ms=50.0,
+        )
+
+    assert target.stats.loss_pct == 0.0
+    assert target.stats.received < target.stats.sent
+    assert target.status == TargetStatus.INTERMITTENT
+
+
+def test_jitter_classification_uses_unrounded_measurement() -> None:
+    # The RFC 3550 jitter for these two samples is 0.0045 ms, which rounds to
+    # 0.0 in exported/display statistics but still exceeds the configured gate.
+    samples = [
+        sample(SampleStatus.OK, 1.0),
+        sample(SampleStatus.OK, 1.072),
+    ]
+
+    assert summarize_samples(samples).jitter_ms == 0.0
+    assert classify_samples(
+        samples,
+        fail_threshold=3,
+        jitter_threshold_ms=0.004,
+    ) == TargetStatus.INTERMITTENT
+
+
+def test_jitter_threshold_remains_latched_after_the_estimator_decays() -> None:
+    target = TargetRun("service.example")
+    latencies = [10.0, 1_000.0, 10.0, *([10.0] * 30)]
+
+    for latency in latencies:
+        target.apply_sample(
+            sample(SampleStatus.OK, latency),
+            fail_threshold=3,
+            jitter_threshold_ms=50.0,
+        )
+
+    assert target.stats.jitter_ms is not None
+    assert target.stats.jitter_ms < 50.0
+    assert target.status == TargetStatus.INTERMITTENT

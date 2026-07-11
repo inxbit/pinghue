@@ -6,6 +6,43 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 5.0.0 - 2026-07-11
+
+### Breaking
+
+- Limited each run to 5,000 unique targets and reduced per-target sample tails uniformly when needed to keep retained history within 100,000 samples total; whole-run statistics remain unbounded counters. The target cap invokes the documented resource-safety exception to the deprecation window and requires the next major release.
+- Changed `--overwrite` to refuse multiply linked regular files and perform a descriptor-verified, non-crash-atomic in-place rewrite instead of replacing the inode; workflows that require crash-atomic evidence rotation should write a new report and rotate it only after PingHue exits successfully.
+
+### Security
+
+- Hardened the release path so only a verified signed annotated tag for the checked-out commit, reachable from protected `main`, can publish; release checks now install Twine from the hash-pinned development lock.
+- Expanded hosted-hardening drift checks and apply support to cover ruleset bypasses and status-check sources, exact PyPI deployment/reviewer policies, repository security features, GitHub Actions permissions, and the default branch; unclassified 403s and missing fields now fail closed.
+- Hash-pinned the universal development/CI lock and made source distributions deterministic through safe archive normalization plus a required two-build byte comparison.
+- Preserved symlinks, FIFOs, Unix sockets, and other special output paths even when `--overwrite` is requested; direct character-device/FIFO writes now verify the opened inode.
+- Made output cleanup cover interrupts and documented that an explicit overwrite of an existing single-link regular file is a verified in-place rewrite, not a crash-atomic replacement.
+- Documented that no-clobber creation falls back to a non-crash-atomic exclusive copy on filesystems without hardlink support; handled failures still remove the incomplete path.
+- Validated editable-install metadata structure and local `file://` URLs before adding fallback import paths.
+
+### Fixed
+
+- Restored real ICMP concurrency with bounded reusable daemon workers, including safe capacity recovery when worker startup fails.
+- Made `--duration` an absolute run deadline that includes startup work in both modes, and made SIGINT/SIGTERM cancel active no-TUI resolution and probe batches promptly while preserving requested targets in final output.
+- Preserved line output for probes that completed just before a no-TUI interruption or deadline.
+- Kept consecutive-failure classification correct when `--fail-threshold` exceeds the retained sample window, and kept any observed loss intermittent even when its percentage rounds to `0.0`.
+- Refreshed stale DNS results after repeated all-address failures on a consistent cooldown that no longer depends on machine uptime.
+- Preserved the first-address failure when all failover addresses are down, kept successful TCP connect latency when close teardown resets, and measured latency before teardown.
+- Corrected TCP-refused history styling, static-site JSON field examples, and clipboard failure feedback.
+- Kept FIFO report writes blocking after a verified nonblocking open so large JSON documents cannot be truncated at pipe capacity.
+- Sanitized scoped resolved addresses in JSON evidence just like target/error text.
+- Made the editable launcher reject malformed nested metadata without a traceback, clean up failed fallback paths, and preserve missing-dependency errors.
+
+### Changed
+
+- CI installs only hash-pinned dependency locks before installing the local project without dependency resolution, and dependency audit runs against the exact CI/build locks.
+- Release publishing now reruns the coverage-gated validation suite on the exact tagged commit, audits all hash locks across supported marker boundaries, installs/smoke-tests both exact artifacts, checks the staged Homebrew SHA, and revalidates the protected signed tag immediately before both PyPI publication and GitHub release creation.
+- Changed the fixed history slow-latency threshold from 300 ms to 100 ms; exactly 100 ms remains in the green `▅` bucket and values above it are amber.
+- Release documentation now requires merging the release PR before signing and pushing a tag from the merged public `main` commit.
+
 ## 4.0.0 - 2026-07-08
 
 ### Breaking

@@ -18,10 +18,17 @@
           btn.textContent = "Copy";
         }, 1600);
       };
+      const failed = () => {
+        btn.classList.remove("copied");
+        btn.textContent = "Copy failed";
+        setTimeout(() => {
+          btn.textContent = "Copy";
+        }, 1600);
+      };
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done, done);
+        navigator.clipboard.writeText(text).then(done, failed);
       } else {
-        done();
+        failed();
       }
     });
   });
@@ -89,9 +96,9 @@
     h.last = null;
     h.prev = null;
     h.jitter = 0;
+    h.peakJitter = 0;
     h.consecFail = 0;
     h.everLoss = false;
-    h.everSlow = false;
     h.down = false;
   });
 
@@ -122,24 +129,24 @@
       let ms = h.base + (rand() * 2 - 1) * h.wobble;
       if (h.spike && tick >= h.spike.from && tick <= h.spike.to) {
         ms = h.spike.ms + rand() * 120;
-        h.everSlow = true;
       }
       ms = Math.max(0.4, ms);
       if (h.prev !== null) {
         h.jitter += (Math.abs(ms - h.prev) - h.jitter) / 16;
+        h.peakJitter = Math.max(h.peakJitter, h.jitter);
       }
       h.prev = ms;
       h.last = ms;
       h.recv += 1;
       h.sum += ms;
-      h.hist.push({ g: glyphFor(ms), c: ms >= SLOW_MS ? "g-slow" : "g-ok" });
+      h.hist.push({ g: glyphFor(ms), c: ms > SLOW_MS ? "g-slow" : "g-ok" });
     }
     if (h.hist.length > HISTORY) h.hist.shift();
   };
 
   const stateOf = (h) => {
     if (h.down) return { label: "down", cls: "s-down" };
-    if (h.everLoss || h.everSlow || h.jitter > 50) {
+    if (h.everLoss || h.peakJitter > 50) {
       return { label: "intermittent", cls: "s-intermittent" };
     }
     return { label: "healthy", cls: "s-healthy" };
