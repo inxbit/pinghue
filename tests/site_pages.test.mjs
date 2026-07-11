@@ -343,6 +343,10 @@ test('copy controls require JavaScript and mobile no-JS navigation stays one-row
   );
   assert.match(
     css,
+    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav\s*\{[^}]*gap:\s*0\.75rem/,
+  );
+  assert.match(
+    css,
     /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav-links\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/,
   );
 });
