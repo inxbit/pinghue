@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-10
+Review date: 2026-07-11
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -10,10 +10,10 @@ ICMP/TCP monitoring tool: it opens no inbound service, handles no credentials,
 uses no runtime shell execution, and has no authentication, database, template,
 or unsafe-deserialization surface.
 
-One release-blocking hosted-hardening finding remains open. Live read-only
-verification found several GitHub settings weaker than their checked-in
-baselines. The code now detects these conditions fail-closed, but the hosted
-settings have not been changed by this repository review.
+No release-blocking hosted-hardening finding remains open. The checked-in
+baseline was applied to GitHub, administrator bypass was disabled manually on
+the protected `pypi` environment, and the administration-readable fail-closed
+check passed on 2026-07-11.
 
 ## Scope
 
@@ -31,9 +31,9 @@ Reviewed:
 The companion `pinghue-threat-model.md` records assets, trust boundaries,
 attacker capabilities, abuse paths, residual risk, and review triggers.
 
-## Open findings and residual risk
+## Findings and residual risk
 
-### BP-001 — Hosted release/security settings drift (Medium, open)
+### BP-001 — Hosted release/security settings drift (Medium, resolved 2026-07-11)
 
 The 2026-07-10 live read found:
 
@@ -69,9 +69,10 @@ Repository remediation completed:
   GraphQL update inputs do not accept the field, so that setting remains a
   manual UI operation.
 
-Required closure: apply the hosted baseline with explicit authorization,
-disable `pypi` administrator bypass in GitHub's settings UI, and rerun the
-fail-closed check successfully before release.
+Closure evidence: the tracked baseline was applied with explicit authorization,
+the `pypi` environment's administrator bypass was disabled in GitHub's settings
+UI, and `scripts/check-github-hardening.sh inxbit/pinghue` passed with
+repository-administration visibility on 2026-07-11.
 
 ### BP-002 — Some output installation paths are not crash-atomic (Low, accepted)
 
@@ -120,7 +121,7 @@ requires the next major release; it must not ship as a patch or minor version.
 | Artifact reproducibility | Incrementally bounds/validates sdist members and canonicalizes bytes; required CI builds from two independent source trees with different mtimes and compares wheel/sdist bytes. |
 | Artifact execution | The tag workflow installs and runs both exact distributions against localhost TCP and blocks when the staged Homebrew version/SHA differs from the built sdist. |
 | Sdist smoke build | Installs the exact hash-pinned build backend before the no-build-isolation source-distribution smoke test. |
-| Hosted hardening | Fails closed on unclassified API errors, missing fields, reviewer substitution, bypasses, rule/status inventory drift, and status-check source changes. |
+| Hosted hardening | Fails closed on unclassified API errors, missing fields, reviewer substitution, bypasses, rule/status inventory drift, and status-check source changes; the tracked baseline and manual administrator-bypass control were reconciled and verified live on 2026-07-11. |
 | Sdist contract | Excludes repository-only hardening/normalizer tests and maintainer-only contribution/release/hardening documents whose tooling is intentionally absent. |
 
 ## Secure defaults observed
@@ -168,17 +169,19 @@ requires the next major release; it must not ship as a patch or minor version.
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
 - The final normalized sdist and wheel passed `twine check`; all 243 tests
   shipped in the unpacked sdist passed; fresh wheel and sdist installs both
-  reported `pinghue 4.0.0` through the installed launcher.
+  reported `pinghue 5.0.0` through the installed launcher and completed the
+  localhost TCP smoke test.
 - ShellCheck and Bash syntax checks passed for shell scripts; Homebrew formula
   Ruby syntax passed.
-- The live hosted-hardening check correctly failed on current drift; it is not
-  reported as passing.
+- The administration-readable hosted-hardening check passed after reconciling
+  the tracked baseline and disabling `pypi` administrator bypass.
 
 ## Release decision
 
-Local code, tests, locks, and deterministic artifact controls passed the
-release-preparation checks. Publishing remains blocked until BP-001 is
-corrected and the breaking target cap is assigned a new major version.
+The breaking target cap is assigned to 5.0.0 and BP-001 is closed. The local
+candidate passed the security, QA, deterministic-artifact, installed-artifact,
+and staged-formula gates. Publishing remains gated on release-PR review and
+exact-head CI.
 
 Revisit this report if PingHue gains a listener, privileged wrapper, remote
 inventory source, credential handling, plugin execution, subprocess probes, a

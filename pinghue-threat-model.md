@@ -45,8 +45,9 @@ Assumptions:
   baselines with an administration-readable token.
 - Release security requires administrators to be manually prevented from
   bypassing the protected `pypi` environment. GitHub exposes the field for
-  verification but not through its supported update inputs. The 2026-07-10
-  live check found bypass enabled, so publishing is blocked until corrected.
+  verification but not through its supported update inputs. The 2026-07-11
+  administration-readable check confirmed that bypass is disabled and the
+  complete tracked hosted-hardening baseline matches live state.
 
 Open questions:
 
@@ -214,7 +215,7 @@ external dependencies, so fresh audits remain a release gate.
   every release.
 - The `pypi` environment's administrator bypass is disabled manually and
   verified before release; its exact required-reviewer identity also matches
-  the checked-in baseline. Current live drift must be corrected first.
+  the checked-in baseline.
 
 ## Review triggers
 

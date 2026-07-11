@@ -16,6 +16,10 @@ scenario = json.loads(Path(os.environ["FAKE_GH_SCENARIO"]).read_text(encoding="u
 with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\\n")
 
+if "--slurp" in args and "--jq" in args:
+    print("the `--slurp` option is not supported with `--jq`", file=sys.stderr)
+    raise SystemExit(2)
+
 if args[:3] == ["api", "user", "--jq"]:
     print(str(scenario.get("viewer_id", 42)))
     raise SystemExit

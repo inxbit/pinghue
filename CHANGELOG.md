@@ -6,9 +6,12 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 5.0.0 - 2026-07-11
+
 ### Breaking
 
 - Limited each run to 5,000 unique targets and reduced per-target sample tails uniformly when needed to keep retained history within 100,000 samples total; whole-run statistics remain unbounded counters. The target cap invokes the documented resource-safety exception to the deprecation window and requires the next major release.
+- Changed `--overwrite` to refuse multiply linked regular files and perform a descriptor-verified, non-crash-atomic in-place rewrite instead of replacing the inode; workflows that require crash-atomic evidence rotation should write a new report and rotate it only after PingHue exits successfully.
 
 ### Security
 

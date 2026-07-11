@@ -596,9 +596,16 @@ def test_hardening_scripts_paginate_ruleset_and_deployment_policy_inventories() 
         "scripts/apply-github-hardening.sh",
     ):
         script = read(path)
-        assert script.count("--paginate --slurp") >= 2
+        assert script.count("--paginate") >= 2
         assert '"repos/${repo}/rulesets"' in script
         assert '"repos/${repo}/environments/pypi/deployment-branch-policies"' in script
+        logical_lines = script.replace("\\\n", " ").splitlines()
+        assert not any(
+            "gh api" in line
+            and "--slurp" in line
+            and ("--jq" in line or "--template" in line)
+            for line in logical_lines
+        )
 
 
 def _run_repository_hardening_check(

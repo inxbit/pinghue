@@ -88,8 +88,8 @@ upsert_ruleset() {
   local duplicate_id
 
   ids="$(
-    gh api --paginate --slurp "repos/${repo}/rulesets" \
-      --jq ".[][] | select(.name == \"${name}\" and .target == \"${target}\") | .id"
+    gh api --paginate "repos/${repo}/rulesets" \
+      --jq ".[] | select(.name == \"${name}\" and .target == \"${target}\") | .id"
   )"
   id="$(printf '%s\n' "${ids}" | sed -n '1p')"
   duplicate_id="$(printf '%s\n' "${ids}" | sed -n '2p')"

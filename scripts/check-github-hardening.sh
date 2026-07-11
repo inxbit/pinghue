@@ -98,8 +98,8 @@ require_ruleset() {
   local ruleset_id
   local duplicate_id
   ruleset_ids="$(
-    gh api --paginate --slurp "repos/${repo}/rulesets" \
-      --jq ".[][] | select(.name == \"${name}\" and .target == \"${target}\" and .enforcement == \"active\") | .id"
+    gh api --paginate "repos/${repo}/rulesets" \
+      --jq ".[] | select(.name == \"${name}\" and .target == \"${target}\" and .enforcement == \"active\") | .id"
   )"
   ruleset_id="$(printf '%s\n' "${ruleset_ids}" | sed -n '1p')"
   duplicate_id="$(printf '%s\n' "${ruleset_ids}" | sed -n '2p')"
