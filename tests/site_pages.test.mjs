@@ -301,19 +301,25 @@ const createStubElement = (initialAttributes = {}) => {
   };
 };
 
-const createCopyHarness = (writeText) => {
+const createCopyHarness = (
+  writeText,
+  commands = ['uv tool install pinghue'],
+) => {
   const status = { textContent: '' };
-  const button = createStubElement({
-    'aria-label': 'Copy install command',
-    'data-copy': 'uv tool install pinghue',
+  const buttons = commands.map((command) => {
+    const button = createStubElement({
+      'aria-label': 'Copy install command',
+      'data-copy': command,
+    });
+    button.textContent = 'Copy';
+    return button;
   });
-  button.textContent = 'Copy';
-  let reset;
+  const resets = [];
 
   runInNewContext(read('docs/script.js'), {
     document: {
       documentElement: { classList: { add: () => {} } },
-      querySelectorAll: (selector) => selector === '.copy-btn' ? [button] : [],
+      querySelectorAll: (selector) => selector === '.copy-btn' ? buttons : [],
       querySelector: (selector) => selector === '[data-copy-status]' ? status : null,
       addEventListener: () => {},
       hidden: false,
@@ -322,12 +328,17 @@ const createCopyHarness = (writeText) => {
     navigator: { clipboard: { writeText } },
     clearTimeout: () => {},
     setTimeout: (handler) => {
-      reset = handler;
-      return 1;
+      resets.push(handler);
+      return resets.length;
     },
   });
 
-  return { button, reset: () => reset(), status };
+  return {
+    button: buttons[0],
+    buttons,
+    reset: (index = 0) => resets[index](),
+    status,
+  };
 };
 
 test('copy buttons report a rejected clipboard write as a failure', async () => {
@@ -357,6 +368,31 @@ test('copy buttons announce success and reset their visible and accessible state
   assert.equal(harness.button.textContent, 'Copy');
   assert.equal(harness.button.classes.has('copied'), false);
   assert.equal(harness.button.attributes.get('aria-label'), 'Copy install command');
+  assert.equal(harness.status.textContent, '');
+});
+
+test('an older copy reset cannot clear a newer shared announcement', async () => {
+  const firstCommand = 'uv tool install pinghue';
+  const secondCommand = 'brew install inxbit/tap/pinghue';
+  const harness = createCopyHarness(
+    (command) => command === firstCommand
+      ? Promise.resolve()
+      : Promise.reject(new Error('clipboard denied')),
+    [firstCommand, secondCommand],
+  );
+
+  harness.buttons[0].listeners.get('click')();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.status.textContent, 'Install command copied.');
+
+  harness.buttons[1].listeners.get('click')();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.status.textContent, 'Copy failed. Select the command and copy it manually.');
+
+  harness.reset(0);
+  assert.equal(harness.status.textContent, 'Copy failed. Select the command and copy it manually.');
+
+  harness.reset(1);
   assert.equal(harness.status.textContent, '');
 });
 
@@ -555,7 +591,69 @@ test('reveal content resolves when motion or observer support is unavailable', (
   }
 });
 
-const createTerminalHarness = ({ withObserver = true } = {}) => {
+test('reveal observer resolves each intersecting target only once', () => {
+  const item = createStubElement();
+  const strip = createStubElement();
+  const observers = [];
+  function IntersectionObserver(callback, options) {
+    this.callback = callback;
+    this.options = options;
+    this.targets = new Set();
+    this.unobserved = [];
+    this.observe = (target) => this.targets.add(target);
+    this.unobserve = (target) => {
+      this.targets.delete(target);
+      this.unobserved.push(target);
+    };
+    this.deliver = (entries) => {
+      const observedEntries = entries.filter(({ target }) => this.targets.has(target));
+      this.callback(observedEntries, this);
+    };
+    observers.push(this);
+  }
+  const window = {
+    IntersectionObserver,
+    matchMedia: () => ({ matches: false }),
+  };
+
+  runInNewContext(read('docs/script.js'), {
+    document: {
+      documentElement: { classList: { add: () => {} } },
+      querySelectorAll: (selector) => selector === '[data-reveal]' ? [item] : [],
+      querySelector: (selector) => selector === '[data-scale]' ? strip : null,
+      addEventListener: () => {},
+      hidden: false,
+    },
+    window,
+    IntersectionObserver,
+    navigator: {},
+    clearTimeout: () => {},
+    setTimeout: () => 0,
+  });
+
+  const revealObserver = observers.find(({ options }) => options.threshold === 0.16);
+  const entries = [
+    { target: item, isIntersecting: true },
+    { target: strip, isIntersecting: true },
+  ];
+  assert.ok(revealObserver);
+  assert.equal(revealObserver.targets.size, 2);
+
+  revealObserver.deliver(entries);
+  assert.equal(item.classes.has('is-revealed'), true);
+  assert.equal(strip.classes.has('in-view'), true);
+  assert.deepEqual(revealObserver.unobserved, [item, strip]);
+  assert.equal(revealObserver.targets.size, 0);
+
+  revealObserver.deliver(entries);
+  assert.deepEqual(revealObserver.unobserved, [item, strip]);
+});
+
+const createTerminalHarness = ({
+  initiallyHidden = false,
+  reduced = false,
+  withObserver = true,
+} = {}) => {
   const createNode = () => {
     const node = createStubElement();
     node.children = [];
@@ -576,7 +674,7 @@ const createTerminalHarness = ({ withObserver = true } = {}) => {
   const documentListeners = new Map();
   const document = {
     documentElement: { classList: { add: () => {} } },
-    hidden: false,
+    hidden: initiallyHidden,
     querySelectorAll: () => [],
     querySelector: (selector) => selector === '[data-terminal]' ? root : null,
     addEventListener: (event, handler) => documentListeners.set(event, handler),
@@ -598,7 +696,11 @@ const createTerminalHarness = ({ withObserver = true } = {}) => {
   let intervalStarts = 0;
   let intervalStops = 0;
   let nextInterval = 1;
-  const window = { matchMedia: () => ({ matches: false }) };
+  const window = {
+    matchMedia: (query) => ({
+      matches: query === '(prefers-reduced-motion: reduce)' && reduced,
+    }),
+  };
   const context = {
     document,
     window,
@@ -674,10 +776,29 @@ test('terminal interval follows observer and document visibility without duplica
   assert.equal(harness.getIntervalStops(), 2);
 });
 
-test('terminal interval starts immediately only without observer support', () => {
-  const harness = createTerminalHarness({ withObserver: false });
+test('terminal interval waits for document visibility without observer support', () => {
+  const harness = createTerminalHarness({
+    initiallyHidden: true,
+    withObserver: false,
+  });
 
   assert.equal(harness.clock.textContent, '00:04');
+  assert.equal(harness.getIntervalStarts(), 0);
+  assert.equal(harness.activeIntervals.size, 0);
+
+  harness.document.hidden = false;
+  harness.documentListeners.get('visibilitychange')();
   assert.equal(harness.getIntervalStarts(), 1);
   assert.equal(harness.activeIntervals.size, 1);
+});
+
+test('reduced motion renders the static terminal frame without an interval', () => {
+  const harness = createTerminalHarness({ reduced: true, withObserver: true });
+
+  assert.equal(harness.clock.textContent, '00:30');
+  assert.equal(harness.getIntervalStarts(), 0);
+  assert.equal(harness.getIntervalStops(), 0);
+  assert.equal(harness.activeIntervals.size, 0);
+  assert.equal(harness.observers.length, 0);
+  assert.equal(harness.documentListeners.has('visibilitychange'), false);
 });

@@ -10,32 +10,44 @@
   /* ------------------------------------------------ copy buttons */
 
   const copyStatus = document.querySelector("[data-copy-status]");
+  let copyAnnouncementVersion = 0;
 
   document.querySelectorAll(".copy-btn").forEach((btn) => {
     const originalLabel = btn.getAttribute("aria-label") || "Copy command";
     let resetTimer = null;
 
-    const report = (label, announcement, copied) => {
+    const report = (label, announcement, copied, announcementVersion) => {
       clearTimeout(resetTimer);
       btn.classList.toggle("copied", copied);
       btn.textContent = label;
       btn.setAttribute("aria-label", label === "Copied" ? "Command copied" : label);
-      if (copyStatus) copyStatus.textContent = announcement;
+      if (copyStatus && announcementVersion === copyAnnouncementVersion) {
+        copyStatus.textContent = announcement;
+      }
       resetTimer = setTimeout(() => {
         btn.classList.remove("copied");
         btn.textContent = "Copy";
         btn.setAttribute("aria-label", originalLabel);
-        if (copyStatus) copyStatus.textContent = "";
+        if (copyStatus && announcementVersion === copyAnnouncementVersion) {
+          copyStatus.textContent = "";
+        }
       }, 1800);
     };
 
     btn.addEventListener("click", () => {
       const text = btn.getAttribute("data-copy") || "";
-      const done = () => report("Copied", "Install command copied.", true);
+      const announcementVersion = ++copyAnnouncementVersion;
+      const done = () => report(
+        "Copied",
+        "Install command copied.",
+        true,
+        announcementVersion,
+      );
       const failed = () => report(
         "Copy failed",
         "Copy failed. Select the command and copy it manually.",
         false,
+        announcementVersion,
       );
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
