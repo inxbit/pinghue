@@ -200,6 +200,7 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.match(js, /updateTerminalTimer/);
   assert.match(js, /navPanel\.hidden/);
   assert.match(js, /IntersectionObserver/);
+  assert.match(js, /mobileMenu\.addListener/);
   assert.doesNotMatch(js, /addEventListener\(["']scroll/);
 
   const readme = read('README.md');
@@ -279,22 +280,35 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
   );
 });
 
-test('copy buttons report a rejected clipboard write as a failure', async () => {
-  let click;
+const createStubElement = (initialAttributes = {}) => {
+  const attributes = new Map(Object.entries(initialAttributes));
   const classes = new Set();
-  const attributes = new Map([['aria-label', 'Copy install command']]);
-  const status = { textContent: '' };
-  const button = {
-    textContent: 'Copy',
-    getAttribute: (name) => name === 'data-copy' ? 'uv tool install pinghue' : attributes.get(name),
+  const listeners = new Map();
+  return {
+    attributes,
+    classes,
+    listeners,
+    hidden: false,
+    textContent: '',
+    getAttribute: (name) => attributes.get(name),
     setAttribute: (name, value) => attributes.set(name, value),
-    addEventListener: (_event, handler) => { click = handler; },
+    addEventListener: (event, handler) => listeners.set(event, handler),
     classList: {
       add: (name) => classes.add(name),
       remove: (name) => classes.delete(name),
       toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
     },
   };
+};
+
+const createCopyHarness = (writeText) => {
+  const status = { textContent: '' };
+  const button = createStubElement({
+    'aria-label': 'Copy install command',
+    'data-copy': 'uv tool install pinghue',
+  });
+  button.textContent = 'Copy';
+  let reset;
 
   runInNewContext(read('docs/script.js'), {
     document: {
@@ -304,60 +318,65 @@ test('copy buttons report a rejected clipboard write as a failure', async () => 
       addEventListener: () => {},
       hidden: false,
     },
-    window: {
-      matchMedia: () => ({ matches: false }),
-    },
-    navigator: {
-      clipboard: {
-        writeText: () => Promise.reject(new Error('clipboard denied')),
-      },
-    },
+    window: { matchMedia: () => ({ matches: false }) },
+    navigator: { clipboard: { writeText } },
     clearTimeout: () => {},
-    setTimeout: () => 0,
+    setTimeout: (handler) => {
+      reset = handler;
+      return 1;
+    },
   });
 
-  click();
+  return { button, reset: () => reset(), status };
+};
+
+test('copy buttons report a rejected clipboard write as a failure', async () => {
+  const harness = createCopyHarness(() => Promise.reject(new Error('clipboard denied')));
+
+  harness.button.listeners.get('click')();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(button.textContent, 'Copy failed');
-  assert.equal(classes.has('copied'), false);
-  assert.equal(status.textContent, 'Copy failed. Select the command and copy it manually.');
-  assert.equal(attributes.get('aria-label'), 'Copy failed');
+  assert.equal(harness.button.textContent, 'Copy failed');
+  assert.equal(harness.button.classes.has('copied'), false);
+  assert.equal(harness.status.textContent, 'Copy failed. Select the command and copy it manually.');
+  assert.equal(harness.button.attributes.get('aria-label'), 'Copy failed');
 });
 
-test('mobile menu synchronizes visibility, ARIA, focus trap, Escape, and resize', () => {
-  const element = (initialAttributes = {}) => {
-    const attributes = new Map(Object.entries(initialAttributes));
-    const classes = new Set();
-    const listeners = new Map();
-    return {
-      attributes,
-      classes,
-      listeners,
-      hidden: false,
-      getAttribute: (name) => attributes.get(name),
-      setAttribute: (name, value) => attributes.set(name, value),
-      addEventListener: (event, handler) => listeners.set(event, handler),
-      classList: {
-        add: (name) => classes.add(name),
-        remove: (name) => classes.delete(name),
-        toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
-      },
-    };
-  };
+test('copy buttons announce success and reset their visible and accessible state', async () => {
+  const harness = createCopyHarness(() => Promise.resolve());
 
-  const nav = element();
-  const toggle = element({ 'aria-expanded': 'false' });
-  const panel = element();
-  const close = element();
-  const link = element();
+  harness.button.listeners.get('click')();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(harness.button.textContent, 'Copied');
+  assert.equal(harness.button.classes.has('copied'), true);
+  assert.equal(harness.button.attributes.get('aria-label'), 'Command copied');
+  assert.equal(harness.status.textContent, 'Install command copied.');
+
+  harness.reset();
+  assert.equal(harness.button.textContent, 'Copy');
+  assert.equal(harness.button.classes.has('copied'), false);
+  assert.equal(harness.button.attributes.get('aria-label'), 'Copy install command');
+  assert.equal(harness.status.textContent, '');
+});
+
+const createMenuHarness = ({ legacyMedia = false } = {}) => {
+  const nav = createStubElement();
+  const toggle = createStubElement({ 'aria-expanded': 'false' });
+  const panel = createStubElement();
+  const close = createStubElement();
+  const link = createStubElement();
+  const unrelated = createStubElement();
   const documentListeners = new Map();
   const mediaListeners = new Map();
   const bodyClasses = new Set();
-  const mobileMenu = {
-    matches: true,
-    addEventListener: (event, handler) => mediaListeners.set(event, handler),
-  };
+  let legacyChange;
+  const mobileMenu = { matches: true };
+  if (legacyMedia) {
+    mobileMenu.addListener = (handler) => { legacyChange = handler; };
+  } else {
+    mobileMenu.addEventListener = (event, handler) => mediaListeners.set(event, handler);
+  }
   const document = {
     documentElement: { classList: { add: () => {} } },
     body: {
@@ -365,7 +384,7 @@ test('mobile menu synchronizes visibility, ARIA, focus trap, Escape, and resize'
         toggle: (name, enabled) => enabled ? bodyClasses.add(name) : bodyClasses.delete(name),
       },
     },
-    activeElement: toggle,
+    activeElement: unrelated,
     hidden: false,
     querySelectorAll: () => [],
     querySelector: (selector) => ({
@@ -376,9 +395,9 @@ test('mobile menu synchronizes visibility, ARIA, focus trap, Escape, and resize'
     })[selector] || null,
     addEventListener: (event, handler) => documentListeners.set(event, handler),
   };
-  close.focus = () => { document.activeElement = close; };
-  toggle.focus = () => { document.activeElement = toggle; };
-  link.focus = () => { document.activeElement = link; };
+  for (const item of [toggle, close, link, unrelated]) {
+    item.focus = () => { document.activeElement = item; };
+  }
   panel.querySelectorAll = (selector) => (
     selector === 'a[href]' ? [link] : [close, link]
   );
@@ -395,41 +414,270 @@ test('mobile menu synchronizes visibility, ARIA, focus trap, Escape, and resize'
     setTimeout: () => 0,
   });
 
+  return {
+    bodyClasses,
+    close,
+    document,
+    documentListeners,
+    getMediaChange: () => legacyMedia ? legacyChange : mediaListeners.get('change'),
+    link,
+    mobileMenu,
+    panel,
+    toggle,
+    unrelated,
+  };
+};
+
+const assertClosedMobileMenu = ({ bodyClasses, document, panel, toggle }) => {
   assert.equal(panel.hidden, true);
   assert.equal(panel.attributes.get('data-open'), 'false');
   assert.equal(toggle.attributes.get('aria-expanded'), 'false');
+  assert.equal(bodyClasses.has('menu-open'), false);
+  assert.equal(document.activeElement, toggle);
+};
 
-  toggle.listeners.get('click')();
-  assert.equal(panel.hidden, false);
-  assert.equal(panel.attributes.get('data-open'), 'true');
-  assert.equal(toggle.attributes.get('aria-expanded'), 'true');
-  assert.equal(bodyClasses.has('menu-open'), true);
-  assert.equal(document.activeElement, close);
+test('mobile menu synchronizes ARIA, traps focus, and restores its opener', () => {
+  const harness = createMenuHarness();
 
-  document.activeElement = link;
+  assert.equal(harness.panel.hidden, true);
+  assert.equal(harness.panel.attributes.get('data-open'), 'false');
+  assert.equal(harness.toggle.attributes.get('aria-expanded'), 'false');
+  assert.equal(harness.bodyClasses.has('menu-open'), false);
+  assert.equal(harness.document.activeElement, harness.unrelated);
+  harness.toggle.listeners.get('click')();
+  assert.equal(harness.panel.hidden, false);
+  assert.equal(harness.panel.attributes.get('data-open'), 'true');
+  assert.equal(harness.toggle.attributes.get('aria-expanded'), 'true');
+  assert.equal(harness.bodyClasses.has('menu-open'), true);
+  assert.equal(harness.document.activeElement, harness.close);
+
   let prevented = false;
-  documentListeners.get('keydown')({
+  harness.documentListeners.get('keydown')({
+    key: 'Tab',
+    shiftKey: true,
+    preventDefault: () => { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(harness.document.activeElement, harness.link);
+
+  prevented = false;
+  harness.documentListeners.get('keydown')({
     key: 'Tab',
     shiftKey: false,
     preventDefault: () => { prevented = true; },
   });
   assert.equal(prevented, true);
-  assert.equal(document.activeElement, close);
+  assert.equal(harness.document.activeElement, harness.close);
 
-  documentListeners.get('keydown')({
+  harness.documentListeners.get('keydown')({
     key: 'Escape',
     shiftKey: false,
     preventDefault: () => {},
   });
-  assert.equal(panel.hidden, true);
-  assert.equal(toggle.attributes.get('aria-expanded'), 'false');
-  assert.equal(bodyClasses.has('menu-open'), false);
-  assert.equal(document.activeElement, toggle);
+  assertClosedMobileMenu(harness);
+});
 
-  toggle.listeners.get('click')();
-  mobileMenu.matches = false;
-  mediaListeners.get('change')();
-  assert.equal(panel.hidden, false);
-  assert.equal(panel.attributes.get('data-open'), 'false');
-  assert.equal(document.activeElement, toggle);
+test('mobile menu closes through every pointer dismissal path and viewport reset', () => {
+  const harness = createMenuHarness();
+  const open = () => {
+    harness.document.activeElement = harness.unrelated;
+    harness.toggle.listeners.get('click')();
+  };
+
+  open();
+  harness.close.listeners.get('click')();
+  assertClosedMobileMenu(harness);
+
+  open();
+  harness.link.listeners.get('click')();
+  assertClosedMobileMenu(harness);
+
+  open();
+  harness.panel.listeners.get('click')({ target: harness.panel });
+  assertClosedMobileMenu(harness);
+
+  open();
+  harness.mobileMenu.matches = false;
+  harness.getMediaChange()();
+  assert.equal(harness.panel.hidden, false);
+  assert.equal(harness.panel.attributes.get('data-open'), 'false');
+  assert.equal(harness.toggle.attributes.get('aria-expanded'), 'false');
+  assert.equal(harness.document.activeElement, harness.toggle);
+});
+
+test('mobile menu registers the legacy MediaQueryList change callback', () => {
+  const harness = createMenuHarness({ legacyMedia: true });
+
+  assert.equal(typeof harness.getMediaChange(), 'function');
+  harness.toggle.listeners.get('click')();
+  harness.mobileMenu.matches = false;
+  harness.getMediaChange()();
+
+  assert.equal(harness.panel.hidden, false);
+  assert.equal(harness.panel.attributes.get('data-open'), 'false');
+  assert.equal(harness.document.activeElement, harness.toggle);
+});
+
+test('reveal content resolves when motion or observer support is unavailable', () => {
+  for (const { reduced, withObserver } of [
+    { reduced: false, withObserver: false },
+    { reduced: true, withObserver: true },
+  ]) {
+    const item = createStubElement();
+    const strip = createStubElement();
+    let observerConstructions = 0;
+    function IntersectionObserver() { observerConstructions += 1; }
+    const window = { matchMedia: () => ({ matches: reduced }) };
+    const context = {
+      document: {
+        documentElement: { classList: { add: () => {} } },
+        querySelectorAll: (selector) => selector === '[data-reveal]' ? [item] : [],
+        querySelector: (selector) => selector === '[data-scale]' ? strip : null,
+        addEventListener: () => {},
+        hidden: false,
+      },
+      window,
+      navigator: {},
+      clearTimeout: () => {},
+      setTimeout: () => 0,
+    };
+    if (withObserver) {
+      window.IntersectionObserver = IntersectionObserver;
+      context.IntersectionObserver = IntersectionObserver;
+    }
+
+    runInNewContext(read('docs/script.js'), context);
+
+    assert.equal(item.classes.has('reveal-ready'), true);
+    assert.equal(item.classes.has('is-revealed'), true);
+    assert.equal(strip.classes.has('in-view'), true);
+    assert.equal(observerConstructions, 0);
+  }
+});
+
+const createTerminalHarness = ({ withObserver = true } = {}) => {
+  const createNode = () => {
+    const node = createStubElement();
+    node.children = [];
+    node.appendChild = (child) => {
+      node.children.push(child);
+      return child;
+    };
+    node.replaceChildren = (...children) => { node.children = children; };
+    return node;
+  };
+  const tbody = createNode();
+  const clock = createNode();
+  const root = createNode();
+  root.querySelector = (selector) => ({
+    '[data-rows]': tbody,
+    '[data-clock]': clock,
+  })[selector] || null;
+  const documentListeners = new Map();
+  const document = {
+    documentElement: { classList: { add: () => {} } },
+    hidden: false,
+    querySelectorAll: () => [],
+    querySelector: (selector) => selector === '[data-terminal]' ? root : null,
+    addEventListener: (event, handler) => documentListeners.set(event, handler),
+    createDocumentFragment: createNode,
+    createElement: createNode,
+  };
+  const observers = [];
+  function IntersectionObserver(callback, options) {
+    this.callback = callback;
+    this.options = options;
+    this.targets = [];
+    this.observe = (target) => this.targets.push(target);
+    this.unobserve = (target) => {
+      this.targets = this.targets.filter((candidate) => candidate !== target);
+    };
+    observers.push(this);
+  }
+  const activeIntervals = new Set();
+  let intervalStarts = 0;
+  let intervalStops = 0;
+  let nextInterval = 1;
+  const window = { matchMedia: () => ({ matches: false }) };
+  const context = {
+    document,
+    window,
+    navigator: {},
+    clearTimeout: () => {},
+    setTimeout: () => 0,
+    setInterval: () => {
+      intervalStarts += 1;
+      const id = nextInterval;
+      nextInterval += 1;
+      activeIntervals.add(id);
+      return id;
+    },
+    clearInterval: (id) => {
+      intervalStops += 1;
+      activeIntervals.delete(id);
+    },
+  };
+  if (withObserver) {
+    window.IntersectionObserver = IntersectionObserver;
+    context.IntersectionObserver = IntersectionObserver;
+  }
+
+  runInNewContext(read('docs/script.js'), context);
+
+  return {
+    activeIntervals,
+    clock,
+    document,
+    documentListeners,
+    getIntervalStarts: () => intervalStarts,
+    getIntervalStops: () => intervalStops,
+    observers,
+    root,
+  };
+};
+
+test('terminal interval follows observer and document visibility without duplication', () => {
+  const harness = createTerminalHarness();
+  const terminalObserver = harness.observers.find(({ options }) => options.threshold === 0.08);
+
+  assert.ok(terminalObserver);
+  assert.equal(harness.clock.textContent, '00:04');
+  assert.equal(harness.getIntervalStarts(), 0);
+  assert.equal(harness.activeIntervals.size, 0);
+
+  terminalObserver.callback([{ target: harness.root, isIntersecting: true }]);
+  assert.equal(harness.getIntervalStarts(), 1);
+  assert.equal(harness.activeIntervals.size, 1);
+
+  terminalObserver.callback([{ target: harness.root, isIntersecting: true }]);
+  assert.equal(harness.getIntervalStarts(), 1);
+  assert.equal(harness.activeIntervals.size, 1);
+
+  harness.document.hidden = true;
+  harness.documentListeners.get('visibilitychange')();
+  assert.equal(harness.getIntervalStops(), 1);
+  assert.equal(harness.activeIntervals.size, 0);
+
+  terminalObserver.callback([{ target: harness.root, isIntersecting: true }]);
+  assert.equal(harness.getIntervalStarts(), 1);
+
+  harness.document.hidden = false;
+  harness.documentListeners.get('visibilitychange')();
+  assert.equal(harness.getIntervalStarts(), 2);
+  assert.equal(harness.activeIntervals.size, 1);
+
+  terminalObserver.callback([{ target: harness.root, isIntersecting: false }]);
+  assert.equal(harness.getIntervalStops(), 2);
+  assert.equal(harness.activeIntervals.size, 0);
+
+  terminalObserver.callback([{ target: harness.root, isIntersecting: false }]);
+  assert.equal(harness.getIntervalStops(), 2);
+});
+
+test('terminal interval starts immediately only without observer support', () => {
+  const harness = createTerminalHarness({ withObserver: false });
+
+  assert.equal(harness.clock.textContent, '00:04');
+  assert.equal(harness.getIntervalStarts(), 1);
+  assert.equal(harness.activeIntervals.size, 1);
 });

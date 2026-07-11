@@ -25,6 +25,7 @@
         btn.classList.remove("copied");
         btn.textContent = "Copy";
         btn.setAttribute("aria-label", originalLabel);
+        if (copyStatus) copyStatus.textContent = "";
       }, 1800);
     };
 
@@ -70,7 +71,7 @@
       menuOpen = mobileMenu.matches && open;
       syncMenu();
       if (menuOpen) {
-        returnFocus = document.activeElement;
+        returnFocus = navToggle;
         navClose.focus();
       } else if (returnFocus && typeof returnFocus.focus === "function") {
         const target = returnFocus;
@@ -108,6 +109,8 @@
     });
     if (typeof mobileMenu.addEventListener === "function") {
       mobileMenu.addEventListener("change", () => setMenu(false));
+    } else if (typeof mobileMenu.addListener === "function") {
+      mobileMenu.addListener(() => setMenu(false));
     }
     syncMenu();
   }
@@ -288,7 +291,8 @@
   };
 
   let timer = null;
-  let terminalVisible = true;
+  const observesTerminal = "IntersectionObserver" in window;
+  let terminalVisible = !observesTerminal;
   let documentVisible = !document.hidden;
 
   const updateTerminalTimer = () => {
@@ -305,7 +309,7 @@
     for (let i = 0; i < 30; i += 1) step();
   } else {
     for (let i = 0; i < 4; i += 1) step(); // start with a little history on screen
-    if ("IntersectionObserver" in window) {
+    if (observesTerminal) {
       const terminalObserver = new IntersectionObserver((entries) => {
         terminalVisible = entries.some((entry) => entry.isIntersecting);
         updateTerminalTimer();
