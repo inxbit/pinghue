@@ -190,6 +190,17 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.match(js, /peakJitter/);
   assert.doesNotMatch(js, /everSlow/);
   assert.match(js, /prefers-reduced-motion/);
+  assert.match(js, /documentElement\.classList\.add\("js"\)/);
+  assert.match(js, /data-nav-toggle/);
+  assert.match(js, /aria-expanded/);
+  assert.match(js, /data-copy-status/);
+  assert.match(js, /reveal-ready/);
+  assert.match(js, /terminalVisible/);
+  assert.match(js, /documentVisible/);
+  assert.match(js, /updateTerminalTimer/);
+  assert.match(js, /navPanel\.hidden/);
+  assert.match(js, /IntersectionObserver/);
+  assert.doesNotMatch(js, /addEventListener\(["']scroll/);
 
   const readme = read('README.md');
   assert.match(readme, /https:\/\/pinghue\.com/);
@@ -271,28 +282,37 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
 test('copy buttons report a rejected clipboard write as a failure', async () => {
   let click;
   const classes = new Set();
+  const attributes = new Map([['aria-label', 'Copy install command']]);
+  const status = { textContent: '' };
   const button = {
     textContent: 'Copy',
-    getAttribute: () => 'uv tool install pinghue',
-    addEventListener: (_event, handler) => {
-      click = handler;
-    },
+    getAttribute: (name) => name === 'data-copy' ? 'uv tool install pinghue' : attributes.get(name),
+    setAttribute: (name, value) => attributes.set(name, value),
+    addEventListener: (_event, handler) => { click = handler; },
     classList: {
       add: (name) => classes.add(name),
       remove: (name) => classes.delete(name),
+      toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
     },
   };
 
   runInNewContext(read('docs/script.js'), {
     document: {
-      querySelectorAll: () => [button],
-      querySelector: () => null,
+      documentElement: { classList: { add: () => {} } },
+      querySelectorAll: (selector) => selector === '.copy-btn' ? [button] : [],
+      querySelector: (selector) => selector === '[data-copy-status]' ? status : null,
+      addEventListener: () => {},
+      hidden: false,
+    },
+    window: {
+      matchMedia: () => ({ matches: false }),
     },
     navigator: {
       clipboard: {
         writeText: () => Promise.reject(new Error('clipboard denied')),
       },
     },
+    clearTimeout: () => {},
     setTimeout: () => 0,
   });
 
@@ -301,4 +321,115 @@ test('copy buttons report a rejected clipboard write as a failure', async () => 
 
   assert.equal(button.textContent, 'Copy failed');
   assert.equal(classes.has('copied'), false);
+  assert.equal(status.textContent, 'Copy failed. Select the command and copy it manually.');
+  assert.equal(attributes.get('aria-label'), 'Copy failed');
+});
+
+test('mobile menu synchronizes visibility, ARIA, focus trap, Escape, and resize', () => {
+  const element = (initialAttributes = {}) => {
+    const attributes = new Map(Object.entries(initialAttributes));
+    const classes = new Set();
+    const listeners = new Map();
+    return {
+      attributes,
+      classes,
+      listeners,
+      hidden: false,
+      getAttribute: (name) => attributes.get(name),
+      setAttribute: (name, value) => attributes.set(name, value),
+      addEventListener: (event, handler) => listeners.set(event, handler),
+      classList: {
+        add: (name) => classes.add(name),
+        remove: (name) => classes.delete(name),
+        toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
+      },
+    };
+  };
+
+  const nav = element();
+  const toggle = element({ 'aria-expanded': 'false' });
+  const panel = element();
+  const close = element();
+  const link = element();
+  const documentListeners = new Map();
+  const mediaListeners = new Map();
+  const bodyClasses = new Set();
+  const mobileMenu = {
+    matches: true,
+    addEventListener: (event, handler) => mediaListeners.set(event, handler),
+  };
+  const document = {
+    documentElement: { classList: { add: () => {} } },
+    body: {
+      classList: {
+        toggle: (name, enabled) => enabled ? bodyClasses.add(name) : bodyClasses.delete(name),
+      },
+    },
+    activeElement: toggle,
+    hidden: false,
+    querySelectorAll: () => [],
+    querySelector: (selector) => ({
+      '[data-nav]': nav,
+      '[data-nav-toggle]': toggle,
+      '[data-nav-panel]': panel,
+      '[data-nav-close]': close,
+    })[selector] || null,
+    addEventListener: (event, handler) => documentListeners.set(event, handler),
+  };
+  close.focus = () => { document.activeElement = close; };
+  toggle.focus = () => { document.activeElement = toggle; };
+  link.focus = () => { document.activeElement = link; };
+  panel.querySelectorAll = (selector) => (
+    selector === 'a[href]' ? [link] : [close, link]
+  );
+
+  runInNewContext(read('docs/script.js'), {
+    document,
+    window: {
+      matchMedia: (query) => query === '(max-width: 767px)'
+        ? mobileMenu
+        : { matches: false },
+    },
+    navigator: {},
+    clearTimeout: () => {},
+    setTimeout: () => 0,
+  });
+
+  assert.equal(panel.hidden, true);
+  assert.equal(panel.attributes.get('data-open'), 'false');
+  assert.equal(toggle.attributes.get('aria-expanded'), 'false');
+
+  toggle.listeners.get('click')();
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.attributes.get('data-open'), 'true');
+  assert.equal(toggle.attributes.get('aria-expanded'), 'true');
+  assert.equal(bodyClasses.has('menu-open'), true);
+  assert.equal(document.activeElement, close);
+
+  document.activeElement = link;
+  let prevented = false;
+  documentListeners.get('keydown')({
+    key: 'Tab',
+    shiftKey: false,
+    preventDefault: () => { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(document.activeElement, close);
+
+  documentListeners.get('keydown')({
+    key: 'Escape',
+    shiftKey: false,
+    preventDefault: () => {},
+  });
+  assert.equal(panel.hidden, true);
+  assert.equal(toggle.attributes.get('aria-expanded'), 'false');
+  assert.equal(bodyClasses.has('menu-open'), false);
+  assert.equal(document.activeElement, toggle);
+
+  toggle.listeners.get('click')();
+  mobileMenu.matches = false;
+  mediaListeners.get('change')();
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.attributes.get('data-open'), 'false');
+  assert.equal(document.activeElement, toggle);
 });

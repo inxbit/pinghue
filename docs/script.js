@@ -5,26 +5,38 @@
 (() => {
   "use strict";
 
+  document.documentElement.classList.add("js");
+
   /* ------------------------------------------------ copy buttons */
 
+  const copyStatus = document.querySelector("[data-copy-status]");
+
   document.querySelectorAll(".copy-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const text = btn.getAttribute("data-copy");
-      const done = () => {
-        btn.classList.add("copied");
-        btn.textContent = "Copied";
-        setTimeout(() => {
-          btn.classList.remove("copied");
-          btn.textContent = "Copy";
-        }, 1600);
-      };
-      const failed = () => {
+    const originalLabel = btn.getAttribute("aria-label") || "Copy command";
+    let resetTimer = null;
+
+    const report = (label, announcement, copied) => {
+      clearTimeout(resetTimer);
+      btn.classList.toggle("copied", copied);
+      btn.textContent = label;
+      btn.setAttribute("aria-label", label === "Copied" ? "Command copied" : label);
+      if (copyStatus) copyStatus.textContent = announcement;
+      resetTimer = setTimeout(() => {
         btn.classList.remove("copied");
-        btn.textContent = "Copy failed";
-        setTimeout(() => {
-          btn.textContent = "Copy";
-        }, 1600);
-      };
+        btn.textContent = "Copy";
+        btn.setAttribute("aria-label", originalLabel);
+      }, 1800);
+    };
+
+    btn.addEventListener("click", () => {
+      const text = btn.getAttribute("data-copy") || "";
+      const done = () => report("Copied", "Install command copied.", true);
+      const failed = () => report(
+        "Copy failed",
+        "Copy failed. Select the command and copy it manually.",
+        false,
+      );
+
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, failed);
       } else {
@@ -33,25 +45,95 @@
     });
   });
 
-  /* ------------------------------------------------ scale strip reveal */
+  /* ------------------------------------------------ mobile navigation */
 
-  const strip = document.querySelector("[data-scale]");
-  if (strip && "IntersectionObserver" in window) {
-    strip.querySelectorAll(".scale-cell").forEach((cell, i) => {
-      cell.style.setProperty("--i", i);
+  const nav = document.querySelector("[data-nav]");
+  const navToggle = document.querySelector("[data-nav-toggle]");
+  const navPanel = document.querySelector("[data-nav-panel]");
+  const navClose = document.querySelector("[data-nav-close]");
+
+  if (nav && navToggle && navPanel && navClose) {
+    const focusableSelector = "a[href], button:not([disabled])";
+    const mobileMenu = window.matchMedia("(max-width: 767px)");
+    let returnFocus = null;
+    let menuOpen = false;
+
+    const syncMenu = () => {
+      const open = mobileMenu.matches && menuOpen;
+      navPanel.hidden = mobileMenu.matches && !open;
+      navPanel.setAttribute("data-open", String(open));
+      navToggle.setAttribute("aria-expanded", String(open));
+      document.body.classList.toggle("menu-open", open);
+    };
+
+    const setMenu = (open) => {
+      menuOpen = mobileMenu.matches && open;
+      syncMenu();
+      if (menuOpen) {
+        returnFocus = document.activeElement;
+        navClose.focus();
+      } else if (returnFocus && typeof returnFocus.focus === "function") {
+        const target = returnFocus;
+        returnFocus = null;
+        target.focus();
+      }
+    };
+
+    navToggle.addEventListener("click", () => setMenu(true));
+    navClose.addEventListener("click", () => setMenu(false));
+    navPanel.addEventListener("click", (event) => {
+      if (event.target === navPanel) setMenu(false);
     });
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((e) => {
-          if (e.isIntersecting) {
-            strip.classList.add("in-view");
-            io.disconnect();
-          }
-        });
-      },
-      { threshold: 0.35 }
-    );
-    io.observe(strip);
+    navPanel.querySelectorAll("a[href]").forEach((link) => {
+      link.addEventListener("click", () => setMenu(false));
+    });
+    document.addEventListener("keydown", (event) => {
+      if (navPanel.getAttribute("data-open") !== "true") return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenu(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = [...navPanel.querySelectorAll(focusableSelector)];
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    if (typeof mobileMenu.addEventListener === "function") {
+      mobileMenu.addEventListener("change", () => setMenu(false));
+    }
+    syncMenu();
+  }
+
+  /* ------------------------------------------------ reveal orchestration */
+
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const revealItems = [...document.querySelectorAll("[data-reveal]")];
+  const strip = document.querySelector("[data-scale]");
+
+  revealItems.forEach((item) => item.classList.add("reveal-ready"));
+
+  if (reduced || !("IntersectionObserver" in window)) {
+    revealItems.forEach((item) => item.classList.add("is-revealed"));
+    if (strip) strip.classList.add("in-view");
+  } else {
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-revealed");
+        if (entry.target === strip) strip.classList.add("in-view");
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.16 });
+    revealItems.forEach((item) => revealObserver.observe(item));
+    if (strip && !revealItems.includes(strip)) revealObserver.observe(strip);
   }
 
   /* ------------------------------------------------ terminal simulation */
@@ -205,21 +287,35 @@
     render(tick);
   };
 
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let timer = null;
+  let terminalVisible = true;
+  let documentVisible = !document.hidden;
+
+  const updateTerminalTimer = () => {
+    const shouldRun = !reduced && terminalVisible && documentVisible;
+    if (shouldRun && timer === null) timer = setInterval(step, TICK_MS);
+    if (!shouldRun && timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
 
   if (reduced) {
     // Static end-of-run frame: the whole story, already told.
     for (let i = 0; i < 30; i += 1) step();
   } else {
     for (let i = 0; i < 4; i += 1) step(); // start with a little history on screen
-    let timer = setInterval(step, TICK_MS);
+    if ("IntersectionObserver" in window) {
+      const terminalObserver = new IntersectionObserver((entries) => {
+        terminalVisible = entries.some((entry) => entry.isIntersecting);
+        updateTerminalTimer();
+      }, { threshold: 0.08 });
+      terminalObserver.observe(root);
+    }
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        clearInterval(timer);
-        timer = null;
-      } else if (!timer) {
-        timer = setInterval(step, TICK_MS);
-      }
+      documentVisible = !document.hidden;
+      updateTerminalTimer();
     });
+    updateTerminalTimer();
   }
 })();
