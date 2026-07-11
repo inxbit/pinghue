@@ -314,7 +314,10 @@ const createCopyHarness = (
     button.textContent = 'Copy';
     return button;
   });
-  const resets = [];
+  const canceledTimerIds = [];
+  const scheduledTimerIds = [];
+  const timers = new Map();
+  let nextTimerId = 1;
 
   runInNewContext(read('docs/script.js'), {
     document: {
@@ -326,17 +329,36 @@ const createCopyHarness = (
     },
     window: { matchMedia: () => ({ matches: false }) },
     navigator: { clipboard: { writeText } },
-    clearTimeout: () => {},
+    clearTimeout: (id) => {
+      if (id !== null && id !== undefined && timers.delete(id)) {
+        canceledTimerIds.push(id);
+      }
+    },
     setTimeout: (handler) => {
-      resets.push(handler);
-      return resets.length;
+      const id = nextTimerId;
+      nextTimerId += 1;
+      scheduledTimerIds.push(id);
+      timers.set(id, handler);
+      return id;
     },
   });
 
+  const runTimer = (id) => {
+    const handler = timers.get(id);
+    if (!handler) return false;
+    timers.delete(id);
+    handler();
+    return true;
+  };
+
   return {
+    canceledTimerIds,
     button: buttons[0],
     buttons,
-    reset: (index = 0) => resets[index](),
+    getActiveTimerIds: () => [...timers.keys()],
+    reset: (index = 0) => runTimer(scheduledTimerIds[index]),
+    runTimer,
+    scheduledTimerIds,
     status,
   };
 };
@@ -394,6 +416,67 @@ test('an older copy reset cannot clear a newer shared announcement', async () =>
 
   harness.reset(1);
   assert.equal(harness.status.textContent, '');
+});
+
+test('a new click cancels the current button reset and neutralizes stale feedback', async () => {
+  const harness = createCopyHarness(() => Promise.resolve());
+
+  harness.button.listeners.get('click')();
+  await new Promise((resolve) => setImmediate(resolve));
+  const staleReset = harness.scheduledTimerIds[0];
+  assert.deepEqual(harness.getActiveTimerIds(), [staleReset]);
+  assert.equal(harness.button.textContent, 'Copied');
+
+  harness.button.listeners.get('click')();
+  assert.deepEqual(harness.canceledTimerIds, [staleReset]);
+  assert.deepEqual(harness.getActiveTimerIds(), []);
+  assert.equal(harness.button.textContent, 'Copy');
+  assert.equal(harness.button.classes.has('copied'), false);
+  assert.equal(harness.button.attributes.get('aria-label'), 'Copy install command');
+  assert.equal(harness.status.textContent, '');
+  assert.equal(harness.runTimer(staleReset), false);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.button.textContent, 'Copied');
+  assert.equal(harness.status.textContent, 'Install command copied.');
+});
+
+test('an older same-button completion cannot mutate or cancel the newer result', async () => {
+  const operations = [];
+  const harness = createCopyHarness(() => new Promise((resolve, reject) => {
+    operations.push({ reject, resolve });
+  }));
+
+  harness.button.listeners.get('click')();
+  harness.button.listeners.get('click')();
+  assert.equal(operations.length, 2);
+
+  operations[1].resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  const currentReset = harness.scheduledTimerIds[0];
+  assert.equal(harness.button.textContent, 'Copied');
+  assert.equal(harness.button.classes.has('copied'), true);
+  assert.equal(harness.button.attributes.get('aria-label'), 'Command copied');
+  assert.equal(harness.status.textContent, 'Install command copied.');
+  assert.deepEqual(harness.getActiveTimerIds(), [currentReset]);
+
+  operations[0].reject(new Error('older clipboard failure'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.button.textContent, 'Copied');
+  assert.equal(harness.button.classes.has('copied'), true);
+  assert.equal(harness.button.attributes.get('aria-label'), 'Command copied');
+  assert.equal(harness.status.textContent, 'Install command copied.');
+  assert.deepEqual(harness.canceledTimerIds, []);
+  assert.deepEqual(harness.getActiveTimerIds(), [currentReset]);
+  assert.deepEqual(harness.scheduledTimerIds, [currentReset]);
+
+  assert.equal(harness.runTimer(currentReset), true);
+  assert.equal(harness.button.textContent, 'Copy');
+  assert.equal(harness.button.classes.has('copied'), false);
+  assert.equal(harness.button.attributes.get('aria-label'), 'Copy install command');
+  assert.equal(harness.status.textContent, '');
+  assert.deepEqual(harness.getActiveTimerIds(), []);
+  assert.equal(harness.runTimer(currentReset), false);
 });
 
 const createMenuHarness = ({ legacyMedia = false } = {}) => {

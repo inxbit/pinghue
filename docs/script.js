@@ -14,10 +14,25 @@
 
   document.querySelectorAll(".copy-btn").forEach((btn) => {
     const originalLabel = btn.getAttribute("aria-label") || "Copy command";
+    let operationVersion = 0;
     let resetTimer = null;
 
-    const report = (label, announcement, copied, announcementVersion) => {
+    const resetButton = () => {
+      btn.classList.remove("copied");
+      btn.textContent = "Copy";
+      btn.setAttribute("aria-label", originalLabel);
+    };
+
+    const report = (
+      label,
+      announcement,
+      copied,
+      announcementVersion,
+      currentOperation,
+    ) => {
+      if (currentOperation !== operationVersion) return;
       clearTimeout(resetTimer);
+      resetTimer = null;
       btn.classList.toggle("copied", copied);
       btn.textContent = label;
       btn.setAttribute("aria-label", label === "Copied" ? "Command copied" : label);
@@ -25,9 +40,9 @@
         copyStatus.textContent = announcement;
       }
       resetTimer = setTimeout(() => {
-        btn.classList.remove("copied");
-        btn.textContent = "Copy";
-        btn.setAttribute("aria-label", originalLabel);
+        if (currentOperation !== operationVersion) return;
+        resetTimer = null;
+        resetButton();
         if (copyStatus && announcementVersion === copyAnnouncementVersion) {
           copyStatus.textContent = "";
         }
@@ -36,18 +51,25 @@
 
     btn.addEventListener("click", () => {
       const text = btn.getAttribute("data-copy") || "";
+      const currentOperation = ++operationVersion;
       const announcementVersion = ++copyAnnouncementVersion;
+      clearTimeout(resetTimer);
+      resetTimer = null;
+      resetButton();
+      if (copyStatus) copyStatus.textContent = "";
       const done = () => report(
         "Copied",
         "Install command copied.",
         true,
         announcementVersion,
+        currentOperation,
       );
       const failed = () => report(
         "Copy failed",
         "Copy failed. Select the command and copy it manually.",
         false,
         announcementVersion,
+        currentOperation,
       );
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
