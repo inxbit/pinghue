@@ -196,6 +196,7 @@ button {
 .wordmark {
   position: relative;
   z-index: calc(var(--layer-menu) + 1);
+  flex: 0 0 auto;
   min-width: 44px;
   min-height: 44px;
   display: inline-flex;
@@ -1233,6 +1234,7 @@ button {
     padding: 5rem 1rem 1rem;
     display: grid;
     place-items: start center;
+    overflow-y: auto;
     background: rgba(10, 14, 18, 0.9);
     opacity: 0;
     pointer-events: none;
@@ -1250,9 +1252,11 @@ button {
 
   .js .nav-panel .nav-links {
     width: min(100%, 28rem);
+    height: auto;
     padding: 1rem;
     display: grid;
     gap: 0.4rem;
+    overflow: visible;
     border: 1px solid rgba(230, 237, 243, 0.08);
     border-radius: var(--radius-shell);
     background: var(--panel);

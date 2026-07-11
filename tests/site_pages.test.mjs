@@ -351,6 +351,16 @@ test('copy controls require JavaScript and mobile no-JS navigation stays one-row
   );
 });
 
+test('mobile wordmark stays atomic and the enhanced menu resets no-JS clipping', () => {
+  const css = stripCssComments(read('docs/styles.css'));
+  assert.match(cssRuleBody(css, '.wordmark'), /flex:\s*0\s+0\s+auto/);
+  assert.match(cssRuleBody(css, '.js .nav-panel'), /overflow-y:\s*auto/);
+
+  const enhancedLinks = cssRuleBody(css, '.js .nav-panel .nav-links');
+  assert.match(enhancedLinks, /height:\s*auto/);
+  assert.match(enhancedLinks, /overflow:\s*visible/);
+});
+
 test('all public navigation and footer links meet the 44px target contract', () => {
   const css = stripCssComments(read('docs/styles.css'));
   for (const selector of ['.wordmark', '.nav-links a', '.footer nav a']) {
