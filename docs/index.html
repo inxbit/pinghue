@@ -55,7 +55,10 @@
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy" data-reveal>
       <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
-      <h1 id="hero-title">Watch the whole window.</h1>
+      <h1 id="hero-title">
+        <span class="hero-line">Watch the whole</span>
+        <span class="hero-line">window.</span>
+      </h1>
       <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
       <div class="install-line">
         <code id="hero-install">uv tool install pinghue</code>
@@ -136,17 +139,17 @@
     <h2>TUI when you watch. Lines when you script.</h2>
     <div class="modes mode-cascade">
       <article class="mode mode-primary">
-        <h3><span class="mode-tag c-green">ICMP</span> the default</h3>
+        <h3><span class="mode-tag">ICMP</span> the default</h3>
         <pre><code><span class="prompt">$</span> pinghue 1.1.1.1 8.8.8.8 example.com</code></pre>
         <p>Concurrent echo probes with the full TUI: history bars, states, and keyboard control.</p>
       </article>
       <article class="mode mode-tcp">
-        <h3><span class="mode-tag c-blue">TCP</span> no privileges needed</h3>
+        <h3><span class="mode-tag">TCP</span> no privileges needed</h3>
         <pre><code><span class="prompt">$</span> pinghue -p 443 example.com api.internal</code></pre>
         <p>Connect checks against any port, 1 to 65535. Refused connections get their own amber marker.</p>
       </article>
       <article class="mode mode-automation">
-        <h3><span class="mode-tag c-amber">--no-tui</span> for cron and CI</h3>
+        <h3><span class="mode-tag">--no-tui</span> for cron and CI</h3>
         <pre><code><span class="prompt">$</span> pinghue -p 443 example.com -c 3 --no-tui
 <span class="out">2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms</span></code></pre>
         <p>One line per probe, fail-on-down exit codes, and <code>--output</code> for the report.</p>
@@ -192,10 +195,10 @@
       <pre class="json"><code><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json
 <span class="jk">{</span>
   <span class="jq">"schema_version"</span>: <span class="jn">1</span>,
-  <span class="jq">"pinghue_version"</span>: <span class="js">"5.0.0"</span>,
-  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="js">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="js">"deadline"</span>, <span class="jc">…</span> },
+  <span class="jq">"pinghue_version"</span>: <span class="json-string">"5.0.0"</span>,
+  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="json-string">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="json-string">"deadline"</span>, <span class="jc">…</span> },
   <span class="jq">"targets"</span>: [
-    { <span class="jq">"target"</span>: <span class="js">"db-primary"</span>, <span class="jq">"status"</span>: <span class="js c-amber">"intermittent"</span>,
+    { <span class="jq">"target"</span>: <span class="json-string">"db-primary"</span>, <span class="jq">"status"</span>: <span class="json-string c-amber">"intermittent"</span>,
       <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.11</span>, <span class="jc">…</span> } }
   ]
 <span class="jk">}</span></code></pre>
@@ -209,7 +212,7 @@
 
   <!-- ============================== not ============================== -->
   <section class="section scope-section" id="not" data-reveal>
-    <p class="kicker"><span class="glyph red">· · ·</span> # what pinghue is not</p>
+    <p class="kicker"><span class="glyph">· · ·</span> # what pinghue is not</p>
     <h2>Small on purpose.</h2>
     <ul class="not-list">
       <li>Not a Prometheus, Smokeping, Zabbix, or NMS replacement.</li>

@@ -57,11 +57,11 @@ html {
 }
 
 body {
-  min-width: 320px;
+  min-width: 0;
   margin: 0;
   overflow-x: clip;
   background:
-    radial-gradient(circle at 72% 7%, rgba(88, 166, 255, 0.055), transparent 28rem),
+    radial-gradient(circle at 72% 7%, rgba(142, 160, 184, 0.045), transparent 28rem),
     var(--bg);
   color: var(--text);
   font-family: var(--sans);
@@ -242,6 +242,9 @@ button {
 }
 
 .nav-links a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   color: var(--muted);
   font-size: 0.9rem;
   font-weight: 600;
@@ -307,18 +310,24 @@ button {
 .hero-copy {
   position: relative;
   z-index: 2;
+  min-width: 0;
   grid-column: 1 / span 5;
   grid-row: 1 / span 2;
   align-self: center;
 }
 
 .hero h1 {
-  max-width: 8ch;
+  max-width: none;
   margin: 0 0 1.2rem;
   font-size: clamp(3.25rem, 6vw, 6rem);
   font-weight: 760;
   line-height: 0.94;
   letter-spacing: -0.055em;
+}
+
+.hero-line {
+  display: block;
+  white-space: nowrap;
 }
 
 .kicker {
@@ -358,7 +367,7 @@ button {
   min-width: 0;
   padding: 0.75rem 1rem;
   overflow-x: auto;
-  color: var(--green);
+  color: var(--text);
   font-size: 0.9rem;
   white-space: nowrap;
 }
@@ -384,7 +393,8 @@ button {
 }
 
 .copy-btn.copied {
-  background: var(--green);
+  background: var(--text);
+  color: var(--bg);
 }
 
 .terminal-shell {
@@ -589,22 +599,14 @@ button {
   width: min(calc(100% - 3rem), var(--maxw));
   height: 2px;
   margin: 0 auto;
-  background: linear-gradient(
-    90deg,
-    var(--green) 0%,
-    var(--amber) 38%,
-    var(--red) 68%,
-    var(--blue) 100%
-  );
-  opacity: 0.72;
+  background: var(--border);
 }
 
 .glyph {
   font-weight: 400;
 }
 
-.glyph.green,
-.c-green {
+.glyph.green {
   color: var(--green);
 }
 
@@ -616,11 +618,6 @@ button {
 .glyph.red,
 .c-red {
   color: var(--red);
-}
-
-.glyph.blue,
-.c-blue {
-  color: var(--blue);
 }
 
 /* ---------------------------------------------------------------- ledger */
@@ -647,7 +644,7 @@ button {
 
 .ledger-item dt {
   margin: 0 0 0.55rem;
-  color: var(--green);
+  color: var(--muted);
   font: 0.76rem var(--mono);
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -724,6 +721,7 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--header);
+  color: var(--muted);
   font: 0.7rem var(--mono);
 }
 
@@ -835,15 +833,18 @@ button {
 }
 
 .jq {
-  color: var(--blue);
+  color: var(--muted);
 }
 
-.js {
-  color: var(--green);
+.json-string {
+  color: var(--text);
 }
 
-.js.c-amber,
 .jn {
+  color: var(--text);
+}
+
+.json-string.c-amber {
   color: var(--amber);
 }
 
@@ -902,7 +903,7 @@ button {
 .not-list li::before {
   position: absolute;
   left: 0.2rem;
-  color: var(--red);
+  color: var(--muted);
   content: "·";
   font-family: var(--mono);
   font-weight: 700;
@@ -945,13 +946,13 @@ button {
 .install-row code {
   min-width: 0;
   overflow-x: auto;
-  color: var(--green);
+  color: var(--text);
   font-size: 0.86rem;
   white-space: nowrap;
 }
 
 .install-row .copy-btn {
-  min-height: 38px;
+  min-height: 44px;
   padding-inline: 0.85rem;
 }
 
@@ -1245,7 +1246,7 @@ button {
   }
 
   .hero h1 {
-    font-size: clamp(3rem, 15vw, 4.5rem);
+    font-size: clamp(2.15rem, 10.5vw, 4.5rem);
   }
 
   .proof-rail {
@@ -1374,6 +1375,10 @@ button {
     background: var(--bg);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  .js .nav-panel {
+    background: var(--bg);
   }
 }
 

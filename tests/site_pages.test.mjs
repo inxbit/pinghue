@@ -4,6 +4,13 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 const read = (path) => readFileSync(path, 'utf8');
+const stripCssComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '');
+const cssRuleBody = (source, selector) => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = source.match(new RegExp(escaped + '\\s*\\{([^}]*)\\}'));
+  assert.ok(match, 'missing CSS rule for ' + selector);
+  return match[1];
+};
 const attributeCount = (source, attribute) => (
   source.match(new RegExp('\\s' + attribute + '(?=[\\s=>])', 'g')) || []
 ).length;
@@ -23,7 +30,7 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(existsSync('docs/fonts/jetbrains-mono-var-latin.woff2'), true);
 
   const html = read('docs/index.html');
-  const css = read('docs/styles.css');
+  const css = stripCssComments(read('docs/styles.css'));
   assert.match(css, /--nav-height:\s*64px/);
   assert.match(css, /--radius-shell:\s*24px/);
   assert.match(css, /--radius-core:\s*18px/);
@@ -156,11 +163,11 @@ test('GitHub Pages site has the expected static contract', () => {
   // The hero demonstrates the product with a JS-driven simulated run.
   assert.match(html, /data-terminal\b/);
   assert.match(html, /schema_version/);
-  assert.match(html, /"exit_reason"<\/span>: <span class="js">"deadline"<\/span>/);
-  assert.match(html, /"status"<\/span>: <span class="js c-amber">"intermittent"<\/span>/);
+  assert.match(html, /"exit_reason"<\/span>: <span class="json-string">"deadline"<\/span>/);
+  assert.match(html, /"status"<\/span>: <span class="json-string c-amber">"intermittent"<\/span>/);
   assert.match(html, /"loss_pct"<\/span>: <span class="jn">1\.11<\/span>/);
-  assert.doesNotMatch(html, /"exit_reason"<\/span>: <span class="js">"duration"<\/span>/);
-  assert.doesNotMatch(html, /"state"<\/span>: <span class="js c-amber">"intermittent"<\/span>/);
+  assert.doesNotMatch(html, /"exit_reason"<\/span>: <span class="json-string">"duration"<\/span>/);
+  assert.doesNotMatch(html, /"state"<\/span>: <span class="json-string c-amber">"intermittent"<\/span>/);
   assert.match(html, /What pinghue is not/i);
 
   // Self-hosted variable fonts, no third-party font CDN.
@@ -186,6 +193,79 @@ test('GitHub Pages site has the expected static contract', () => {
 
   const readme = read('README.md');
   assert.match(readme, /https:\/\/pinghue\.com/);
+});
+
+test('Signal Theatre visual contracts preserve meaning and accessibility', () => {
+  const html = read('docs/index.html');
+  const css = stripCssComments(read('docs/styles.css'));
+  const gradientPattern = /linear-gradient\((?:[^()]|\([^()]*\))*\)/gs;
+  const signalReference = /var\(--(?:green|amber|red|blue)\)|rgba\(\s*88\s*,\s*166\s*,\s*255\b/;
+  const signalGradients = (css.match(gradientPattern) || []).filter((gradient) => (
+    signalReference.test(gradient)
+  ));
+
+  // The identity wordmark is the sole decorative use of the signal palette.
+  assert.equal(signalGradients.length, 1);
+  const wordmarkRule = cssRuleBody(css, '.wm-hue');
+  assert.match(wordmarkRule, /linear-gradient/);
+  assert.equal(wordmarkRule.includes(signalGradients[0]), true);
+
+  for (const selector of [
+    'body',
+    '.hue-ribbon',
+    '.ledger-item dt',
+    '.install-line code',
+    '.install-row code',
+    '.not-list li::before',
+    '.mode-tag',
+    '.jq',
+    '.json-string',
+    '.jn',
+    '.copy-btn.copied',
+  ]) {
+    assert.doesNotMatch(cssRuleBody(css, selector), signalReference, selector + ' must stay neutral');
+  }
+
+  assert.equal((html.match(/<span class="mode-tag">/g) || []).length, 3);
+  assert.doesNotMatch(html, /class="mode-tag c-(?:green|amber|red|blue)"/);
+  const scopeSection = html.match(/<section(?=[^>]*\sid="not")[^>]*>[\s\S]*?<\/section>/);
+  assert.ok(scopeSection);
+  assert.doesNotMatch(scopeSection[0], /class="glyph (?:green|amber|red|blue)"/);
+
+  const heroTitle = /<h1 id="hero-title">\s*<span class="hero-line">Watch the whole<\/span>\s*<span class="hero-line">window\.<\/span>\s*<\/h1>/;
+  assert.match(html, heroTitle);
+  assert.equal((html.match(/class="hero-line"/g) || []).length, 2);
+  assert.match(cssRuleBody(css, '.hero-line'), /display:\s*block/);
+  assert.match(cssRuleBody(css, '.hero-line'), /white-space:\s*nowrap/);
+
+  assert.match(cssRuleBody(css, '.nav-links a'), /min-height:\s*44px/);
+  assert.match(cssRuleBody(css, '.install-row .copy-btn'), /min-height:\s*44px/);
+
+  const classNames = [...html.matchAll(/\bclass="([^"]+)"/g)]
+    .flatMap((match) => match[1].split(/\s+/));
+  assert.equal(classNames.includes('js'), false);
+  assert.equal(classNames.filter((name) => name === 'json-string').length, 5);
+
+  assert.match(
+    css,
+    /@media\s*\(prefers-reduced-transparency:\s*reduce\)\s*\{[\s\S]*?\.js \.nav-panel\s*\{[^}]*background:\s*var\(--bg\)/,
+  );
+
+  const transitionProperties = [...css.matchAll(/\btransition\s*:\s*([^;]+);/gs)]
+    .flatMap((match) => match[1].split(','))
+    .map((declaration) => declaration.trim().split(/\s+/)[0]);
+  assert.equal(transitionProperties.length > 0, true);
+  assert.deepEqual(
+    transitionProperties.filter((property) => !['opacity', 'transform'].includes(property)),
+    [],
+  );
+
+  // The mobile headline size and bounded shells are the static 320px layout contract.
+  assert.match(cssRuleBody(css, 'body'), /min-width:\s*0/);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.hero h1\s*\{[^}]*font-size:\s*clamp\(2\.15rem,\s*10\.5vw,\s*4\.5rem\)/,
+  );
 });
 
 test('copy buttons report a rejected clipboard write as a failure', async () => {
