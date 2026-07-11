@@ -1385,41 +1385,69 @@ button {
 /* ---------------------------------------------------------------- 404 */
 
 .lost {
-  width: min(calc(100% - 3rem), 46rem);
+  width: min(calc(100% - 2rem), 720px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding-block: clamp(6rem, 16vh, 11rem) 3rem;
+  padding-block: clamp(2rem, 8vh, 6rem);
+  display: grid;
+  align-content: center;
+  gap: 2rem;
 }
 
-.lost h1 {
-  max-width: 9ch;
-  margin-bottom: 2rem;
-  font-size: clamp(3rem, 10vw, 6rem);
-  line-height: 0.94;
-  letter-spacing: -0.055em;
+.lost-wordmark {
+  width: max-content;
+  color: var(--text);
+  font-size: 1.35rem;
+  font-weight: 750;
+  text-decoration: none;
 }
 
-.lost pre {
-  margin: 0 0 1.6rem;
-  padding: 1.1rem 1.3rem;
-  overflow-x: auto;
+.lost-shell {
+  min-width: 0;
+  padding: clamp(1.5rem, 5vw, 3rem);
   border: 1px solid rgba(230, 237, 243, 0.08);
+  border-radius: var(--radius-shell);
+  background: var(--shell);
+  box-shadow: inset 0 1px 0 rgba(230, 237, 243, 0.08), var(--shadow-stage);
+}
+
+.lost-shell h1 {
+  margin-bottom: 1.5rem;
+  font-size: clamp(2.25rem, 10vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+  overflow-wrap: anywhere;
+}
+
+.lost-shell pre {
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
   border-radius: var(--radius-core);
   background: var(--panel);
-  box-shadow: inset 0 1px 0 rgba(230, 237, 243, 0.07);
-  font-size: 0.82rem;
-  line-height: 1.8;
 }
 
-.lost p:last-child {
-  margin: 0;
-}
-
-.lost p:last-child a {
-  display: inline-flex;
+.lost-link {
   min-height: 44px;
+  width: max-content;
+  max-width: 100%;
   padding: 0.7rem 1rem;
+  display: inline-flex;
   align-items: center;
   border-radius: var(--radius-control);
   background: var(--blue-soft);
+  color: var(--text);
+  text-align: center;
+  text-decoration: none;
+}
+
+@media (max-width: 400px) {
+  .lost-shell {
+    padding-inline: 1.25rem;
+  }
+
+  .lost-link {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+  }
 }

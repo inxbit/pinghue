@@ -10,12 +10,18 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main class="lost">
-    <p class="kicker"><span class="glyph red">· · ·</span> # host state: down</p>
-    <h1>404: not found.</h1>
-    <pre><code><span class="prompt">$</span> pinghue this-page
+  <a class="skip-link" href="#main">Skip to content</a>
+  <main class="lost" id="main">
+    <a class="wordmark lost-wordmark" href="/" aria-label="PingHue home">
+      <span class="wm-ping">ping</span><span class="wm-hue">hue</span>
+    </a>
+    <div class="lost-shell">
+      <p class="kicker"><span class="glyph red">· · ·</span> # host state: down</p>
+      <h1>404: not found.</h1>
+      <pre><code><span class="prompt">$</span> pinghue this-page
 <span class="out">this-page</span> <span class="c-red">resolve failed: NXDOMAIN</span></code></pre>
-    <p><a href="/">Reset and go back to pinghue.com</a></p>
+      <p><a class="lost-link" href="/">Reset and go back to pinghue.com</a></p>
+    </div>
   </main>
 </body>
 </html>

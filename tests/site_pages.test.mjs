@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 const read = (path) => readFileSync(path, 'utf8');
+const pngDimensions = (path) => {
+  const png = readFileSync(path);
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+};
 const stripCssComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '');
 const cssRuleBody = (source, selector) => {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -25,6 +30,10 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(existsSync('docs/assets/pinghue-favicon.svg'), true);
   assert.equal(existsSync('docs/assets/pinghue-hero.svg'), true);
   assert.equal(existsSync('docs/assets/pinghue-screenshot.png'), true);
+  assert.equal(existsSync('docs/assets/slate-texture.jpg'), true);
+  assert.ok(statSync('docs/assets/slate-texture.jpg').size < 100_000);
+  assert.equal(existsSync('docs/assets/pinghue-social-card.png'), true);
+  assert.deepEqual(pngDimensions('docs/assets/pinghue-social-card.png'), { width: 1200, height: 630 });
 
   assert.equal(existsSync('docs/fonts/archivo-var-latin.woff2'), true);
   assert.equal(existsSync('docs/fonts/jetbrains-mono-var-latin.woff2'), true);
@@ -153,12 +162,35 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(html.includes(cspTag), true);
   const notFound = read('docs/404.html');
   assert.equal(notFound.includes(cspTag), true);
+  assert.match(notFound, /<a class="skip-link" href="#main">Skip to content<\/a>/);
+  assert.match(notFound, /<main class="lost" id="main">/);
+  assert.match(notFound, /class="wordmark lost-wordmark" href="\/" aria-label="PingHue home"/);
+  assert.match(notFound, /<div class="lost-shell">/);
+  assert.match(notFound, /class="lost-link" href="\/"/);
+  assert.match(cssRuleBody(css, '.lost'), /width:\s*min\(calc\(100% - 2rem\),\s*720px\)/);
+  assert.match(cssRuleBody(css, '.lost'), /display:\s*grid/);
+  assert.match(cssRuleBody(css, '.lost-shell'), /padding:\s*clamp\(1\.5rem,\s*5vw,\s*3rem\)/);
+  assert.match(cssRuleBody(css, '.lost-shell'), /min-width:\s*0/);
+  assert.match(cssRuleBody(css, '.lost-shell h1'), /font-size:\s*clamp\(2\.25rem,\s*10vw,\s*5\.5rem\)/);
+  assert.match(cssRuleBody(css, '.lost-shell h1'), /overflow-wrap:\s*anywhere/);
+  assert.match(cssRuleBody(css, '.lost-link'), /min-height:\s*44px/);
+  assert.match(cssRuleBody(css, '.lost-link'), /max-width:\s*100%/);
+  assert.match(cssRuleBody(css, '.lost-link'), /text-align:\s*center/);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*400px\)[\s\S]*?\.lost-link\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*justify-content:\s*center/,
+  );
   // No inline style/script blocks anywhere, so 'unsafe-inline' is never needed.
   assert.doesNotMatch(html, /<style/);
   assert.doesNotMatch(notFound, /<style/);
   assert.match(html, /href="https:\/\/github\.com\/inxbit\/pinghue"/);
   assert.match(html, /href="https:\/\/pypi\.org\/project\/pinghue\/"/);
-  assert.match(html, /https:\/\/pinghue\.com\/assets\/pinghue-screenshot\.png/);
+  assert.match(html, /<meta property="og:image" content="https:\/\/pinghue\.com\/assets\/pinghue-social-card\.png">/);
+  assert.match(html, /<meta property="og:image:width" content="1200">/);
+  assert.match(html, /<meta property="og:image:height" content="630">/);
+  assert.match(html, /<meta property="og:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window\.">/);
+  assert.match(html, /<meta name="twitter:image" content="https:\/\/pinghue\.com\/assets\/pinghue-social-card\.png">/);
+  assert.match(html, /<meta name="twitter:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window\.">/);
   assert.match(html, /rel="canonical" href="https:\/\/pinghue\.com\/"/);
   // The hero demonstrates the product with a JS-driven simulated run.
   assert.match(html, /data-terminal\b/);
