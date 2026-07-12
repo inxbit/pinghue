@@ -314,7 +314,7 @@ button {
 
 .hero {
   width: min(calc(100% - 3rem), var(--maxw));
-  min-height: calc(100dvh - var(--nav-height) - 2rem);
+  min-height: min(calc(100dvh - var(--nav-height) - 2rem), 46rem);
   margin: 0 auto;
   padding: clamp(3.5rem, 7vh, 5.5rem) 0 4rem;
   display: grid;
@@ -566,16 +566,16 @@ button {
 }
 
 .section {
-  padding-block: clamp(6rem, 10vw, 9rem);
+  padding-block: clamp(5rem, 8vw, 7rem);
 }
 
 .section h2 {
-  max-width: 15ch;
+  max-width: 20ch;
   margin-bottom: 1.5rem;
-  font-size: clamp(2.35rem, 5vw, 4.8rem);
+  font-size: clamp(2.1rem, 3.3vw, 3.4rem);
   font-weight: 730;
-  line-height: 0.98;
-  letter-spacing: -0.045em;
+  line-height: 1;
+  letter-spacing: -0.04em;
 }
 
 .section-lede,
@@ -608,7 +608,9 @@ button {
 
 .proof-rail strong {
   color: var(--text);
-  font-size: 1rem;
+  font-size: 1.1rem;
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
 }
 
 .proof-rail span {
@@ -650,19 +652,25 @@ button {
 
 /* ---------------------------------------------------------------- ledger */
 
+.why-section {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 2rem clamp(2.5rem, 6vw, 6rem);
+  align-items: start;
+}
+
+.why-section h2 {
+  margin-bottom: 0;
+}
+
 .ledger {
   margin: 0;
 }
 
 .ledger-asymmetric {
   display: grid;
-  grid-template-columns: 1.4fr 0.8fr 0.8fr;
-  gap: 3rem 2rem;
-}
-
-.ledger-asymmetric .ledger-item:first-child {
-  grid-row: span 2;
-  padding-right: clamp(1rem, 4vw, 4rem);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2.5rem 2rem;
 }
 
 .ledger-item {
@@ -697,18 +705,13 @@ button {
 
 .mode-cascade {
   display: grid;
-  grid-template-columns: 1.35fr 0.75fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.25rem;
   align-items: start;
 }
 
-.mode-primary {
-  grid-row: span 2;
-  min-height: 30rem;
-}
-
 .mode-tcp {
-  transform: translateY(2rem) rotate(0.35deg);
+  transform: translateY(1.5rem) rotate(0.35deg);
 }
 
 .mode-automation {
@@ -966,6 +969,10 @@ button {
   background: var(--panel);
 }
 
+.install-row:first-child {
+  background: var(--header);
+}
+
 .install-name {
   color: var(--muted);
   font: 0.78rem var(--mono);
@@ -982,6 +989,19 @@ button {
 .install-row .copy-btn {
   min-height: 44px;
   padding-inline: 0.85rem;
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  background: transparent;
+  color: var(--blue);
+}
+
+.install-row .copy-btn:hover {
+  background: var(--blue-soft);
+}
+
+.install-row .copy-btn.copied {
+  border-color: transparent;
+  background: var(--text);
+  color: var(--bg);
 }
 
 .install-note {
@@ -1138,8 +1158,8 @@ button {
     transform: none;
   }
 
-  .ledger-asymmetric {
-    grid-template-columns: 1.25fr 1fr;
+  .why-section {
+    grid-template-columns: 1fr;
   }
 
   .mode-cascade {
@@ -1321,11 +1341,6 @@ button {
   .ledger-asymmetric,
   .mode-cascade {
     grid-template-columns: 1fr;
-  }
-
-  .ledger-asymmetric .ledger-item:first-child {
-    grid-row: auto;
-    padding-right: 0;
   }
 
   .mode-tcp,
