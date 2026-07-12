@@ -481,34 +481,26 @@ button {
 }
 
 .scroll-cue {
-  margin: 2.2rem 0 0;
+  margin: 1.8rem 0 0;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.75rem;
 }
 
-.cue-glyph {
-  display: inline-block;
-  margin-right: 0.45rem;
-}
-
-.skip-cue {
-  margin: 0.6rem 0 0;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-}
-
-.skip-cue a {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
+.scroll-cue a {
+  padding-block: 0.75rem;
   color: var(--muted);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
-.skip-cue a:hover {
+.scroll-cue a:hover {
   color: var(--text);
+}
+
+.cue-glyph {
+  display: inline-block;
+  margin-right: 0.45rem;
 }
 
 .install-line {
@@ -566,7 +558,7 @@ button {
 
 .terminal-shell {
   position: sticky;
-  top: calc(var(--nav-height) + 3.2rem);
+  top: max(calc(var(--nav-height) + 1.25rem), calc(50dvh - 13rem));
   min-width: 0;
   padding: 7px;
   border: 1px solid rgba(230, 237, 243, 0.08);
@@ -712,7 +704,7 @@ button {
 }
 
 .section {
-  padding-block: clamp(5rem, 8vw, 7rem);
+  padding-block: clamp(4rem, 6vw, 5.5rem);
 }
 
 .section h2 {
@@ -802,20 +794,14 @@ button {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.25rem;
-  align-items: start;
-}
-
-.mode-tcp {
-  transform: translateY(1.5rem) rotate(0.35deg);
-}
-
-.mode-automation {
-  transform: translateY(3rem) rotate(-0.25deg);
+  align-items: stretch;
 }
 
 .mode {
   min-width: 0;
   padding: 6px;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(230, 237, 243, 0.08);
   border-radius: var(--radius-shell);
   background: var(--shell);
@@ -854,6 +840,7 @@ button {
 .mode pre {
   padding: 1rem;
   overflow-x: auto;
+  scrollbar-width: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-core);
   background: var(--panel);
@@ -861,11 +848,18 @@ button {
   line-height: 1.75;
 }
 
+.mode pre::-webkit-scrollbar {
+  display: none;
+}
+
 .mode-automation pre {
   min-height: 7.5rem;
+  -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent 99%);
+  mask-image: linear-gradient(90deg, #000 82%, transparent 99%);
 }
 
 .mode p {
+  margin-top: auto;
   color: var(--muted);
   font-size: 0.92rem;
 }
@@ -1668,11 +1662,6 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .mode-tcp,
-  .mode-automation {
-    transform: none;
-  }
-
   .lab-readout {
     flex-wrap: wrap;
     row-gap: 0.3rem;
@@ -1684,7 +1673,7 @@ button {
   }
 
   .section {
-    padding-block: 6rem;
+    padding-block: 4.5rem;
   }
 
   .scope-section {
@@ -1780,9 +1769,7 @@ button {
     display: none;
   }
 
-  .terminal-shell,
-  .mode-tcp,
-  .mode-automation {
+  .terminal-shell {
     transform: none;
   }
 }
