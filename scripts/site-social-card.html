@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @font-face { font-family: Archivo; src: url("../docs/fonts/archivo-var-latin.woff2") format("woff2"); }
+    @font-face { font-family: JetBrains; src: url("../docs/fonts/jetbrains-mono-var-latin.woff2") format("woff2"); }
+    * { box-sizing: border-box; }
+    html, body { width: 1200px; height: 630px; margin: 0; overflow: hidden; }
+    body { padding: 54px 58px; background: #101418; color: #e6edf3; font-family: Archivo, sans-serif; }
+    .top { display: flex; align-items: center; justify-content: space-between; }
+    .brand { font-size: 34px; font-weight: 750; letter-spacing: -0.04em; }
+    .brand span { background: linear-gradient(90deg, #7ee787, #f2cc60 38%, #ff7b72 68%, #58a6ff); color: transparent; background-clip: text; }
+    .kind { color: #8ea0b8; font: 18px JetBrains, monospace; }
+    h1 { width: 620px; margin: 54px 0 18px; font-size: 74px; line-height: 0.95; letter-spacing: -0.055em; }
+    p { margin: 0; color: #8ea0b8; font: 21px JetBrains, monospace; }
+    .frame { position: absolute; right: 58px; bottom: 46px; width: 690px; padding: 7px; border: 1px solid rgba(230,237,243,.12); border-radius: 24px; background: rgba(230,237,243,.045); box-shadow: inset 0 1px rgba(230,237,243,.1), 0 30px 80px rgba(4,12,20,.48); transform: rotate(-1.2deg); }
+    .frame img { width: 100%; display: block; border-radius: 18px; }
+    .signal { position: absolute; left: 58px; bottom: 54px; font: 34px JetBrains, monospace; letter-spacing: .03em; }
+    .signal .green { color: #7ee787; }
+    .signal .amber { color: #f2cc60; }
+  </style>
+</head>
+<body>
+  <div class="top"><div class="brand">ping<span>hue</span></div><div class="kind">maintenance-window monitor</div></div>
+  <h1>Watch the whole window.</h1>
+  <p>Concurrent ICMP and TCP monitoring</p>
+  <div class="signal"><span class="green">▁▂▃▄▅</span><span class="amber">▆▇█</span></div>
+  <div class="frame"><img src="../docs/assets/pinghue-screenshot.png" alt=""></div>
+</body>
+</html>
