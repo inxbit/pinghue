@@ -77,12 +77,14 @@
             <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy install command">Copy</button>
           </div>
           <p class="scroll-cue" aria-hidden="true"><span class="cue-glyph">▼</span> scroll: replay tonight's window</p>
+          <p class="skip-cue"><a href="#install">or skip the replay and go straight to install</a></p>
         </div>
 
         <div class="chapter" data-chapter data-tick-start="9" data-tick-end="12">
           <p class="stamp">02:12</p>
           <h2>api-gw drops one probe.</h2>
           <p>One lost echo out of seven hundred. Loss ticks up, the state flips to <span class="c-amber">intermittent</span>, and the history bar keeps the dot. A blip you would have missed is now on the record.</p>
+          <p class="chapter-log">02:12:41 · api-gw · 1 echo lost · loss 3% · <span class="c-amber">intermittent</span></p>
           <p class="chapter-fact">Host states reflect the whole run, not the last few probes.</p>
         </div>
 
@@ -90,6 +92,7 @@
           <p class="stamp">02:18</p>
           <h2>db-primary starts to drag.</h2>
           <p>Latency climbs from 18ms into the 300s. The glyphs go amber on the fixed scale, jitter spikes, and the average remembers it. No rescaling, no smoothing: slow looks slow.</p>
+          <p class="chapter-log">02:18:23 · db-primary · last 438ms · jitter 37ms · <span class="c-amber">▆▆▇</span></p>
           <p class="chapter-fact">Latency maps to a fixed glyph scale that never changes between runs.</p>
         </div>
 
@@ -97,6 +100,7 @@
           <p class="stamp">02:31</p>
           <h2>backup-nas stops answering.</h2>
           <p>Three consecutive failures and the state goes <span class="c-red">down</span>. It stays down until the host answers again, not until the graph scrolls past.</p>
+          <p class="chapter-log">02:31:04 · backup-nas · 3 consecutive fails · <span class="c-red">down</span></p>
           <p class="chapter-fact">Fail-on-down exit codes let cron and CI act on it.</p>
         </div>
 
@@ -104,6 +108,7 @@
           <p class="stamp">02:47</p>
           <h2>The window closes. The table remembers.</h2>
           <p>Forty-seven minutes, eight hosts, every probe accounted for. Export the evidence, attach it to the change ticket, and go back to bed.</p>
+          <p class="chapter-log">02:47:56 · window closed · 8 hosts · 2 <span class="c-amber">intermittent</span> · 1 <span class="c-red">down</span> · evidence written</p>
           <p class="chapter-fact"><a href="#evidence">See the report it writes</a>.</p>
         </div>
 
@@ -187,6 +192,10 @@
       </div>
       <label class="lab-label" for="lat-slider">Probe latency</label>
       <input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>
+      <div class="lab-trail" aria-hidden="true">
+        <span class="lab-trail-label">history preview</span>
+        <span class="lab-trail-glyphs" data-lab-trail></span>
+      </div>
       <p class="lab-note visually-hidden" role="status" aria-live="off" data-lab-status>14 milliseconds maps to glyph 4 of 8, green.</p>
     </div>
     <div class="signal-runway" aria-label="Fixed latency scale" data-scale>

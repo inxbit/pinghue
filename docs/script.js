@@ -223,7 +223,9 @@
     const labMs = lab.querySelector("[data-lab-ms]");
     const labBand = lab.querySelector("[data-lab-band]");
     const labStatus = lab.querySelector("[data-lab-status]");
+    const labTrail = lab.querySelector("[data-lab-trail]");
     const steps = [...document.querySelectorAll(".signal-step")];
+    const TRAIL_LENGTH = 26;
 
     if (slider && labGlyph && labMs && labBand) {
       const applyLatency = () => {
@@ -239,6 +241,16 @@
             + (index + 1) + " of 8, " + (ms <= SLOW_MS ? "green" : "amber") + ".";
         }
         steps.forEach((step, i) => step.classList.toggle("is-hit", i === index));
+        // Dragging writes a history bar, the same way a run would.
+        if (labTrail) {
+          const mark = document.createElement("span");
+          mark.className = ms > SLOW_MS ? "g-slow" : "g-ok";
+          mark.textContent = glyphFor(ms);
+          labTrail.appendChild(mark);
+          while (labTrail.childNodes.length > TRAIL_LENGTH) {
+            labTrail.removeChild(labTrail.firstChild);
+          }
+        }
       };
       slider.addEventListener("input", applyLatency);
       applyLatency();
@@ -287,7 +299,7 @@
 
   const HISTORY = 26;
   const TICK_MS = 900;
-  const SEEK_MS = 60;
+  const SEEK_MS = 90;
   const FAIL_THRESHOLD = 3;
   const MAX_TICK = 34;
   const SEC_PER_TICK = 84.6;

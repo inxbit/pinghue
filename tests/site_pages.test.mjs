@@ -344,11 +344,15 @@ test('the window scene stages a seekable story next to a sticky terminal', () =>
   assert.equal(chapters[0][0], 0);
   assert.match(js, new RegExp('MAX_TICK = ' + chapters[chapters.length - 1][1] + ';'));
 
-  // The hero chapter carries the headline and the install line.
+  // The hero chapter carries the headline, the install line, and a skimmer exit.
   const hero = scene[0].match(/<div class="chapter chapter-hero"[\s\S]*?<\/div>\s*<div class="chapter"/);
   assert.ok(hero);
   assert.match(hero[0], /<h1 id="hero-title">/);
   assert.match(hero[0], /<div class="install-line">/);
+  assert.match(hero[0], /<p class="skip-cue"><a href="#install">/);
+
+  // Every story chapter carries a one-line log excerpt.
+  assert.equal((scene[0].match(/class="chapter-log"/g) || []).length, 4);
 
   // Desktop: copy column and sticky terminal; mobile: terminal docks above the story.
   assert.match(cssRuleBody(css, '.window-stage'), /grid-template-columns:\s*minmax\(0,\s*0\.95fr\)\s+minmax\(0,\s*1\.45fr\)/);
@@ -391,6 +395,9 @@ test('the scale laboratory maps latency onto the fixed glyph runway', () => {
   assert.match(html, /<input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>/);
   assert.match(js, /bandIndex/);
   assert.match(js, /is-hit/);
+  // Dragging the slider writes a history-bar preview.
+  assert.equal(attributeCount(html, 'data-lab-trail'), 1);
+  assert.match(js, /data-lab-trail/);
   // The stream loops the documented line format without inventing new output.
   assert.match(html, /<span class="out" data-stream>2026-05-14T18:32:11\.420000\+00:00 example\.com ok latency=14\.08ms<\/span>/);
   assert.match(js, /latency=14\.08ms/);
