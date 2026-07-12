@@ -113,19 +113,21 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(attributeCount(html, 'data-scale'), 1);
   assert.equal((html.match(/class="signal-step"/g) || []).length, 10);
 
-  assert.equal(attributeCount(html, 'data-reveal'), 10);
-  for (const className of ['hero-message', 'terminal-shell', 'proof-rail', 'product-proof']) {
+  assert.equal(attributeCount(html, 'data-reveal'), 7);
+  for (const className of ['proof-rail', 'product-proof']) {
     assert.match(
       html,
       new RegExp('<(?:div|section)(?=[^>]*class="[^"]*' + className + '[^"]*")(?=[^>]*\\sdata-reveal(?:\\s|>))[^>]*>'),
     );
   }
-  for (const id of ['why', 'modes', 'scale', 'evidence', 'not', 'install']) {
+  for (const id of ['modes', 'scale', 'evidence', 'not', 'install']) {
     assert.match(
       html,
       new RegExp('<section(?=[^>]*\\sid="' + id + '")(?=[^>]*\\sdata-reveal(?:\\s|>))[^>]*>'),
     );
   }
+  // The window scene drives itself; it must not join the reveal choreography.
+  assert.doesNotMatch(html, /<section(?=[^>]*\sid="why")(?=[^>]*\sdata-reveal(?:\s|>))[^>]*>/);
   assert.equal((html.match(/class="kicker"/g) || []).length, 2);
 
   assert.equal(
@@ -260,7 +262,9 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
 
   for (const selector of [
     'body',
-    '.ledger-item dt',
+    '.stamp',
+    '.chapter-fact',
+    '.lab-slider',
     '.install-line code',
     '.install-row code',
     '.not-list li::before',
@@ -311,26 +315,85 @@ test('Signal Theatre visual contracts preserve meaning and accessibility', () =>
   assert.match(cssRuleBody(css, 'body'), /min-width:\s*0/);
   assert.match(
     css,
-    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.hero h1\s*\{[^}]*font-size:\s*clamp\(2\.15rem,\s*10\.5vw,\s*4\.5rem\)/,
+    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.chapter h1\s*\{[^}]*font-size:\s*clamp\(2\.15rem,\s*10\.5vw,\s*4\.5rem\)/,
   );
 });
 
-test('hero uses distinct desktop columns and keeps install outside reveal choreography', () => {
+test('the window scene stages a seekable story next to a sticky terminal', () => {
   const html = read('docs/index.html');
   const css = stripCssComments(read('docs/styles.css'));
-  const hero = html.match(/<section class="hero"[\s\S]*?<\/section>/);
+  const js = read('docs/script.js');
+
+  const scene = html.match(/<section class="window"[^>]*>[\s\S]*?<\/section>/);
+  assert.ok(scene);
+  assert.match(scene[0], /id="why"/);
+  assert.equal(attributeCount(html, 'data-window'), 1);
+  assert.match(scene[0], /<canvas class="pulse-field" aria-hidden="true" data-pulse><\/canvas>/);
+
+  // Five chapters with an ascending, in-range tick script.
+  const chapters = [...scene[0].matchAll(/data-chapter data-tick-start="(\d+)" data-tick-end="(\d+)"/g)]
+    .map(([, start, end]) => [Number(start), Number(end)]);
+  assert.equal(chapters.length, 5);
+  assert.equal(attributeCount(html, 'data-chapter'), 5);
+  let previousEnd = -1;
+  for (const [start, end] of chapters) {
+    assert.equal(start > previousEnd, true, 'chapter ticks must ascend');
+    assert.equal(start <= end, true);
+    previousEnd = end;
+  }
+  assert.equal(chapters[0][0], 0);
+  assert.match(js, new RegExp('MAX_TICK = ' + chapters[chapters.length - 1][1] + ';'));
+
+  // The hero chapter carries the headline and the install line.
+  const hero = scene[0].match(/<div class="chapter chapter-hero"[\s\S]*?<\/div>\s*<div class="chapter"/);
   assert.ok(hero);
-  assert.match(hero[0], /<div class="hero-copy">\s*<div class="hero-message" data-reveal>/);
-  assert.match(hero[0], /<\/div>\s*<div class="install-line">/);
-  assert.doesNotMatch(hero[0], /<div class="hero-copy" data-reveal>/);
-  assert.match(cssRuleBody(css, '.hero'), /grid-template-columns:\s*minmax\(0,\s*0\.92fr\)\s+minmax\(0,\s*1\.58fr\)/);
-  assert.match(cssRuleBody(css, '.hero-copy'), /grid-column:\s*1/);
-  assert.match(cssRuleBody(css, '.terminal-shell'), /grid-column:\s*2/);
-  assert.match(cssRuleBody(css, '.hero h1'), /font-size:\s*clamp\(2\.75rem,\s*4\.25vw,\s*4rem\)/);
+  assert.match(hero[0], /<h1 id="hero-title">/);
+  assert.match(hero[0], /<div class="install-line">/);
+
+  // Desktop: copy column and sticky terminal; mobile: terminal docks above the story.
+  assert.match(cssRuleBody(css, '.window-stage'), /grid-template-columns:\s*minmax\(0,\s*0\.95fr\)\s+minmax\(0,\s*1\.45fr\)/);
+  assert.match(cssRuleBody(css, '.terminal-shell'), /position:\s*sticky/);
+  assert.match(cssRuleBody(css, '.chapter h1'), /font-size:\s*clamp\(3rem,\s*4\.6vw,\s*4\.6rem\)/);
   assert.match(
     css,
-    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.hero\s*\{[^}]*grid-template-columns:\s*1fr/,
+    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.window-stage\s*\{[^}]*flex-direction:\s*column/,
   );
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.window-copy\s*\{[^}]*display:\s*contents/,
+  );
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.terminal-shell\s*\{[^}]*order:\s*-1[^}]*position:\s*sticky/,
+  );
+
+  // The night is precomputed and deterministic: seekable both ways, no wall clock.
+  assert.match(js, /const snapshots = /);
+  assert.match(js, /snapshots\.push/);
+  assert.match(js, /rootMargin: "-42% 0px -42% 0px"/);
+  assert.doesNotMatch(js, /Date\.now|Math\.random/);
+
+  // Chapter dimming is a JS enhancement and must never hide story text without it.
+  assert.match(css, /\.js \.chapter-armed\s*\{[^}]*opacity:\s*0\.38/);
+  assert.doesNotMatch(css, /(?<!\.js )\.chapter-armed\s*\{/);
+  assert.match(
+    css,
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.js \.chapter-armed\s*\{[^}]*opacity:\s*1/,
+  );
+});
+
+test('the scale laboratory maps latency onto the fixed glyph runway', () => {
+  const html = read('docs/index.html');
+  const js = read('docs/script.js');
+  assert.equal(attributeCount(html, 'data-lab'), 1);
+  assert.equal(attributeCount(html, 'data-lab-slider'), 1);
+  assert.match(html, /<label class="lab-label" for="lat-slider">Probe latency<\/label>/);
+  assert.match(html, /<input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>/);
+  assert.match(js, /bandIndex/);
+  assert.match(js, /is-hit/);
+  // The stream loops the documented line format without inventing new output.
+  assert.match(html, /<span class="out" data-stream>2026-05-14T18:32:11\.420000\+00:00 example\.com ok latency=14\.08ms<\/span>/);
+  assert.match(js, /latency=14\.08ms/);
 });
 
 test('copy controls require JavaScript and mobile no-JS navigation stays one-row scrollable', () => {
@@ -974,7 +1037,7 @@ test('terminal interval follows observer and document visibility without duplica
   const terminalObserver = harness.observers.find(({ options }) => options.threshold === 0.08);
 
   assert.ok(terminalObserver);
-  assert.equal(harness.clock.textContent, '00:04');
+  assert.equal(harness.clock.textContent, '05:38');
   assert.equal(harness.getIntervalStarts(), 0);
   assert.equal(harness.activeIntervals.size, 0);
 
@@ -1013,7 +1076,7 @@ test('terminal interval waits for document visibility without observer support',
     withObserver: false,
   });
 
-  assert.equal(harness.clock.textContent, '00:04');
+  assert.equal(harness.clock.textContent, '05:38');
   assert.equal(harness.getIntervalStarts(), 0);
   assert.equal(harness.activeIntervals.size, 0);
 
@@ -1026,7 +1089,8 @@ test('terminal interval waits for document visibility without observer support',
 test('reduced motion renders the static terminal frame without an interval', () => {
   const harness = createTerminalHarness({ reduced: true, withObserver: true });
 
-  assert.equal(harness.clock.textContent, '00:30');
+  // The closed window: 34 ticks of 84.6 seconds is the whole 02:00 to 02:47 night.
+  assert.equal(harness.clock.textContent, '47:56');
   assert.equal(harness.getIntervalStarts(), 0);
   assert.equal(harness.getIntervalStops(), 0);
   assert.equal(harness.activeIntervals.size, 0);
