@@ -43,8 +43,9 @@
     <div class="nav-panel" id="site-menu" data-nav-panel>
       <button class="nav-close" type="button" aria-label="Close navigation" data-nav-close>Close</button>
       <nav class="nav-links" aria-label="Site">
-        <a href="#why">Why</a>
+        <a href="#why">The window</a>
         <a href="#modes">Modes</a>
+        <a href="#scale">Scale</a>
         <a href="#evidence">Evidence</a>
         <a href="#install">Install</a>
         <a class="nav-gh" href="https://github.com/inxbit/pinghue">GitHub</a>
@@ -55,49 +56,92 @@
 
 <main id="main">
 
-  <!-- ============================== hero ============================== -->
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-copy">
-      <div class="hero-message" data-reveal>
-        <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
-        <h1 id="hero-title">
-          <span class="hero-line">Watch the</span>
-          <span class="hero-line">whole window.</span>
-        </h1>
-        <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
-      </div>
-      <div class="install-line">
-        <code id="hero-install">uv tool install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy install command">Copy</button>
-      </div>
-    </div>
-    <div class="terminal-shell" data-reveal>
-      <figure class="terminal" data-terminal aria-label="Simulated PingHue maintenance-window run">
-        <figcaption class="term-bar">
-          <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
-          <span class="term-clock" data-clock>00:04</span>
-        </figcaption>
-        <div class="term-body">
-          <table class="term-table">
-            <caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run.</caption>
-            <thead><tr><th scope="col">HOST</th><th scope="col">LAST</th><th scope="col">AVG</th><th scope="col">LOSS</th><th scope="col">JITTER</th><th scope="col">STATE</th><th scope="col" class="th-hist">HISTORY</th></tr></thead>
-            <tbody data-rows>
-              <tr data-static-row><td class="t-host">edge-router-1</td><td class="t-num">9.1ms</td><td class="t-num">9.4ms</td><td class="t-num">0%</td><td class="t-num">0.2ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▃▃▃▃</span></td></tr>
-              <tr data-static-row><td class="t-host">edge-router-2</td><td class="t-num">12.4ms</td><td class="t-num">11.8ms</td><td class="t-num">0%</td><td class="t-num">0.3ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-              <tr data-static-row><td class="t-host">core-sw-1</td><td class="t-num">2.1ms</td><td class="t-num">2.0ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▂▂▂▂</span></td></tr>
-              <tr data-static-row><td class="t-host">db-primary</td><td class="t-num">18.2ms</td><td class="t-num">17.9ms</td><td class="t-num">0%</td><td class="t-num">0.4ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-              <tr data-static-row><td class="t-host">cdn-edge</td><td class="t-num">23.8ms</td><td class="t-num">24.1ms</td><td class="t-num">0%</td><td class="t-num">0.5ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-              <tr data-static-row><td class="t-host">api-gw</td><td class="t-num">30.7ms</td><td class="t-num">31.0ms</td><td class="t-num">0%</td><td class="t-num">0.4ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▅▅▅▅</span></td></tr>
-              <tr data-static-row><td class="t-host">backup-nas</td><td class="t-num">6.2ms</td><td class="t-num">6.1ms</td><td class="t-num">0%</td><td class="t-num">0.2ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▃▃▃▃</span></td></tr>
-              <tr data-static-row><td class="t-host">dns-resolver</td><td class="t-num">1.0ms</td><td class="t-num">1.1ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▁▁▁▁</span></td></tr>
-            </tbody>
-          </table>
+  <!-- ============================== the window ============================== -->
+  <!-- One scripted maintenance window, 02:00 to 02:47. The terminal stays on
+       stage; scrolling replays the night. Without JavaScript the whole story
+       reads top to bottom next to the final frame of the run. -->
+  <section class="window" id="why" aria-labelledby="hero-title" data-window>
+    <canvas class="pulse-field" aria-hidden="true" data-pulse></canvas>
+    <div class="window-stage">
+      <div class="window-copy">
+
+        <div class="chapter chapter-hero" data-chapter data-tick-start="0" data-tick-end="8">
+          <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
+          <h1 id="hero-title">
+            <span class="hero-line">Watch the</span>
+            <span class="hero-line">whole window.</span>
+          </h1>
+          <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
+          <div class="install-line">
+            <code id="hero-install">uv tool install pinghue</code>
+            <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy install command">Copy</button>
+          </div>
+          <p class="scroll-cue" aria-hidden="true"><span class="cue-glyph">▼</span> scroll: replay tonight's window</p>
+          <p class="skip-cue"><a href="#install">or skip the replay and go straight to install</a></p>
         </div>
-        <div class="term-footer" aria-hidden="true">
-          <span><b>q</b> quit</span><span><b>a</b> addresses</span><span><b>r</b> reset</span><span><b>R</b> reset all</span><span><b>b</b> probe</span><span><b>B</b> probe all</span>
+
+        <div class="chapter" data-chapter data-tick-start="9" data-tick-end="12">
+          <p class="stamp">02:12</p>
+          <h2>api-gw drops one probe.</h2>
+          <p>One lost echo out of seven hundred. Loss ticks up, the state flips to <span class="c-amber">intermittent</span>, and the history bar keeps the dot. A blip you would have missed is now on the record.</p>
+          <p class="chapter-log">02:12:41 · api-gw · 1 echo lost · loss 3% · <span class="c-amber">intermittent</span></p>
+          <p class="chapter-fact">Host states reflect the whole run, not the last few probes.</p>
         </div>
-      </figure>
+
+        <div class="chapter" data-chapter data-tick-start="13" data-tick-end="19">
+          <p class="stamp">02:18</p>
+          <h2>db-primary starts to drag.</h2>
+          <p>Latency climbs from 18ms into the 300s. The glyphs go amber on the fixed scale, jitter spikes, and the average remembers it. No rescaling, no smoothing: slow looks slow.</p>
+          <p class="chapter-log">02:18:23 · db-primary · last 438ms · jitter 37ms · <span class="c-amber">▆▆▇</span></p>
+          <p class="chapter-fact">Latency maps to a fixed glyph scale that never changes between runs.</p>
+        </div>
+
+        <div class="chapter" data-chapter data-tick-start="20" data-tick-end="28">
+          <p class="stamp">02:31</p>
+          <h2>backup-nas stops answering.</h2>
+          <p>Three consecutive failures and the state goes <span class="c-red">down</span>. It stays down until the host answers again, not until the graph scrolls past.</p>
+          <p class="chapter-log">02:31:04 · backup-nas · 3 consecutive fails · <span class="c-red">down</span></p>
+          <p class="chapter-fact">Fail-on-down exit codes let cron and CI act on it.</p>
+        </div>
+
+        <div class="chapter" data-chapter data-tick-start="29" data-tick-end="34">
+          <p class="stamp">02:47</p>
+          <h2>The window closes. The table remembers.</h2>
+          <p>Forty-seven minutes, eight hosts, every probe accounted for. Export the evidence, attach it to the change ticket, and go back to bed.</p>
+          <p class="chapter-log">02:47:56 · window closed · 8 hosts · 2 <span class="c-amber">intermittent</span> · 1 <span class="c-red">down</span> · evidence written</p>
+          <p class="chapter-fact"><a href="#evidence">See the report it writes</a>.</p>
+        </div>
+
+      </div>
+
+      <div class="terminal-shell" data-terminal-shell>
+        <figure class="terminal" data-terminal aria-label="Simulated PingHue maintenance-window run">
+          <figcaption class="term-bar">
+            <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
+            <span class="term-clock" data-clock>47:56</span>
+          </figcaption>
+          <div class="term-body">
+            <table class="term-table">
+              <caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run.</caption>
+              <thead><tr><th scope="col">HOST</th><th scope="col">LAST</th><th scope="col">AVG</th><th scope="col">LOSS</th><th scope="col">JITTER</th><th scope="col">STATE</th><th scope="col" class="th-hist">HISTORY</th></tr></thead>
+              <tbody data-rows>
+                <tr data-static-row><td class="t-host">edge-router-1</td><td class="t-num">9.1ms</td><td class="t-num">9.4ms</td><td class="t-num">0%</td><td class="t-num">0.2ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▃▃▃▃</span></td></tr>
+                <tr data-static-row><td class="t-host">edge-router-2</td><td class="t-num">12.4ms</td><td class="t-num">11.8ms</td><td class="t-num">0%</td><td class="t-num">0.3ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
+                <tr data-static-row><td class="t-host">core-sw-1</td><td class="t-num">2.1ms</td><td class="t-num">2.0ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▂▂▂▂</span></td></tr>
+                <tr data-static-row><td class="t-host">db-primary</td><td class="t-num">18.6ms</td><td class="t-num">61.2ms</td><td class="t-num">0%</td><td class="t-num">2.1ms</td><td class="s-intermittent">intermittent</td><td class="t-hist"><span class="g-ok">▄▄</span><span class="g-slow">▆▆</span></td></tr>
+                <tr data-static-row><td class="t-host">cdn-edge</td><td class="t-num">23.8ms</td><td class="t-num">24.1ms</td><td class="t-num">0%</td><td class="t-num">0.5ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
+                <tr data-static-row><td class="t-host">api-gw</td><td class="t-num">30.7ms</td><td class="t-num">31.0ms</td><td class="t-num">3%</td><td class="t-num">0.4ms</td><td class="s-intermittent">intermittent</td><td class="t-hist"><span class="g-ok">▅▅</span><span class="g-fail">·</span><span class="g-ok">▅</span></td></tr>
+                <tr data-static-row><td class="t-host">backup-nas</td><td class="t-num">-</td><td class="t-num">6.1ms</td><td class="t-num">41%</td><td class="t-num">0.2ms</td><td class="s-down">down</td><td class="t-hist"><span class="g-ok">▃▃</span><span class="g-fail">··</span></td></tr>
+                <tr data-static-row><td class="t-host">dns-resolver</td><td class="t-num">1.0ms</td><td class="t-num">1.1ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▁▁▁▁</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="term-footer" aria-hidden="true">
+            <span><b>q</b> quit</span><span><b>a</b> addresses</span><span><b>r</b> reset</span><span><b>R</b> reset all</span><span><b>b</b> probe</span><span><b>B</b> probe all</span>
+          </div>
+        </figure>
+      </div>
     </div>
   </section>
 
@@ -109,37 +153,6 @@
   </section>
 
   <div class="hue-ribbon" role="presentation"></div>
-
-  <!-- ============================== why ============================== -->
-  <section class="section why-section" id="why" data-reveal>
-    <h2>Every host in one table.</h2>
-    <dl class="ledger ledger-asymmetric">
-      <div class="ledger-item">
-        <dt>dense view</dt>
-        <dd>Many hosts in one readable table: per-host latency, loss, jitter, and a live history bar.</dd>
-      </div>
-      <div class="ledger-item">
-        <dt>icmp / tcp</dt>
-        <dd>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</dd>
-      </div>
-      <div class="ledger-item">
-        <dt>json evidence</dt>
-        <dd><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</dd>
-      </div>
-      <div class="ledger-item">
-        <dt>whole-run states</dt>
-        <dd>Host states reflect everything that happened in the window, not just the last few probes.</dd>
-      </div>
-      <div class="ledger-item">
-        <dt>scriptable</dt>
-        <dd><code>--no-tui</code>, <code>--count</code>, <code>--duration</code>, and fail-on-down exit codes for automation.</dd>
-      </div>
-      <div class="ledger-item">
-        <dt>local &amp; safe</dt>
-        <dd>No server, no daemon, no credentials. Runs where you run: macOS and Linux.</dd>
-      </div>
-    </dl>
-  </section>
 
   <!-- ============================== modes ============================== -->
   <section class="section modes-section" id="modes" data-reveal>
@@ -158,7 +171,7 @@
       <article class="mode mode-automation">
         <h3><span class="mode-tag">--no-tui</span> for cron and CI</h3>
         <pre><code><span class="prompt">$</span> pinghue -p 443 example.com -c 3 --no-tui
-<span class="out">2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms</span></code></pre>
+<span class="out" data-stream>2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms</span></code></pre>
         <p>One line per probe, fail-on-down exit codes, and <code>--output</code> for the report.</p>
       </article>
     </div>
@@ -169,8 +182,22 @@
     <h2>One fixed scale, every run.</h2>
     <p class="section-lede">
       Latency maps to a fixed glyph scale. It never rescales, so rows stay comparable
-      across hosts, and across runs.
+      across hosts, and across runs. Try it:
     </p>
+    <div class="scale-lab" data-lab>
+      <div class="lab-readout" aria-hidden="true">
+        <span class="lab-glyph glyph green" data-lab-glyph>▄</span>
+        <span class="lab-ms" data-lab-ms>14ms</span>
+        <span class="lab-band" data-lab-band>within the 30ms band</span>
+      </div>
+      <label class="lab-label" for="lat-slider">Probe latency</label>
+      <input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>
+      <div class="lab-trail" aria-hidden="true">
+        <span class="lab-trail-label">history preview</span>
+        <span class="lab-trail-glyphs" data-lab-trail></span>
+      </div>
+      <p class="lab-note visually-hidden" role="status" aria-live="off" data-lab-status>14 milliseconds maps to glyph 4 of 8, green.</p>
+    </div>
     <div class="signal-runway" aria-label="Fixed latency scale" data-scale>
       <div class="signal-step"><span class="glyph green">▁</span><span>≤1ms</span></div>
       <div class="signal-step"><span class="glyph green">▂</span><span>≤3ms</span></div>
@@ -199,16 +226,7 @@
   <section class="section evidence-section" id="evidence" data-reveal>
     <h2>Close the window with a report.</h2>
     <div class="evidence">
-      <pre class="json"><code><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json
-<span class="jk">{</span>
-  <span class="jq">"schema_version"</span>: <span class="jn">1</span>,
-  <span class="jq">"pinghue_version"</span>: <span class="json-string">"5.0.0"</span>,
-  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="json-string">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="json-string">"deadline"</span>, <span class="jc">…</span> },
-  <span class="jq">"targets"</span>: [
-    { <span class="jq">"target"</span>: <span class="json-string">"db-primary"</span>, <span class="jq">"status"</span>: <span class="json-string c-amber">"intermittent"</span>,
-      <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.11</span>, <span class="jc">…</span> } }
-  ]
-<span class="jk">}</span></code></pre>
+      <pre class="json" data-print><code><span class="jl"><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json</span><span class="jl"><span class="jk">{</span></span><span class="jl">  <span class="jq">"schema_version"</span>: <span class="jn">1</span>,</span><span class="jl">  <span class="jq">"pinghue_version"</span>: <span class="json-string">"5.0.0"</span>,</span><span class="jl">  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="json-string">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="json-string">"deadline"</span>, <span class="jc">…</span> },</span><span class="jl">  <span class="jq">"targets"</span>: [</span><span class="jl">    { <span class="jq">"target"</span>: <span class="json-string">"db-primary"</span>, <span class="jq">"status"</span>: <span class="json-string c-amber">"intermittent"</span>,</span><span class="jl">      <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.11</span>, <span class="jc">…</span> } }</span><span class="jl">  ]</span><span class="jl"><span class="jk">}</span></span></code></pre>
       <ul class="evidence-points">
         <li><b>Versioned contract.</b> JSON uses <code>schema_version: 1</code>. Breaking changes require a new schema version.</li>
         <li><b>Whole-run stats.</b> <code>stats</code> covers every probe in the run; <code>samples</code> is the recent tail.</li>
