@@ -349,7 +349,7 @@ test('the window scene stages a seekable story next to a sticky terminal', () =>
   assert.ok(hero);
   assert.match(hero[0], /<h1 id="hero-title">/);
   assert.match(hero[0], /<div class="install-line">/);
-  assert.match(hero[0], /<p class="skip-cue"><a href="#install">/);
+  assert.match(hero[0], /<p class="scroll-cue">[\s\S]*?<a href="#install">[\s\S]*?<\/p>/);
 
   // Every story chapter carries a one-line log excerpt.
   assert.equal((scene[0].match(/class="chapter-log"/g) || []).length, 4);
