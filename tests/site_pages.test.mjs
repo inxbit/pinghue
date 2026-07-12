@@ -348,8 +348,14 @@ test('the window scene stages a seekable story next to a sticky terminal', () =>
   const hero = scene[0].match(/<div class="chapter chapter-hero"[\s\S]*?<\/div>\s*<div class="chapter"/);
   assert.ok(hero);
   assert.match(hero[0], /<h1 id="hero-title">/);
-  assert.match(hero[0], /<div class="install-line">/);
+  assert.match(hero[0], /<div class="install-stack">/);
+  assert.match(hero[0], /data-copy="uv tool install pinghue"/);
+  assert.match(hero[0], /data-copy="brew install inxbit\/tap\/pinghue"/);
   assert.match(hero[0], /<p class="scroll-cue">[\s\S]*?<a href="#install">[\s\S]*?<\/p>/);
+
+  // The hero autoplays the whole night and loops; chapters take over on scroll.
+  assert.match(js, /autoplay = true/);
+  assert.match(js, /HOLD_TICKS = 7/);
 
   // Every story chapter carries a one-line log excerpt.
   assert.equal((scene[0].match(/class="chapter-log"/g) || []).length, 4);

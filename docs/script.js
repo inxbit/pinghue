@@ -507,6 +507,9 @@
   let shown = 0;
   let target = 0;
   let driftMax = MAX_TICK;
+  let autoplay = true;
+  let holdTicks = 0;
+  const HOLD_TICKS = 7;
 
   let seekTimer = null;
   const seekStep = () => {
@@ -531,13 +534,30 @@
   let documentVisible = !document.hidden;
 
   const step = () => {
+    // While rewinding, let the seek finish before time moves forward again.
+    if (shown > target) {
+      startSeek();
+      return;
+    }
     if (target < driftMax) {
+      holdTicks = 0;
       target += 1;
       if (shown === target - 1 && seekTimer === null) {
         shown = target;
         render(shown);
         emitPulse();
       } else {
+        startSeek();
+      }
+      return;
+    }
+    // Autoplay reaches the closed window, holds the final frame, then
+    // rewinds the tape and replays the night.
+    if (autoplay && shown === MAX_TICK && target === MAX_TICK) {
+      holdTicks += 1;
+      if (holdTicks > HOLD_TICKS) {
+        holdTicks = 0;
+        target = 0;
         startSeek();
       }
     }
@@ -566,9 +586,8 @@
     render(MAX_TICK);
     chapters.forEach((chapter) => chapter.classList.add("is-live"));
   } else {
-    driftMax = chapters.length > 0
-      ? Number(chapters[0].getAttribute("data-tick-end")) || 8
-      : MAX_TICK;
+    // The hero autoplays the whole night; scrolling into a chapter takes over.
+    driftMax = MAX_TICK;
     shown = Math.min(4, driftMax);
     target = shown;
     render(shown);
@@ -592,9 +611,17 @@
         entries.forEach((entry) => {
           if (!entry.isIntersecting) return;
           const chapter = entry.target;
+          chapters.forEach((c) => c.classList.toggle("is-live", c === chapter));
+          if (chapter === chapters[0]) {
+            // Back at the hero: hand time back to the autoplay loop.
+            autoplay = true;
+            holdTicks = 0;
+            driftMax = MAX_TICK;
+            return;
+          }
+          autoplay = false;
           const start = Number(chapter.getAttribute("data-tick-start")) || 0;
           const end = Number(chapter.getAttribute("data-tick-end")) || MAX_TICK;
-          chapters.forEach((c) => c.classList.toggle("is-live", c === chapter));
           target = Math.max(start, Math.min(target, end));
           if (shown > end) target = end;
           if (shown < start) target = start;
