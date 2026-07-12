@@ -503,15 +503,36 @@ button {
   margin-right: 0.45rem;
 }
 
+.install-stack {
+  width: 100%;
+  max-width: 31rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
 .install-line {
   max-width: 31rem;
   padding: 5px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.4rem;
+  align-items: center;
   border: 1px solid rgba(230, 237, 243, 0.08);
   border-radius: var(--radius-control);
   background: var(--shell);
+}
+
+.install-stack .install-line {
+  width: 100%;
+  grid-template-columns: 3.2rem minmax(0, 1fr) auto;
+}
+
+.install-stack .install-name {
+  padding-left: 0.9rem;
+}
+
+.install-stack .install-line code {
+  padding-left: 0;
 }
 
 .install-line code {
@@ -1726,8 +1747,16 @@ button {
     grid-template-columns: 1fr auto;
   }
 
-  .install-name {
+  .install-row .install-name {
     grid-column: 1 / -1;
+  }
+
+  .install-stack .install-line {
+    grid-template-columns: 2.6rem minmax(0, 1fr) auto;
+  }
+
+  .install-stack .install-name {
+    padding-left: 0.7rem;
   }
 }
 
