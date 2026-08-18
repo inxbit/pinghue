@@ -72,4 +72,4 @@ Releases are tag-driven. Release policy requires:
 - PyPI trusted publishing configured for `inxbit/pinghue`
 - a protected `pypi` GitHub environment
 
-See `docs/release-checklist.md`.
+See `.github/release-checklist.md`.

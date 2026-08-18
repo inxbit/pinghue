@@ -86,7 +86,7 @@ def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
     assert "prune .github" in manifest
     assert "prune packaging" in manifest
     assert "include scripts/pinghue" in manifest
-    assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
+    assert "recursive-include docs *.svg *.gif *.png" in manifest
     assert "recursive-include packaging" not in manifest
     assert "recursive-include scripts" not in manifest
     assert "recursive-include .github/workflows" not in manifest
@@ -94,8 +94,12 @@ def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
     assert "exclude tests/test_github_hardening_apply.py" in manifest
     assert "exclude tests/test_normalize_sdist.py" in manifest
     assert "exclude CONTRIBUTING.md" in manifest
-    assert "exclude docs/release-checklist.md" in manifest
-    assert "exclude docs/repository-hardening.md" in manifest
+    # Maintainer docs live under .github/, which is pruned from the sdist and
+    # never uploaded to GitHub Pages.
+    assert Path(".github/release-checklist.md").is_file()
+    assert Path(".github/repository-hardening.md").is_file()
+    assert not Path("docs/release-checklist.md").exists()
+    assert not Path("docs/repository-hardening.md").exists()
 
 
 def test_publish_workflow_has_attestations_and_concurrency() -> None:
@@ -139,7 +143,7 @@ def test_coverage_gate_is_consistent_across_ci_and_docs() -> None:
         ".github/workflows/ci.yml",
         ".github/workflows/publish.yml",
         "CONTRIBUTING.md",
-        "docs/release-checklist.md",
+        ".github/release-checklist.md",
     ):
         assert gate in read(path), path
 
@@ -592,7 +596,7 @@ def test_readme_artwork_uses_packaged_real_assets() -> None:
     assert "docs/assets/pinghue-demo.svg" not in readme
     assert "docs/assets/pinghue-screenshot.svg" not in readme
     assert "scripts/gen-readme-assets.py" not in readme
-    assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
+    assert "recursive-include docs *.svg *.gif *.png" in manifest
 
 
 def test_readme_artwork_captures_are_current_package_version() -> None:
@@ -603,7 +607,7 @@ def test_readme_artwork_captures_are_current_package_version() -> None:
 
 
 def test_release_checklist_revalidates_release_security_gates() -> None:
-    checklist = read("docs/release-checklist.md")
+    checklist = read(".github/release-checklist.md")
 
     assert "pip-audit" in checklist
     assert "hosted hardening" in checklist
@@ -622,7 +626,7 @@ def test_release_checklist_revalidates_release_security_gates() -> None:
 
 
 def test_release_checklist_requires_the_exact_pypi_url_for_final_formula() -> None:
-    checklist = read("docs/release-checklist.md")
+    checklist = read(".github/release-checklist.md")
     after_publish = checklist.split("## After PyPI Publish", 1)[1]
 
     assert "exact published sdist URL" in after_publish
@@ -631,7 +635,7 @@ def test_release_checklist_requires_the_exact_pypi_url_for_final_formula() -> No
 
 
 def test_release_docs_tag_only_the_merged_public_main_commit() -> None:
-    checklist = read("docs/release-checklist.md")
+    checklist = read(".github/release-checklist.md")
     readme = read("README.md")
 
     assert "git push origin main" not in checklist
@@ -1272,7 +1276,7 @@ def test_scheduled_hardening_check_does_not_hide_visible_admin_drift(
 
 def test_hosted_hardening_workflow_uses_documented_reduced_visibility_mode() -> None:
     workflow = read(".github/workflows/repository-hardening.yml")
-    documentation = read("docs/repository-hardening.md")
+    documentation = read(".github/repository-hardening.md")
     check_step = workflow.split("- name: Check hosted repository hardening", 1)[1]
 
     assert 'PINGHUE_ALLOW_HIDDEN_BYPASS_ACTORS: "1"' in check_step
@@ -1300,7 +1304,7 @@ def test_security_feature_policy_is_enabled_and_consumed_by_apply_helper() -> No
 
 
 def test_repository_hardening_docs_list_default_branch_once() -> None:
-    documentation = read("docs/repository-hardening.md")
+    documentation = read(".github/repository-hardening.md")
 
     assert documentation.count("- Default branch: `main`") == 1
 

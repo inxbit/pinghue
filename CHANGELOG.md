@@ -9,6 +9,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 ### Added
 
 - Python 3.14 is now tested in CI on macOS and Linux and declared in the package classifiers.
+- Moved the maintainer-only release checklist and repository-hardening notes from `docs/` (the published website tree) to `.github/`, so they are no longer served from pinghue.com.
 - Every workflow job now has a `timeout-minutes` limit, superseded pull-request CI runs are cancelled automatically, and the coverage gate is 85% (previously 80%).
 
 ### Changed

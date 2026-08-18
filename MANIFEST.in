@@ -10,10 +10,8 @@ prune packaging
 include scripts/pinghue
 recursive-include schemas *.json
 recursive-include examples *.json
-recursive-include docs *.md *.svg *.gif *.png
+recursive-include docs *.svg *.gif *.png
 exclude CONTRIBUTING.md
-exclude docs/release-checklist.md
-exclude docs/repository-hardening.md
 recursive-include tests *.py
 exclude tests/test_repository_hardening.py
 exclude tests/test_github_hardening_apply.py
