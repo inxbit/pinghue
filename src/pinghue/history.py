@@ -50,7 +50,5 @@ def render_history(samples: Sequence[ProbeSample], *, width: int, style: str) ->
             for sample in visible
         )
 
-    if style == "sparkline":
-        return "".join(history_symbol(sample) for sample in visible)
-
+    # "bar" and its alias "sparkline" share the fixed-scale block glyphs.
     return "".join(history_symbol(sample) for sample in visible)

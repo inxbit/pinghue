@@ -13,6 +13,7 @@ from pinghue.cli import (
     HOST_LABEL_MAXIMUM,
     TARGET_COUNT_MAXIMUM,
     TARGET_MAXIMUM,
+    _parser,
     main,
     parse_args,
 )
@@ -53,6 +54,28 @@ def test_help_explains_that_no_samples_emits_empty_arrays(
         " ".join(help_text.split()),
     )
     assert "rewrite an existing single-link regular file in place" in normalized_help
+
+
+def test_help_describes_every_option_and_shows_defaults() -> None:
+    parser = _parser()
+
+    undocumented = [
+        action.option_strings
+        for action in parser._actions
+        if action.help in (None, "")
+    ]
+    assert undocumented == []
+
+    help_text = " ".join(parser.format_help().split())
+    for default in (
+        "(default: 1.0)",
+        "default: 64)",
+        "(default: 3)",
+        "(default: 50.0)",
+        "(default: local)",
+    ):
+        assert default in help_text
+    assert "sparkline is an alias of bar" in help_text
 
 
 def test_parse_args_rejects_too_fast_interval() -> None:

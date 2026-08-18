@@ -203,7 +203,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
 | `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
 | `--fail-on-all-down` | off | Exit `3` only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
-| `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
+| `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline` (an alias of `bar`), or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
 | `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics, up to 253 characters. Defaults to the first target when provided. |
 | `--quiet` | off | With `--check`, suppress output and use only the exit code. |
@@ -255,7 +255,7 @@ The fixed mapping keeps rows comparable:
 | `<=1000ms` | `▇` |
 | `>1000ms` | `█` |
 
-Use `--history-style dots`, `--history-style sparkline`, or `--history-style none` when a terminal font or workflow needs a simpler display.
+Use `--history-style dots` or `--history-style none` when a terminal font or workflow needs a simpler display. `--history-style sparkline` is accepted as an alias of `bar`.
 
 ## Host States
 

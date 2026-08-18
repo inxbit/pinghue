@@ -37,8 +37,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-f", "--file", type=Path, help="read targets from a plain text host file")
     parser.add_argument("-p", "--port", type=int, help="use TCP connect checks against PORT")
-    parser.add_argument("-i", "--interval", type=float, default=1.0, help="seconds between probes")
-    parser.add_argument("--timeout", type=float, help="probe timeout in seconds")
+    parser.add_argument(
+        "-i",
+        "--interval",
+        type=float,
+        default=1.0,
+        help="seconds between probes (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="probe timeout in seconds (default: the interval)",
+    )
     parser.add_argument("-c", "--count", type=int, help="number of probes per target before exit")
     parser.add_argument("--duration", type=float, help="maximum run duration in seconds")
     parser.add_argument(
@@ -77,11 +87,23 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "maximum concurrent probes, 1-"
             f"{CONCURRENCY_MAXIMUM} "
-            "(ICMP daemon workers are bounded by this limit)"
+            "(ICMP daemon workers are bounded by this limit; default: %(default)s)"
         ),
     )
-    parser.add_argument("--jitter-threshold", type=float, default=50.0, metavar="MS")
-    parser.add_argument("--fail-threshold", type=int, default=3, metavar="COUNT")
+    parser.add_argument(
+        "--jitter-threshold",
+        type=float,
+        default=50.0,
+        metavar="MS",
+        help="mark a target intermittent when its jitter exceeds MS (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--fail-threshold",
+        type=int,
+        default=3,
+        metavar="COUNT",
+        help="consecutive failed probes before a target is down (default: %(default)s)",
+    )
     failure_mode = parser.add_mutually_exclusive_group()
     failure_mode.add_argument(
         "--fail-on-any-down",
@@ -99,7 +121,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,
     )
-    parser.add_argument("--history-style", choices=HISTORY_STYLES, default="bar")
+    parser.add_argument(
+        "--history-style",
+        choices=HISTORY_STYLES,
+        default="bar",
+        help=(
+            "history cell glyphs: bar (default), dots, or none; "
+            "sparkline is an alias of bar"
+        ),
+    )
     parser.add_argument(
         "-n",
         "--numeric",
@@ -126,7 +156,7 @@ def _parser() -> argparse.ArgumentParser:
         "--host-label",
         default="local",
         metavar="LABEL",
-        help="operator-controlled host label written to JSON output",
+        help="operator-controlled host label written to JSON output (default: %(default)s)",
     )
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     return parser

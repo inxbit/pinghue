@@ -6,6 +6,11 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Changed
+
+- `--help` now describes every option and shows the default for `--interval`, `--timeout`, `--concurrency`, `--jitter-threshold`, `--fail-threshold`, `--history-style`, and `--host-label`.
+- Documented `--history-style sparkline` as an alias of `bar`; the two styles have always rendered the same glyphs.
+
 ## 5.0.0 - 2026-07-11
 
 ### Breaking
