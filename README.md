@@ -39,7 +39,7 @@ Current version: `5.0.0`. The command-line interface and JSON output are stable 
   <tr>
     <td valign="top"><b>Whole-run accuracy</b><br><br>Host states reflect everything that happened in the window, not just the most recent probes.</td>
     <td valign="top"><b>Scriptable</b><br><br><code>--no-tui</code>, <code>--count</code>, <code>--duration</code>, and fail-on-down exit codes for automation.</td>
-    <td valign="top"><b>Local &amp; safe</b><br><br>No server, no daemon, no credentials. Runs on macOS and Linux, Python 3.10–3.13.</td>
+    <td valign="top"><b>Local &amp; safe</b><br><br>No server, no daemon, no credentials. Runs on macOS and Linux, Python 3.10–3.14.</td>
   </tr>
 </table>
 
@@ -131,7 +131,7 @@ internal-db.corp
 
 ## Supported Platforms
 
-The supported platform contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
+The supported platform contract is macOS and Linux on Python 3.10 through 3.14. CI runs on both macOS and Linux for every supported Python version. Python 3.10 reaches end of life in October 2026; support for it will be dropped in the next major release after that date.
 
 The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared support scope unless explicitly added later.
 

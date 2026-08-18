@@ -6,6 +6,10 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Added
+
+- Python 3.14 is now tested in CI on macOS and Linux and declared in the package classifiers.
+
 ### Changed
 
 - The `pinghue` command is now a standard console-script entry point (`pinghue.cli:main`) instead of the `scripts/pinghue` bootstrap file; `scripts/pinghue` remains in the repository as a development launcher for editable checkouts.
@@ -15,6 +19,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Deprecated
 
+- Python 3.10 reaches end of life in October 2026; support for it will be dropped in the next major release after that date.
 - Starting the TUI while stdout is not a terminal now prints a warning on stderr. A future major release will default to `--no-tui` in that case; pass `--no-tui` explicitly in scripts and cron jobs.
 
 ## 5.0.0 - 2026-07-11

@@ -475,6 +475,16 @@ def test_ci_and_homebrew_cover_python_313() -> None:
     assert '"Programming Language :: Python :: 3.13"' in pyproject
 
 
+def test_ci_and_classifiers_cover_python_314() -> None:
+    ci = read(".github/workflows/ci.yml")
+    pyproject = read("pyproject.toml")
+    readme = read("README.md")
+
+    assert '"3.14"' in ci
+    assert '"Programming Language :: Python :: 3.14"' in pyproject
+    assert "Python 3.10 through 3.14" in readme
+
+
 def test_homebrew_test_uses_fail_on_down_against_local_tcp_server() -> None:
     formula = read("packaging/homebrew/pinghue.rb")
 
