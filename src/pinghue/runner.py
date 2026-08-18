@@ -7,7 +7,6 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from concurrent.futures import Executor
 from datetime import datetime, timezone
 from typing import TextIO
 
@@ -146,13 +145,7 @@ async def resolve_runs(args: RunConfig) -> list[TargetRun]:
     return runs
 
 
-async def _probe_address(
-    address: str,
-    *,
-    args: RunConfig,
-    mode: ProbeMode,
-    executor: Executor | None = None,
-) -> ProbeSample:
+async def _probe_address(address: str, *, args: RunConfig, mode: ProbeMode) -> ProbeSample:
     if mode == ProbeMode.TCP:
         return await tcp_probe(address, args.port or 0, timeout_s=args.timeout)
 
@@ -160,7 +153,6 @@ async def _probe_address(
         address,
         timeout_s=args.timeout,
         address_family=AddressFamily(args.address_family),
-        executor=executor,
     )
 
 
@@ -170,7 +162,6 @@ async def probe_once(
     args: RunConfig,
     mode: ProbeMode,
     semaphore: asyncio.Semaphore,
-    executor: Executor | None = None,
 ) -> ProbeSample | None:
     now = _monotonic_time()
     last_resolve_time = target._last_resolve_time
@@ -181,7 +172,7 @@ async def probe_once(
     needs_resolution = not target.resolved_address
     refresh_stale_resolution = (
         not needs_resolution
-        and not getattr(args, "numeric", False)
+        and not args.numeric
         and target.status != TargetStatus.PERMISSION_DENIED
         and target.samples.consecutive_failures >= args.fail_threshold
         and resolve_cooldown_elapsed
@@ -196,7 +187,7 @@ async def probe_once(
             resolved = await _resolve_target_bounded(
                 target.target,
                 family,
-                numeric=getattr(args, "numeric", False),
+                numeric=args.numeric,
             )
             if resolved.error:
                 if needs_resolution:
@@ -234,12 +225,7 @@ async def probe_once(
     async with semaphore:
         for address in addresses:
             try:
-                sample = await _probe_address(
-                    address,
-                    args=args,
-                    mode=mode,
-                    executor=executor,
-                )
+                sample = await _probe_address(address, args=args, mode=mode)
             except Exception as exc:
                 sample = ProbeSample(
                     timestamp=datetime.now(timezone.utc),
@@ -304,7 +290,6 @@ async def probe_target_loop(
     stop_event: asyncio.Event,
     immediate_event: asyncio.Event,
     initial_delay: float,
-    executor: Executor | None = None,
     probe_once_fn: ProbeOnce | None = None,
 ) -> None:
     """Run one target's probe loop without blocking other targets or UI refresh."""
@@ -326,17 +311,11 @@ async def probe_target_loop(
         immediate_event.clear()
 
     probes_completed = 0
-    probe_limit = getattr(args, "count", None)
+    probe_limit = args.count
     while not stop_event.is_set():
         probe_started = _monotonic_time()
         if probe_once_fn is None:
-            await probe_once(
-                target,
-                args=args,
-                mode=mode,
-                semaphore=semaphore,
-                executor=executor,
-            )
+            await probe_once(target, args=args, mode=mode, semaphore=semaphore)
         else:
             await probe_once_fn()
 
@@ -525,7 +504,6 @@ async def run_no_tui(
     cleanup_signal_handlers = install_stop_signal_handlers(stop_event)
     exit_reason = "completed"
     iteration = 0
-    executor: Executor | None = None
     # With `--output -` the JSON document owns stdout; per-probe lines move to
     # stderr so the exported document stays machine-parseable.
     sample_stream = sys.stderr if args.output is not None and str(args.output) == "-" else None
@@ -544,13 +522,7 @@ async def run_no_tui(
             iteration += 1
             iteration_started_at = _monotonic_time()
             probes = [
-                probe_once(
-                    target,
-                    args=args,
-                    mode=mode,
-                    semaphore=semaphore,
-                    executor=executor,
-                )
+                probe_once(target, args=args, mode=mode, semaphore=semaphore)
                 for target in targets
             ]
             samples, stop_reason = await _run_probe_batch(
@@ -643,9 +615,8 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
             output_mode=args.output_mode,
         )
 
-    fail_on_all_down = args.fail_on_all_down or args.fail_on_down
     return exit_code_for_targets(
         targets,
         fail_on_any_down=args.fail_on_any_down,
-        fail_on_all_down=fail_on_all_down,
+        fail_on_all_down=args.fail_on_all_down,
     )

@@ -11,7 +11,6 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -197,13 +196,9 @@ def _socket_family(address_family: AddressFamily) -> int:
     return socket.AF_UNSPEC
 
 
-def _family_from_ip(address: str) -> AddressFamily:
-    return AddressFamily.IPV6 if ipaddress.ip_address(address).version == 6 else AddressFamily.IPV4
-
-
 def family_from_ip(address: str) -> AddressFamily:
     """Return pinghue's address family enum for an IP literal."""
-    return _family_from_ip(address)
+    return AddressFamily.IPV6 if ipaddress.ip_address(address).version == 6 else AddressFamily.IPV4
 
 
 async def _run_daemon_thread(
@@ -271,12 +266,12 @@ async def resolve_target(
     """Resolve a target to the address used for probing."""
     if numeric:
         try:
-            return ResolvedTarget(target, target, _family_from_ip(target), addresses=(target,))
+            return ResolvedTarget(target, target, family_from_ip(target), addresses=(target,))
         except ValueError:
             return ResolvedTarget(target, None, None, "--numeric requires an IP literal")
 
     try:
-        literal_family = _family_from_ip(target)
+        literal_family = family_from_ip(target)
     except ValueError:
         literal_family = None
 
@@ -389,7 +384,6 @@ async def icmp_probe(
     *,
     timeout_s: float,
     address_family: AddressFamily,
-    executor: Executor | None = None,
 ) -> ProbeSample:
     """Probe a target with a single ICMP echo via icmplib's low-level sockets.
 
@@ -420,10 +414,7 @@ async def icmp_probe(
         ipv6=ipv6,
     )
     try:
-        if executor is None:
-            latency_ms = await _icmp_worker_pool.run(run_echo)
-        else:
-            latency_ms = await asyncio.get_running_loop().run_in_executor(executor, run_echo)
+        latency_ms = await _icmp_worker_pool.run(run_echo)
     except backend.timeout_error:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except backend.unreachable_errors as exc:

@@ -64,17 +64,6 @@ async def test_tui_duration_includes_time_elapsed_before_deadline_task(
     assert reasons == ["deadline"]
 
 
-def test_tui_icmp_uses_daemon_bridge_without_dedicated_executor(monkeypatch) -> None:
-    def no_dedicated_executor(*_: object, **__: object) -> object:
-        raise AssertionError("ICMP probes must use the daemon-thread bridge")
-
-    monkeypatch.setattr(app_module, "ThreadPoolExecutor", no_dedicated_executor, raising=False)
-
-    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
-
-    assert app._probe_executor is None
-
-
 async def test_tui_resolution_preserves_aggregate_sample_budget(monkeypatch) -> None:
     target_count = 200
     app = PinghueTextualApp(

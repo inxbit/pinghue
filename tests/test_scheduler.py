@@ -51,7 +51,7 @@ async def test_probe_target_loop_runs_independent_probe_without_global_wait() ->
         resolved_address="1.1.1.1",
         resolved_family=AddressFamily.IPV4,
     )
-    args = SimpleNamespace(interval=60.0)
+    args = SimpleNamespace(count=None, interval=60.0)
     stop_event = asyncio.Event()
     immediate_event = asyncio.Event()
     calls = 0
@@ -677,7 +677,7 @@ async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
         resolved_address="1.1.1.1",
         resolved_family=AddressFamily.IPV4,
     )
-    seen_executors: list[object] = []
+    probe_kwargs: list[set[str]] = []
 
     def no_dedicated_executor(*_: object, **__: object) -> object:
         pytest.fail("ICMP probes must use the daemon-thread bridge")
@@ -686,7 +686,7 @@ async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
         return [target]
 
     async def fake_probe_once(*_: object, **kwargs: object) -> ProbeSample:
-        seen_executors.append(kwargs["executor"])
+        probe_kwargs.append(set(kwargs))
         return ProbeSample(
             timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
             latency_ms=1.0,
@@ -701,7 +701,7 @@ async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
 
     await run_no_tui(args, ProbeMode.ICMP)
 
-    assert seen_executors == [None]
+    assert probe_kwargs == [{"args", "mode", "semaphore"}]
 
 
 async def test_resolve_runs_resolves_targets_concurrently_and_preserves_order(
@@ -809,6 +809,7 @@ async def test_probe_once_fails_over_to_next_resolved_address(
         address_family=AddressFamily.AUTO.value,
         fail_threshold=1,
         jitter_threshold=50.0,
+        numeric=False,
         port=443,
         timeout=1.0,
     )
@@ -861,6 +862,7 @@ async def test_probe_once_retains_primary_failure_when_all_addresses_fail(
         address_family=AddressFamily.AUTO.value,
         fail_threshold=1,
         jitter_threshold=50.0,
+        numeric=False,
         port=443,
         timeout=1.0,
     )
@@ -878,42 +880,3 @@ async def test_probe_once_retains_primary_failure_when_all_addresses_fail(
     assert target.resolved_family == AddressFamily.IPV4
     assert target.samples[-1] == primary_failure
     assert target.error == "primary unreachable"
-
-
-async def test_probe_once_passes_executor_to_icmp_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executor = object()
-    target = TargetRun(
-        target="1.1.1.1",
-        resolved_address="1.1.1.1",
-        resolved_family=AddressFamily.IPV4,
-    )
-    seen_executors: list[object] = []
-
-    async def fake_icmp_probe(*_: object, **kwargs: object) -> ProbeSample:
-        seen_executors.append(kwargs["executor"])
-        return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
-            latency_ms=2.0,
-            status=SampleStatus.OK,
-        )
-
-    monkeypatch.setattr(runner, "icmp_probe", fake_icmp_probe)
-    args = SimpleNamespace(
-        address_family=AddressFamily.IPV4.value,
-        fail_threshold=1,
-        jitter_threshold=50.0,
-        port=None,
-        timeout=1.0,
-    )
-
-    await runner.probe_once(
-        target,
-        args=args,
-        mode=ProbeMode.ICMP,
-        semaphore=asyncio.Semaphore(1),
-        executor=executor,
-    )
-
-    assert seen_executors == [executor]

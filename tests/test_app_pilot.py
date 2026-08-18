@@ -75,10 +75,9 @@ def stub_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         probed.append(target.target)
         return sample
 
-    # resolve_run_target is looked up in the app module; probe_once is called
-    # both from the app (burst actions) and the runner (probe loop).
+    # resolve_run_target is looked up in the app module; probe_once runs
+    # inside the runner's per-target probe loop.
     monkeypatch.setattr(app_module, "resolve_run_target", fake_resolve)
-    monkeypatch.setattr(app_module, "probe_once", fake_probe_once)
     monkeypatch.setattr(runner_module, "probe_once", fake_probe_once)
     return probed
 

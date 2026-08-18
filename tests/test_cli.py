@@ -217,7 +217,6 @@ def test_parse_args_accepts_json_host_label() -> None:
 def test_parse_args_accepts_fail_on_down() -> None:
     args = parse_args(["--fail-on-down", "1.1.1.1"])
 
-    assert args.fail_on_down is True
     assert args.fail_on_all_down is True
 
 

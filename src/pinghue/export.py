@@ -346,7 +346,7 @@ def write_output_json(
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
             tmp_file.write(output_text)
-        os.chmod(tmp_path, mode)
+            os.fchmod(tmp_file.fileno(), mode)
         _install_output_file(tmp_path, output_path, overwrite=overwrite, mode=mode)
     except BaseException:
         if tmp_path is not None:

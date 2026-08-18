@@ -1,13 +1,17 @@
-"""Runtime configuration protocol."""
+"""Runtime configuration."""
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
-from typing import Protocol
 
 
-class RunConfig(Protocol):
-    """Attributes needed by the runtime after CLI parsing."""
+class RunConfig(argparse.Namespace):
+    """Parsed CLI arguments, as consumed by the runtime.
+
+    The CLI parser fills this namespace directly, so this class is the single
+    declaration of every option's name and type.
+    """
 
     targets: list[str]
     file: Path | None
@@ -26,6 +30,8 @@ class RunConfig(Protocol):
     fail_threshold: int
     history_style: str
     numeric: bool
+    ipv4: bool
+    ipv6: bool
     address_family: str
     check: bool
     quiet: bool
@@ -33,4 +39,3 @@ class RunConfig(Protocol):
     host_label: str
     fail_on_any_down: bool
     fail_on_all_down: bool
-    fail_on_down: bool

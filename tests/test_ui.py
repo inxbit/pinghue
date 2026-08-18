@@ -22,8 +22,8 @@ from pinghue.ui import (
     focus_table,
     format_history_cell,
     format_history_legend,
-    format_numeric_cell,
     format_state_cell,
+    format_text_cell,
     issue_styles,
     restore_cursor_row,
     sync_target_table,
@@ -84,10 +84,10 @@ def test_issue_styles_marks_loss_when_percentage_rounds_to_zero() -> None:
     assert styles["loss"] == RED
 
 
-def test_format_numeric_cell_colors_only_affected_values() -> None:
-    assert plain_and_style(format_numeric_cell("12.30", GREEN)) == ("12.30", GREEN)
-    assert plain_and_style(format_numeric_cell("450.00", AMBER)) == ("450.00", AMBER)
-    assert plain_and_style(format_numeric_cell("5.00%", RED)) == ("5.00%", RED)
+def test_format_text_cell_colors_only_affected_values() -> None:
+    assert plain_and_style(format_text_cell("12.30", GREEN)) == ("12.30", GREEN)
+    assert plain_and_style(format_text_cell("450.00", AMBER)) == ("450.00", AMBER)
+    assert plain_and_style(format_text_cell("5.00%", RED)) == ("5.00%", RED)
 
 
 def test_compact_metric_formats_keep_columns_readable() -> None:
