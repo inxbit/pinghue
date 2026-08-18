@@ -20,6 +20,12 @@ def package_version() -> str:
     return match.group(1)
 
 
+def build_backend_requires() -> list[str]:
+    match = re.search(r"^requires = \[(.*)\]$", read("pyproject.toml"), re.MULTILINE)
+    assert match is not None
+    return re.findall(r'"([^"]+)"', match.group(1))
+
+
 def png_text_chunks(path: str) -> dict[str, str]:
     data = Path(path).read_bytes()
     signature = b"\x89PNG\r\n\x1a\n"
@@ -197,8 +203,8 @@ def test_requirements_audit_is_hash_pinned() -> None:
     requirements = read("requirements-audit.txt")
 
     assert "pip-audit==" in requirements
-    assert "setuptools==84.0.0" in requirements
-    assert "wheel==0.48.0" in requirements
+    assert re.search(r"^setuptools==\S+ \\$", requirements, re.MULTILINE)
+    assert re.search(r"^wheel==\S+ \\$", requirements, re.MULTILINE)
     assert "--hash=sha256:" in requirements
 
 
@@ -234,19 +240,23 @@ def test_requirements_build_is_hash_pinned() -> None:
     # L14: the build backend is pinned with sha256 hashes for --require-hashes.
     requirements = read("requirements-build.txt")
 
-    assert "build==1.5.0" in requirements
-    assert "setuptools==84.0.0" in requirements
-    assert "wheel==0.48.0" in requirements
+    assert re.search(r"^build==\S+ \\$", requirements, re.MULTILINE)
+    assert re.search(r"^setuptools==\S+ \\$", requirements, re.MULTILINE)
+    assert re.search(r"^wheel==\S+ \\$", requirements, re.MULTILINE)
     assert "--hash=sha256:" in requirements
 
 
 def test_build_backend_metadata_support_and_lock_stay_aligned() -> None:
-    pyproject = read("pyproject.toml")
+    requires = build_backend_requires()
     requirements = read("requirements-build.txt")
 
-    assert 'requires = ["setuptools==84.0.0", "wheel==0.48.0"]' in pyproject
-    assert "setuptools==84.0.0" in requirements
-    assert "wheel==0.48.0" in requirements
+    pins = dict(item.split("==", 1) for item in requires if "==" in item)
+    assert len(pins) == len(requires), requires
+    assert set(pins) == {"setuptools", "wheel"}
+    # PEP 639 license metadata (license = "MIT", license-files) needs setuptools >= 77.
+    assert tuple(int(part) for part in pins["setuptools"].split(".")) >= (77, 0, 0)
+    for item in requires:
+        assert re.search(rf"^{re.escape(item)} \\$", requirements, re.MULTILINE), item
 
 
 def test_publish_workflow_verifies_tag_and_hash_pins_build() -> None:
