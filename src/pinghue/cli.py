@@ -315,6 +315,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from pinghue.runner import run
 
+    if not args.no_tui and not sys.stdout.isatty():
+        # The TUI draws on stderr and leaves stdout empty; scripts and cron
+        # jobs almost always want the per-probe line output instead.
+        print(
+            "pinghue: warning: stdout is not a terminal; pass --no-tui for line output "
+            "(a future major release will make this the default)",
+            file=sys.stderr,
+        )
+
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
     try:
         return asyncio.run(run(args, mode=mode))

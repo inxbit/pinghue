@@ -167,6 +167,10 @@ Use no-TUI mode for scripts, cron, CI, and package smoke tests:
 pinghue -p 443 example.com -c 3 --no-tui
 ```
 
+Starting the TUI while stdout is not a terminal (for example under cron or a
+pipe) prints a warning on stderr; a future major release will switch to
+`--no-tui` automatically in that case.
+
 Example no-TUI output:
 
 ```text

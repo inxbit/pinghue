@@ -11,6 +11,10 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - `--help` now describes every option and shows the default for `--interval`, `--timeout`, `--concurrency`, `--jitter-threshold`, `--fail-threshold`, `--history-style`, and `--host-label`.
 - Documented `--history-style sparkline` as an alias of `bar`; the two styles have always rendered the same glyphs.
 
+### Deprecated
+
+- Starting the TUI while stdout is not a terminal now prints a warning on stderr. A future major release will default to `--no-tui` in that case; pass `--no-tui` explicitly in scripts and cron jobs.
+
 ## 5.0.0 - 2026-07-11
 
 ### Breaking

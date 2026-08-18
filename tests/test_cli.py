@@ -150,6 +150,38 @@ def test_main_reports_output_write_errors_without_traceback(
     assert "Traceback" not in captured.err
 
 
+def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    assert main(["1.1.1.1"]) == 0
+    assert "stdout is not a terminal; pass --no-tui" in capsys.readouterr().err
+
+
+def test_main_does_not_warn_about_stdout_when_no_tui_is_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    assert main(["--no-tui", "1.1.1.1"]) == 0
+    assert capsys.readouterr().err == ""
+
+
 def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
