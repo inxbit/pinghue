@@ -1,6 +1,6 @@
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -194,54 +194,31 @@ async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
         resolved_address="1.1.1.1",
         resolved_family=AddressFamily.IPV4,
     )
-    base = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
-    times = iter(
-        [
-            base,
-            base,
-            base - timedelta(seconds=0.4),
-            base + timedelta(seconds=1.0),
-            base + timedelta(seconds=1.0),
-        ]
-    )
     monotonic_times = iter([10.0, 10.4, 11.0])
-    sleeps: list[float] = []
+    recorded: list[tuple[float, float]] = []
 
-    class FakeDateTime:
-        @classmethod
-        def now(cls, _tz: timezone) -> datetime:
-            return next(times)
+    def spy_iteration_sleep(*, interval: float, iteration_elapsed: float) -> float:
+        recorded.append((interval, iteration_elapsed))
+        return 0.0
 
     async def fake_resolve_runs(_: object) -> list[TargetRun]:
         return [target]
 
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
-            timestamp=base,
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
 
-    async def fake_wait_for_stop_event(_: asyncio.Event, delay: float) -> bool:
-        sleeps.append(delay)
-        return False
-
-    monkeypatch.setattr(runner, "datetime", FakeDateTime)
-    monkeypatch.setattr(
-        runner,
-        "_monotonic_time",
-        lambda: next(monotonic_times),
-        raising=False,
-    )
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: next(monotonic_times))
+    monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
     monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
-    monkeypatch.setattr(runner, "wait_for_stop_event", fake_wait_for_stop_event)
 
-    args = no_tui_args(count=2)
+    await run_no_tui(no_tui_args(count=2), ProbeMode.ICMP)
 
-    await run_no_tui(args, ProbeMode.ICMP)
-
-    assert sleeps == pytest.approx([0.6])
+    assert recorded == [(1.0, pytest.approx(0.4))]
 
 
 async def test_run_no_tui_yields_after_slow_iteration(
@@ -252,54 +229,69 @@ async def test_run_no_tui_yields_after_slow_iteration(
         resolved_address="1.1.1.1",
         resolved_family=AddressFamily.IPV4,
     )
-    base = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
-    times = iter(
-        [
-            base,
-            base,
-            base + timedelta(seconds=1.5),
-            base + timedelta(seconds=1.6),
-            base + timedelta(seconds=1.7),
-        ]
-    )
     monotonic_times = iter([10.0, 11.5, 11.6])
+    original_iteration_sleep = runner._iteration_sleep
     sleeps: list[float] = []
 
-    class FakeDateTime:
-        @classmethod
-        def now(cls, _tz: timezone) -> datetime:
-            return next(times)
+    def spy_iteration_sleep(*, interval: float, iteration_elapsed: float) -> float:
+        sleep_for = original_iteration_sleep(
+            interval=interval, iteration_elapsed=iteration_elapsed
+        )
+        sleeps.append(sleep_for)
+        return sleep_for
 
     async def fake_resolve_runs(_: object) -> list[TargetRun]:
         return [target]
 
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
-            timestamp=base,
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
 
-    async def fake_wait_for_stop_event(_: asyncio.Event, delay: float) -> bool:
-        sleeps.append(delay)
-        return False
-
-    monkeypatch.setattr(runner, "datetime", FakeDateTime)
-    monkeypatch.setattr(
-        runner,
-        "_monotonic_time",
-        lambda: next(monotonic_times),
-        raising=False,
-    )
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: next(monotonic_times))
+    monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
     monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
-    monkeypatch.setattr(runner, "wait_for_stop_event", fake_wait_for_stop_event)
 
-    args = no_tui_args(count=2)
+    await run_no_tui(no_tui_args(count=2), ProbeMode.ICMP)
 
-    await run_no_tui(args, ProbeMode.ICMP)
+    assert sleeps == [runner.MIN_OVERRUN_SLEEP]
 
-    assert sleeps == [0.1]
+
+async def test_run_no_tui_probes_targets_independently_and_prints_as_results_land(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A slow target must not hold back a fast target's cadence: no-TUI mode
+    # runs the same per-target loops as the TUI instead of lockstep batches.
+    fast = TargetRun(target="fast.example", resolved_address="192.0.2.1")
+    slow = TargetRun(target="slow.example", resolved_address="192.0.2.2")
+
+    async def fake_resolve_runs(_: object) -> list[TargetRun]:
+        return [fast, slow]
+
+    async def fake_probe_once(target: TargetRun, *_: object, **__: object) -> ProbeSample:
+        if target is slow:
+            await asyncio.sleep(0.3)
+        return ProbeSample(
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            latency_ms=1.0,
+            status=SampleStatus.OK,
+        )
+
+    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    monkeypatch.setattr(runner, "probe_once", fake_probe_once)
+
+    _, exit_reason, _, _ = await run_no_tui(
+        no_tui_args(targets=[fast.target, slow.target], count=2, interval=0.05, port=443),
+        ProbeMode.TCP,
+    )
+
+    assert exit_reason == "completed"
+    printed = [line.split()[1] for line in capsys.readouterr().out.splitlines()]
+    assert printed == ["fast.example", "fast.example", "slow.example", "slow.example"]
 
 
 async def test_run_no_tui_returns_interrupted_on_cancellation(
@@ -431,7 +423,9 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
         return lambda: None
 
     async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [fast, blocked]
+        # The blocked target is listed first so its probe is already in flight
+        # when the fast target's probe requests the stop.
+        return [blocked, fast]
 
     async def fake_probe_once(
         target: TargetRun, *_: object, **__: object
@@ -460,19 +454,19 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     targets, exit_reason, _, _ = await run_no_tui(
-        no_tui_args(targets=[fast.target, blocked.target], port=443),
+        no_tui_args(targets=[blocked.target, fast.target], port=443),
         ProbeMode.TCP,
     )
 
     assert exit_reason == "interrupted"
-    assert [target.stats.sent for target in targets] == [1, 0]
+    assert [target.stats.sent for target in targets] == [0, 1]
     assert blocked_probe_cancelled.is_set()
     output = capsys.readouterr().out
     assert "fast.example ok latency=1.00ms" in output
     assert "blocked.example" not in output
 
 
-async def test_run_no_tui_cancels_an_active_probe_batch_when_stop_is_requested(
+async def test_run_no_tui_cancels_an_active_probe_when_stop_is_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = TargetRun("1.1.1.1", resolved_address="1.1.1.1")
@@ -519,7 +513,7 @@ async def test_run_no_tui_cancels_an_active_probe_batch_when_stop_is_requested(
     assert probe_cancelled.is_set()
 
 
-async def test_run_no_tui_duration_cancels_an_active_probe_batch(
+async def test_run_no_tui_duration_cancels_an_active_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = TargetRun("1.1.1.1", resolved_address="1.1.1.1")
@@ -623,20 +617,28 @@ async def test_run_no_tui_duration_includes_synchronous_startup_time(
     assert resolution_calls == 0
 
 
-async def test_probe_batch_rejects_work_when_deadline_is_already_expired() -> None:
+async def test_probe_loops_reject_work_when_deadline_is_already_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     called = False
 
-    async def immediate_probe() -> None:
+    async def fake_probe_once(*_: object, **__: object) -> ProbeSample | None:
         nonlocal called
         called = True
+        return None
 
-    samples, stop_reason = await runner._run_probe_batch(
-        [immediate_probe()],
-        asyncio.Event(),
+    monkeypatch.setattr(runner, "probe_once", fake_probe_once)
+
+    stop_reason = await runner._run_probe_loops_until_shutdown(
+        [TargetRun("1.1.1.1", resolved_address="1.1.1.1")],
+        args=no_tui_args(),
+        mode=ProbeMode.ICMP,
+        semaphore=asyncio.Semaphore(1),
+        stop_event=asyncio.Event(),
         deadline_at=asyncio.get_running_loop().time() - 1.0,
+        on_sample=lambda *_: None,
     )
 
-    assert samples == []
     assert stop_reason == "deadline"
     assert called is False
 
