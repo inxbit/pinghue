@@ -8,6 +8,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Changed
 
+- The `pinghue` command is now a standard console-script entry point (`pinghue.cli:main`) instead of the `scripts/pinghue` bootstrap file; `scripts/pinghue` remains in the repository as a development launcher for editable checkouts.
 - `--help` now describes every option and shows the default for `--interval`, `--timeout`, `--concurrency`, `--jitter-threshold`, `--fail-threshold`, `--history-style`, and `--host-label`.
 - Documented `--history-style sparkline` as an alias of `bar`; the two styles have always rendered the same glyphs.
 - No-TUI mode now runs the same per-target probe loops as the TUI instead of lockstep batches: a slow or timing-out target no longer delays the other targets' probes, and each per-probe line prints as soon as its result lands, so line order across targets follows completion order.

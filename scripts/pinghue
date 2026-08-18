@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Launch pinghue with a resilient import path bootstrap.
+"""Development launcher with a resilient import path bootstrap.
 
-This launcher avoids hard dependency on editable .pth processing by falling back
-to the editable source root path captured in `direct_url.json` when available.
+Installed packages use the ``pinghue`` console script declared in
+``pyproject.toml``. This launcher is for editable checkouts: it falls back to
+the editable source root recorded in ``direct_url.json`` when the ``.pth``
+based import path is not usable.
 """
 
 from __future__ import annotations
