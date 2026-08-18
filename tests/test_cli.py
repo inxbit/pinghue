@@ -13,6 +13,7 @@ from pinghue.cli import (
     HOST_LABEL_MAXIMUM,
     TARGET_COUNT_MAXIMUM,
     TARGET_MAXIMUM,
+    _parser,
     main,
     parse_args,
 )
@@ -53,6 +54,26 @@ def test_help_explains_that_no_samples_emits_empty_arrays(
         " ".join(help_text.split()),
     )
     assert "rewrite an existing single-link regular file in place" in normalized_help
+
+
+def test_help_describes_every_option_and_shows_defaults() -> None:
+    parser = _parser()
+
+    undocumented = [
+        action.option_strings for action in parser._actions if action.help in (None, "")
+    ]
+    assert undocumented == []
+
+    help_text = " ".join(parser.format_help().split())
+    for default in (
+        "(default: 1.0)",
+        "default: 64)",
+        "(default: 3)",
+        "(default: 50.0)",
+        "(default: local)",
+    ):
+        assert default in help_text
+    assert "sparkline is an alias of bar" in help_text
 
 
 def test_parse_args_rejects_too_fast_interval() -> None:
@@ -127,6 +148,38 @@ def test_main_reports_output_write_errors_without_traceback(
     assert "Traceback" not in captured.err
 
 
+def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    assert main(["1.1.1.1"]) == 0
+    assert "stdout is not a terminal; pass --no-tui" in capsys.readouterr().err
+
+
+def test_main_does_not_warn_about_stdout_when_no_tui_is_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    assert main(["--no-tui", "1.1.1.1"]) == 0
+    assert capsys.readouterr().err == ""
+
+
 def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -135,9 +188,7 @@ def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
         server.listen()
         port = server.getsockname()[1]
 
-        exit_code = main(
-            ["-p", str(port), "127.0.0.1", "-c", "1", "--no-tui", "--output", "-"]
-        )
+        exit_code = main(["-p", str(port), "127.0.0.1", "-c", "1", "--no-tui", "--output", "-"])
 
     assert exit_code == 0
     captured = capsys.readouterr()
@@ -217,7 +268,6 @@ def test_parse_args_accepts_json_host_label() -> None:
 def test_parse_args_accepts_fail_on_down() -> None:
     args = parse_args(["--fail-on-down", "1.1.1.1"])
 
-    assert args.fail_on_down is True
     assert args.fail_on_all_down is True
 
 

@@ -39,7 +39,7 @@ Current version: `5.0.0`. The command-line interface and JSON output are stable 
   <tr>
     <td valign="top"><b>Whole-run accuracy</b><br><br>Host states reflect everything that happened in the window, not just the most recent probes.</td>
     <td valign="top"><b>Scriptable</b><br><br><code>--no-tui</code>, <code>--count</code>, <code>--duration</code>, and fail-on-down exit codes for automation.</td>
-    <td valign="top"><b>Local &amp; safe</b><br><br>No server, no daemon, no credentials. Runs on macOS and Linux, Python 3.10–3.13.</td>
+    <td valign="top"><b>Local &amp; safe</b><br><br>No server, no daemon, no credentials. Runs on macOS and Linux, Python 3.10–3.14.</td>
   </tr>
 </table>
 
@@ -131,7 +131,7 @@ internal-db.corp
 
 ## Supported Platforms
 
-The supported platform contract is macOS and Linux on Python 3.10 through 3.13. CI runs on both macOS and Linux for every supported Python version.
+The supported platform contract is macOS and Linux on Python 3.10 through 3.14. CI runs on both macOS and Linux for every supported Python version. Python 3.10 reaches end of life in October 2026; support for it will be dropped in the next major release after that date.
 
 The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared support scope unless explicitly added later.
 
@@ -166,6 +166,10 @@ Use no-TUI mode for scripts, cron, CI, and package smoke tests:
 ```sh
 pinghue -p 443 example.com -c 3 --no-tui
 ```
+
+Starting the TUI while stdout is not a terminal (for example under cron or a
+pipe) prints a warning on stderr; a future major release will switch to
+`--no-tui` automatically in that case.
 
 Example no-TUI output:
 
@@ -203,7 +207,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
 | `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
 | `--fail-on-all-down` | off | Exit `3` only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
-| `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline`, or `none`. |
+| `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline` (an alias of `bar`), or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
 | `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics, up to 253 characters. Defaults to the first target when provided. |
 | `--quiet` | off | With `--check`, suppress output and use only the exit code. |
@@ -255,7 +259,7 @@ The fixed mapping keeps rows comparable:
 | `<=1000ms` | `▇` |
 | `>1000ms` | `█` |
 
-Use `--history-style dots`, `--history-style sparkline`, or `--history-style none` when a terminal font or workflow needs a simpler display.
+Use `--history-style dots` or `--history-style none` when a terminal font or workflow needs a simpler display. `--history-style sparkline` is accepted as an alias of `bar`.
 
 ## Host States
 

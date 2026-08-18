@@ -232,7 +232,7 @@ def test_run_check_sanitizes_dns_diagnostics(monkeypatch: pytest.MonkeyPatch) ->
     assert exit_code == 0
     assert dns_name not in text
     assert dns_error not in text
-    assert r'\x1b]52;c;QUJD\x07bad' in text
+    assert r"\x1b]52;c;QUJD\x07bad" in text
     assert r"\x1b[31mboom" in text
 
 

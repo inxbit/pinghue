@@ -18,7 +18,6 @@ from pinghue.models import ProbeMode, SampleWindow, TargetRun, TargetStatus
 from pinghue.runner import (
     _monotonic_time,
     apply_retained_sample_budget,
-    probe_once,
     probe_target_loop,
     resolve_run_target,
     stagger_delay,
@@ -97,15 +96,10 @@ class PinghueTextualApp(App[None]):
         self.targets: list[TargetRun] = []
         self.started_at = datetime.now(timezone.utc)
         self.ended_at = self.started_at
-        self._deadline_at = (
-            None
-            if args.duration is None
-            else _monotonic_time() + args.duration
-        )
+        self._deadline_at = None if args.duration is None else _monotonic_time() + args.duration
         self.exit_reason = "user_quit"
         self.show_address = False
         self._semaphore = asyncio.Semaphore(args.concurrency)
-        self._probe_executor = None
         self._stop_event = asyncio.Event()
         self._probe_tasks: list[asyncio.Task[None]] = []
         self._resolution_task: asyncio.Task[None] | None = None
@@ -202,15 +196,12 @@ class PinghueTextualApp(App[None]):
                         count=active_count,
                         interval=self.args_config.interval,
                     ),
-                    executor=self._probe_executor,
                 )
             )
             self._probe_tasks.append(task)
 
         if self.args_config.count is not None:
-            self._completion_task = asyncio.create_task(
-                self._finish_when_probe_tasks_complete()
-            )
+            self._completion_task = asyncio.create_task(self._finish_when_probe_tasks_complete())
 
     async def _stop_probe_tasks(self) -> None:
         self._stop_event.set()
@@ -271,29 +262,6 @@ class PinghueTextualApp(App[None]):
         self.exit_reason = exit_reason
         await self._stop_probe_tasks()
         self.exit()
-
-    async def _probe_selected_now(self, index: int) -> None:
-        if 0 <= index < len(self.targets):
-            await probe_once(
-                self.targets[index],
-                args=self.args_config,
-                mode=self.mode,
-                semaphore=self._semaphore,
-                executor=self._probe_executor,
-            )
-
-    async def _probe_all_now(self) -> None:
-        probes = [
-            self._probe_selected_now(index)
-            for index in range(len(self.targets))
-        ]
-        if probes:
-            await asyncio.gather(*probes)
-
-    async def _tick(self) -> None:
-        # Kept for tests and future manual refresh paths; normal probing is per-host.
-        await self._probe_all_now()
-        self._refresh_table()
 
     async def on_unmount(self) -> None:
         await self._stop_resolution_tasks()
@@ -400,9 +368,5 @@ class PinghueApp:
     async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
         app = PinghueTextualApp(args=self.args, mode=self.mode)
         await app.run_async()
-        ended_at = (
-            app.ended_at
-            if app.ended_at != app.started_at
-            else datetime.now(timezone.utc)
-        )
+        ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)
         return app.targets, app.exit_reason, app.started_at, ended_at

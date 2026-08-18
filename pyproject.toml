@@ -23,6 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: System :: Monitoring",
   "Topic :: System :: Networking :: Monitoring",
   "Topic :: Utilities",
@@ -45,6 +46,9 @@ dev = [
   "twine>=5.1",
 ]
 
+[project.scripts]
+pinghue = "pinghue.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/inxbit/pinghue"
 Repository = "https://github.com/inxbit/pinghue"
@@ -54,9 +58,6 @@ Security = "https://github.com/inxbit/pinghue/security"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools]
-script-files = ["scripts/pinghue"]
 
 [tool.setuptools.package-data]
 pinghue = ["py.typed"]

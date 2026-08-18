@@ -11,7 +11,6 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -110,9 +109,7 @@ class _DaemonWorkerPool:
                     self._outstanding_work_count -= 1
                 raise
 
-        self._work_queue.put(
-            _DaemonWorkItem(loop=loop, future=future, function=function)
-        )
+        self._work_queue.put(_DaemonWorkItem(loop=loop, future=future, function=function))
         return await future
 
     @staticmethod
@@ -121,9 +118,7 @@ class _DaemonWorkerPool:
             future.set_result(result)
 
     @staticmethod
-    def _deliver_exception(
-        future: asyncio.Future[Any], exception: BaseException
-    ) -> None:
+    def _deliver_exception(future: asyncio.Future[Any], exception: BaseException) -> None:
         if not future.done():
             future.set_exception(exception)
 
@@ -197,13 +192,9 @@ def _socket_family(address_family: AddressFamily) -> int:
     return socket.AF_UNSPEC
 
 
-def _family_from_ip(address: str) -> AddressFamily:
-    return AddressFamily.IPV6 if ipaddress.ip_address(address).version == 6 else AddressFamily.IPV4
-
-
 def family_from_ip(address: str) -> AddressFamily:
     """Return pinghue's address family enum for an IP literal."""
-    return _family_from_ip(address)
+    return AddressFamily.IPV6 if ipaddress.ip_address(address).version == 6 else AddressFamily.IPV4
 
 
 async def _run_daemon_thread(
@@ -256,9 +247,7 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
         partial(socket.getaddrinfo, target, None, family=family, type=socket.SOCK_STREAM),
         name="pinghue-dns",
         slots=_dns_thread_slots,
-        unavailable_error=(
-            f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"
-        ),
+        unavailable_error=(f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"),
     )
 
 
@@ -271,12 +260,12 @@ async def resolve_target(
     """Resolve a target to the address used for probing."""
     if numeric:
         try:
-            return ResolvedTarget(target, target, _family_from_ip(target), addresses=(target,))
+            return ResolvedTarget(target, target, family_from_ip(target), addresses=(target,))
         except ValueError:
             return ResolvedTarget(target, None, None, "--numeric requires an IP literal")
 
     try:
-        literal_family = _family_from_ip(target)
+        literal_family = family_from_ip(target)
     except ValueError:
         literal_family = None
 
@@ -335,11 +324,7 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
             error=str(exc) or "connection refused",
         )
     except OSError as exc:
-        status = (
-            SampleStatus.UNREACHABLE
-            if exc.errno in UNREACHABLE_ERRNOS
-            else SampleStatus.ERROR
-        )
+        status = SampleStatus.UNREACHABLE if exc.errno in UNREACHABLE_ERRNOS else SampleStatus.ERROR
         return ProbeSample(
             timestamp=timestamp,
             latency_ms=None,
@@ -389,7 +374,6 @@ async def icmp_probe(
     *,
     timeout_s: float,
     address_family: AddressFamily,
-    executor: Executor | None = None,
 ) -> ProbeSample:
     """Probe a target with a single ICMP echo via icmplib's low-level sockets.
 
@@ -420,10 +404,7 @@ async def icmp_probe(
         ipv6=ipv6,
     )
     try:
-        if executor is None:
-            latency_ms = await _icmp_worker_pool.run(run_echo)
-        else:
-            latency_ms = await asyncio.get_running_loop().run_in_executor(executor, run_echo)
+        latency_ms = await _icmp_worker_pool.run(run_echo)
     except backend.timeout_error:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except backend.unreachable_errors as exc:

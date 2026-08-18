@@ -15,6 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,6 +85,7 @@ jobs:
 
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -209,6 +211,7 @@ jobs:
 
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -224,14 +227,17 @@ jobs:
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install --no-deps --no-build-isolation -e .
       - name: Ruff
-        run: ruff check .
+        run: |
+          ruff check .
+          ruff format --check .
       - name: Mypy
         run: mypy src
       - name: Tests
-        run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
+        run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85
 
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build
     strategy:
       fail-fast: false
@@ -256,6 +262,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs:
       - build
       - check
@@ -312,6 +319,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: publish
     permissions:
       contents: write

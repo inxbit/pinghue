@@ -86,7 +86,7 @@ def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
     assert "prune .github" in manifest
     assert "prune packaging" in manifest
     assert "include scripts/pinghue" in manifest
-    assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
+    assert "recursive-include docs *.svg *.gif *.png" in manifest
     assert "recursive-include packaging" not in manifest
     assert "recursive-include scripts" not in manifest
     assert "recursive-include .github/workflows" not in manifest
@@ -94,8 +94,12 @@ def test_manifest_excludes_developer_only_workflows_and_scripts() -> None:
     assert "exclude tests/test_github_hardening_apply.py" in manifest
     assert "exclude tests/test_normalize_sdist.py" in manifest
     assert "exclude CONTRIBUTING.md" in manifest
-    assert "exclude docs/release-checklist.md" in manifest
-    assert "exclude docs/repository-hardening.md" in manifest
+    # Maintainer docs live under .github/, which is pruned from the sdist and
+    # never uploaded to GitHub Pages.
+    assert Path(".github/release-checklist.md").is_file()
+    assert Path(".github/repository-hardening.md").is_file()
+    assert not Path("docs/release-checklist.md").exists()
+    assert not Path("docs/repository-hardening.md").exists()
 
 
 def test_publish_workflow_has_attestations_and_concurrency() -> None:
@@ -103,15 +107,42 @@ def test_publish_workflow_has_attestations_and_concurrency() -> None:
 
     assert "concurrency:" in workflow
     assert "attestations: write" in workflow
-    assert (
-        "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8"
-        in workflow
-    )
+    assert "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8" in workflow
     assert "subject-path: dist/*" in workflow
 
     publish_job = workflow.split("  publish:", 1)[1].split("  release:", 1)[0]
     assert "contents: read" in publish_job
     assert "artifact-metadata: write" not in publish_job
+
+
+def test_every_workflow_job_has_a_timeout() -> None:
+    for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        job_count = len(re.findall(r"^    runs-on: ", workflow, re.MULTILINE))
+        timeout_count = len(re.findall(r"^    timeout-minutes: \d+$", workflow, re.MULTILINE))
+
+        assert job_count > 0, workflow_path
+        assert timeout_count == job_count, workflow_path
+
+
+def test_ci_cancels_superseded_pull_request_runs_but_not_main_pushes() -> None:
+    workflow = read(".github/workflows/ci.yml")
+
+    assert "concurrency:" in workflow
+    assert "group: ci-${{ github.ref }}" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+
+
+def test_coverage_gate_is_consistent_across_ci_and_docs() -> None:
+    gate = "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85"
+
+    for path in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/publish.yml",
+        "CONTRIBUTING.md",
+        ".github/release-checklist.md",
+    ):
+        assert gate in read(path), path
 
 
 def test_dependency_audit_workflow_runs_pip_audit_weekly() -> None:
@@ -129,14 +160,9 @@ def test_dependency_audits_are_required_for_every_pull_request() -> None:
     status_rule = next(
         rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks"
     )
-    contexts = {
-        check["context"]
-        for check in status_rule["parameters"]["required_status_checks"]
-    }
+    contexts = {check["context"] for check in status_rule["parameters"]["required_status_checks"]}
 
-    pull_request_trigger = workflow.split("pull_request:", 1)[1].split(
-        "permissions:", 1
-    )[0]
+    pull_request_trigger = workflow.split("pull_request:", 1)[1].split("permissions:", 1)[0]
     assert "paths:" not in pull_request_trigger
     assert "name: Dependency audit / Python ${{ matrix.python-version }}" in workflow
     assert {
@@ -228,7 +254,7 @@ def test_publish_workflow_verifies_tag_and_hash_pins_build() -> None:
 
     # L13: the build must fail when the tag disagrees with the package version.
     assert "Verify tag matches package version" in workflow
-    assert 'GITHUB_REF_NAME#v' in workflow
+    assert "GITHUB_REF_NAME#v" in workflow
     # L14: the artifact-producing toolchain is installed from the hash-pinned lock.
     assert "pip install --require-hashes -r requirements-build.txt" in workflow
     assert 'SOURCE_DATE_EPOCH: "0"' in workflow
@@ -273,8 +299,9 @@ def test_publish_workflow_revalidates_the_exact_tagged_commit() -> None:
     assert "python -m pip install --require-hashes -r requirements.txt" in validate_job
     assert "python -m pip install --no-deps --no-build-isolation -e ." in validate_job
     assert "ruff check ." in validate_job
+    assert "ruff format --check ." in validate_job
     assert "mypy src" in validate_job
-    assert "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80" in validate_job
+    assert "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85" in validate_job
     assert "- validate" in publish_job
 
 
@@ -325,9 +352,7 @@ def test_publish_sdist_smoke_installs_hash_pinned_build_backend() -> None:
     build_backend_install = check_job.index(
         "python -m pip install --require-hashes -r requirements-build.txt"
     )
-    sdist_install = check_job.index(
-        '"${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip install'
-    )
+    sdist_install = check_job.index('"${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip install')
 
     assert build_backend_install < sdist_install
 
@@ -357,10 +382,7 @@ def test_publish_workflow_keeps_package_check_out_of_build_job() -> None:
     assert "python -m build --no-isolation" in build_job
     assert re.search(r"actions/checkout@[0-9a-f]{40}", check_and_publish) is not None
     assert "persist-credentials: false" in check_and_publish
-    assert (
-        "python -m pip install --require-hashes -r requirements.txt"
-        in check_and_publish
-    )
+    assert "python -m pip install --require-hashes -r requirements.txt" in check_and_publish
     assert "pip install twine==" not in check_and_publish
     assert "twine check dist/*" in check_and_publish
     assert "needs:\n      - build\n      - check\n      - validate" in check_and_publish
@@ -392,10 +414,7 @@ def test_ci_requires_a_two_build_reproducibility_check() -> None:
     status_rule = next(
         rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks"
     )
-    contexts = {
-        check["context"]
-        for check in status_rule["parameters"]["required_status_checks"]
-    }
+    contexts = {check["context"] for check in status_rule["parameters"]["required_status_checks"]}
     job = ci.split("  reproducible-build:", 1)[1]
 
     assert "name: Reproducible distributions" in job
@@ -475,6 +494,16 @@ def test_ci_and_homebrew_cover_python_313() -> None:
     assert '"Programming Language :: Python :: 3.13"' in pyproject
 
 
+def test_ci_and_classifiers_cover_python_314() -> None:
+    ci = read(".github/workflows/ci.yml")
+    pyproject = read("pyproject.toml")
+    readme = read("README.md")
+
+    assert '"3.14"' in ci
+    assert '"Programming Language :: Python :: 3.14"' in pyproject
+    assert "Python 3.10 through 3.14" in readme
+
+
 def test_homebrew_test_uses_fail_on_down_against_local_tcp_server() -> None:
     formula = read("packaging/homebrew/pinghue.rb")
 
@@ -493,7 +522,10 @@ def test_output_schema_has_stable_v1_id_and_samples_window_contract() -> None:
     schema = json.loads(read("schemas/output-v1.schema.json"))
     run_definition = schema["$defs"]["run"]
 
-    assert schema["$id"] == "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json"
+    assert (
+        schema["$id"]
+        == "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json"
+    )
     assert "samples_window" in run_definition["required"]
     assert run_definition["properties"]["samples_window"]["minimum"] == 0
 
@@ -521,9 +553,7 @@ def test_example_output_contains_a_possible_retained_sample_tail() -> None:
         if sent == len(samples):
             reconstructed = [
                 ProbeSample(
-                    timestamp=datetime.fromisoformat(
-                        sample["timestamp"].replace("Z", "+00:00")
-                    ),
+                    timestamp=datetime.fromisoformat(sample["timestamp"].replace("Z", "+00:00")),
                     latency_ms=sample["latency_ms"],
                     status=SampleStatus(sample["status"]),
                     error=sample["error"],
@@ -552,7 +582,7 @@ def test_readme_artwork_uses_packaged_real_assets() -> None:
     assert "docs/assets/pinghue-demo.svg" not in readme
     assert "docs/assets/pinghue-screenshot.svg" not in readme
     assert "scripts/gen-readme-assets.py" not in readme
-    assert "recursive-include docs *.md *.svg *.gif *.png" in manifest
+    assert "recursive-include docs *.svg *.gif *.png" in manifest
 
 
 def test_readme_artwork_captures_are_current_package_version() -> None:
@@ -563,7 +593,7 @@ def test_readme_artwork_captures_are_current_package_version() -> None:
 
 
 def test_release_checklist_revalidates_release_security_gates() -> None:
-    checklist = read("docs/release-checklist.md")
+    checklist = read(".github/release-checklist.md")
 
     assert "pip-audit" in checklist
     assert "hosted hardening" in checklist
@@ -582,7 +612,7 @@ def test_release_checklist_revalidates_release_security_gates() -> None:
 
 
 def test_release_checklist_requires_the_exact_pypi_url_for_final_formula() -> None:
-    checklist = read("docs/release-checklist.md")
+    checklist = read(".github/release-checklist.md")
     after_publish = checklist.split("## After PyPI Publish", 1)[1]
 
     assert "exact published sdist URL" in after_publish
@@ -591,7 +621,7 @@ def test_release_checklist_requires_the_exact_pypi_url_for_final_formula() -> No
 
 
 def test_release_docs_tag_only_the_merged_public_main_commit() -> None:
-    checklist = read("docs/release-checklist.md")
+    checklist = read(".github/release-checklist.md")
     readme = read("README.md")
 
     assert "git push origin main" not in checklist
@@ -639,9 +669,7 @@ def test_hardening_scripts_paginate_ruleset_and_deployment_policy_inventories() 
         assert '"repos/${repo}/environments/pypi/deployment-branch-policies"' in script
         logical_lines = script.replace("\\\n", " ").splitlines()
         assert not any(
-            "gh api" in line
-            and "--slurp" in line
-            and ("--jq" in line or "--template" in line)
+            "gh api" in line and "--slurp" in line and ("--jq" in line or "--template" in line)
             for line in logical_lines
         )
 
@@ -672,9 +700,7 @@ def _run_repository_hardening_check(
     (tmp_path / "main.json").write_text(json.dumps(main_ruleset), encoding="utf-8")
     (tmp_path / "tag.json").write_text(json.dumps(tag_ruleset), encoding="utf-8")
     policies = (
-        [{"id": 301, "name": "v*.*.*", "type": "tag"}]
-        if pypi_policies is None
-        else pypi_policies
+        [{"id": 301, "name": "v*.*.*", "type": "tag"}] if pypi_policies is None else pypi_policies
     )
     (tmp_path / "pypi-policies.json").write_text(
         json.dumps({"branch_policies": policies}), encoding="utf-8"
@@ -866,9 +892,7 @@ def test_repository_hardening_check_rejects_untracked_rules_and_parameters(
 
     extra_check = json.loads(json.dumps(base_main))
     status_rule = next(
-        rule
-        for rule in extra_check["rules"]
-        if rule["type"] == "required_status_checks"
+        rule for rule in extra_check["rules"] if rule["type"] == "required_status_checks"
     )
     status_rule["parameters"]["required_status_checks"].append(
         {"context": "untracked check", "integration_id": 15368}
@@ -881,9 +905,7 @@ def test_repository_hardening_check_rejects_untracked_rules_and_parameters(
 
     changed_parameter = json.loads(json.dumps(base_main))
     pull_request_rule = next(
-        rule
-        for rule in changed_parameter["rules"]
-        if rule["type"] == "pull_request"
+        rule for rule in changed_parameter["rules"] if rule["type"] == "pull_request"
     )
     pull_request_rule["parameters"]["require_code_owner_review"] = True
     changed_parameter_result = _run_repository_hardening_check(
@@ -1232,7 +1254,7 @@ def test_scheduled_hardening_check_does_not_hide_visible_admin_drift(
 
 def test_hosted_hardening_workflow_uses_documented_reduced_visibility_mode() -> None:
     workflow = read(".github/workflows/repository-hardening.yml")
-    documentation = read("docs/repository-hardening.md")
+    documentation = read(".github/repository-hardening.md")
     check_step = workflow.split("- name: Check hosted repository hardening", 1)[1]
 
     assert 'PINGHUE_ALLOW_HIDDEN_BYPASS_ACTORS: "1"' in check_step
@@ -1260,7 +1282,7 @@ def test_security_feature_policy_is_enabled_and_consumed_by_apply_helper() -> No
 
 
 def test_repository_hardening_docs_list_default_branch_once() -> None:
-    documentation = read("docs/repository-hardening.md")
+    documentation = read(".github/repository-hardening.md")
 
     assert documentation.count("- Default branch: `main`") == 1
 

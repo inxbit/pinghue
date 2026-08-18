@@ -8,6 +8,7 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 pytest
 ruff check .
+ruff format --check .
 mypy src
 ```
 
@@ -50,8 +51,9 @@ git config gpg.format ssh
 python -m pip install --require-hashes -r requirements-build.txt
 python -m pip install --require-hashes -r requirements.txt
 python -m pip install --no-deps --no-build-isolation -e .
-pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
+pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85
 ruff check .
+ruff format --check .
 mypy src
 pip-audit --strict --disable-pip -r requirements.txt
 pip-audit --strict --disable-pip -r requirements-build.txt
@@ -72,4 +74,4 @@ Releases are tag-driven. Release policy requires:
 - PyPI trusted publishing configured for `inxbit/pinghue`
 - a protected `pypi` GitHub environment
 
-See `docs/release-checklist.md`.
+See `.github/release-checklist.md`.

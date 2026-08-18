@@ -189,11 +189,14 @@ def test_clearing_samples_resets_the_lifetime_failure_streak() -> None:
     window.append(sample(SampleStatus.OK, 10.0))
     window.append(sample(SampleStatus.TIMEOUT))
 
-    assert classify_samples(
-        window,
-        fail_threshold=2,
-        jitter_threshold_ms=50.0,
-    ) == TargetStatus.INTERMITTENT
+    assert (
+        classify_samples(
+            window,
+            fail_threshold=2,
+            jitter_threshold_ms=50.0,
+        )
+        == TargetStatus.INTERMITTENT
+    )
 
 
 def test_any_lifetime_loss_remains_intermittent_when_percentage_rounds_to_zero() -> None:
@@ -224,11 +227,14 @@ def test_jitter_classification_uses_unrounded_measurement() -> None:
     ]
 
     assert summarize_samples(samples).jitter_ms == 0.0
-    assert classify_samples(
-        samples,
-        fail_threshold=3,
-        jitter_threshold_ms=0.004,
-    ) == TargetStatus.INTERMITTENT
+    assert (
+        classify_samples(
+            samples,
+            fail_threshold=3,
+            jitter_threshold_ms=0.004,
+        )
+        == TargetStatus.INTERMITTENT
+    )
 
 
 def test_jitter_threshold_remains_latched_after_the_estimator_decays() -> None:

@@ -222,54 +222,9 @@ def _make_backend(*, v4_factory: Any, v6_factory: Any) -> probes._IcmpBackend:
     )
 
 
-class _FakeLoop:
-    def __init__(self) -> None:
-        self.executor: object = None
-
-    def run_in_executor(self, executor: object, function: Any) -> "asyncio.Future[object]":
-        self.executor = executor
-        future: asyncio.Future[object] = asyncio.Future()
-        try:
-            future.set_result(function())
-        except BaseException as exc:  # noqa: BLE001 - mirror executor propagation
-            future.set_exception(exc)
-        return future
-
-
-def _install_backend(
-    monkeypatch: pytest.MonkeyPatch,
-    backend: probes._IcmpBackend,
-    *,
-    install_executor_loop: bool = False,
-) -> _FakeLoop:
-    loop = _FakeLoop()
+def _install_backend(monkeypatch: pytest.MonkeyPatch, backend: probes._IcmpBackend) -> None:
     monkeypatch.setattr(probes, "_icmp_backend", backend, raising=False)
     monkeypatch.setattr(probes, "_icmp_import_error", None, raising=False)
-    if install_executor_loop:
-        monkeypatch.setattr(asyncio, "get_running_loop", lambda: loop)
-    return loop
-
-
-async def test_icmp_probe_reports_success_via_supplied_executor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executor = object()
-    backend = _make_backend(
-        v4_factory=lambda *_: _FakeSocket(reply=_FakeReply(time=1000.0042)),
-        v6_factory=lambda *_: pytest.fail("IPv4 address must use the IPv4 socket"),
-    )
-    loop = _install_backend(monkeypatch, backend, install_executor_loop=True)
-
-    sample = await icmp_probe(
-        "1.1.1.1",
-        timeout_s=1.0,
-        address_family=AddressFamily.IPV4,
-        executor=executor,
-    )
-
-    assert sample.status == SampleStatus.OK
-    assert sample.latency_ms == 4.2
-    assert loop.executor is executor
 
 
 async def test_icmp_probe_runs_cancellable_blocking_echo_on_daemon_thread(
@@ -488,9 +443,7 @@ async def test_resolve_target_stuck_resolver_is_abandoned(
     # The daemon-thread lookup must be abandonable: wait_for times out even
     # though the resolver call is still blocked in its thread.
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(
-            resolve_target("stuck.example", AddressFamily.AUTO), timeout=0.05
-        )
+        await asyncio.wait_for(resolve_target("stuck.example", AddressFamily.AUTO), timeout=0.05)
     release.set()
 
 

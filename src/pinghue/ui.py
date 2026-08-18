@@ -54,17 +54,6 @@ FIXED_COLUMN_WIDTHS = {
 }
 
 
-def _latest_success(target: TargetRun) -> ProbeSample | None:
-    return next(
-        (
-            sample
-            for sample in reversed(target.samples)
-            if sample.status == SampleStatus.OK and sample.latency_ms is not None
-        ),
-        None,
-    )
-
-
 def issue_styles(
     target: TargetRun,
     *,
@@ -111,11 +100,6 @@ def issue_styles(
 
 def format_text_cell(value: str, style: str = TEXT) -> Text:
     """Return a styled table cell."""
-    return Text(value, style=style)
-
-
-def format_numeric_cell(value: str, style: str = TEXT) -> Text:
-    """Return a styled numeric table cell."""
     return Text(value, style=style)
 
 
@@ -235,11 +219,7 @@ def target_row_cells(
     """Return rendered cells for one target row."""
     stats = target.stats
     last = next(
-        (
-            sample
-            for sample in reversed(target.samples)
-            if sample.latency_ms is not None
-        ),
+        (sample for sample in reversed(target.samples) if sample.latency_ms is not None),
         None,
     )
     address = target.resolved_address if show_address else ""
@@ -253,27 +233,12 @@ def target_row_cells(
         format_text_cell(sanitize_display(target.target), GREEN),
         format_text_cell(sanitize_display(address or ""), GREEN if address else MUTED),
         format_state_cell(target.status),
-        format_numeric_cell(
-            compact_ms(None if last is None else last.latency_ms),
-            styles["last"],
-        ),
-        format_numeric_cell(
-            compact_ms(stats.min_ms),
-            styles["min"],
-        ),
-        format_numeric_cell(
-            compact_ms(stats.avg_ms),
-            styles["avg"],
-        ),
-        format_numeric_cell(
-            compact_ms(stats.max_ms),
-            styles["max"],
-        ),
-        format_numeric_cell(
-            compact_ms(stats.jitter_ms),
-            styles["jitter"],
-        ),
-        format_numeric_cell(compact_loss(stats.loss_pct), styles["loss"]),
+        format_text_cell(compact_ms(None if last is None else last.latency_ms), styles["last"]),
+        format_text_cell(compact_ms(stats.min_ms), styles["min"]),
+        format_text_cell(compact_ms(stats.avg_ms), styles["avg"]),
+        format_text_cell(compact_ms(stats.max_ms), styles["max"]),
+        format_text_cell(compact_ms(stats.jitter_ms), styles["jitter"]),
+        format_text_cell(compact_loss(stats.loss_pct), styles["loss"]),
         format_text_cell(mode, TEXT),
         format_history_cell(
             target.samples,
@@ -285,10 +250,7 @@ def target_row_cells(
 
 
 def _uses_ipv6(targets: Sequence[TargetRun]) -> bool:
-    return any(
-        (target.resolved_address and ":" in target.resolved_address)
-        for target in targets
-    )
+    return any((target.resolved_address and ":" in target.resolved_address) for target in targets)
 
 
 def _target_width(targets: Sequence[TargetRun]) -> int:
@@ -334,20 +296,14 @@ def compute_table_layout(
 def apply_column_widths(table: Any, widths: ColumnWidths) -> None:
     """Apply column widths to an existing Textual DataTable."""
     for column_key, width in widths.items():
-        try:
-            column_index = table.get_column_index(column_key)
-            column = table.ordered_columns[column_index]
-        except AttributeError:
-            column_index = table.get_column_index(column_key)
-            column = table.columns.get(column_key)
-
-        if column is None:
-            continue
-        if column.width == width:
+        # DataTable keys compare equal to their string value, so a plain
+        # string lookup works against the real widget and simple fakes alike.
+        column = table.columns.get(column_key)
+        if column is None or column.width == width:
             continue
 
         column.width = width
-        table.refresh_column(column_index)
+        table.refresh_column(table.get_column_index(column_key))
 
 
 def _cell_signature(cell: Text) -> CellSignature:

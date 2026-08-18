@@ -122,12 +122,8 @@ class _RunningSampleStats:
                 self.latency_jitter,
             )
         self.latency_previous = latency
-        self.latency_min = (
-            latency if self.latency_min is None else min(self.latency_min, latency)
-        )
-        self.latency_max = (
-            latency if self.latency_max is None else max(self.latency_max, latency)
-        )
+        self.latency_min = latency if self.latency_min is None else min(self.latency_min, latency)
+        self.latency_max = latency if self.latency_max is None else max(self.latency_max, latency)
 
     def summary(self) -> SummaryStats:
         sent = self.sent
@@ -317,9 +313,7 @@ def classify_samples(
             running_stats.add(sample)
 
     effective_fail_threshold = max(1, fail_threshold)
-    failure_threshold_reached = (
-        running_stats.consecutive_failures >= effective_fail_threshold
-    )
+    failure_threshold_reached = running_stats.consecutive_failures >= effective_fail_threshold
     if failure_threshold_reached:
         return TargetStatus.DOWN
 

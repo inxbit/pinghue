@@ -131,9 +131,7 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
         return None
     if stat.S_ISREG(pre.st_mode):
         return None
-    if stat.S_ISLNK(pre.st_mode) or not (
-        stat.S_ISCHR(pre.st_mode) or stat.S_ISFIFO(pre.st_mode)
-    ):
+    if stat.S_ISLNK(pre.st_mode) or not (stat.S_ISCHR(pre.st_mode) or stat.S_ISFIFO(pre.st_mode)):
         raise FileExistsError(
             f"output path already exists and is not a regular file: {output_path}"
         )
@@ -148,9 +146,8 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
 
     try:
         post = os.fstat(fd)
-        if (
-            (post.st_dev, post.st_ino) != (pre.st_dev, pre.st_ino)
-            or not (stat.S_ISCHR(post.st_mode) or stat.S_ISFIFO(post.st_mode))
+        if (post.st_dev, post.st_ino) != (pre.st_dev, pre.st_ino) or not (
+            stat.S_ISCHR(post.st_mode) or stat.S_ISFIFO(post.st_mode)
         ):
             raise _output_changed_error(output_path)
         if stat.S_ISFIFO(post.st_mode) and hasattr(os, "O_NONBLOCK"):
@@ -204,9 +201,9 @@ def _overwrite_existing_regular_file(
     fd = os.open(output_path, flags)
     try:
         opened = os.fstat(fd)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino)
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+            observed.st_dev,
+            observed.st_ino,
         ):
             raise _output_changed_error(output_path)
         if opened.st_nlink != 1:
@@ -230,9 +227,9 @@ def _overwrite_existing_regular_file(
         current = os.lstat(output_path)
     except OSError as exc:
         raise _output_changed_error(output_path) from exc
-    if (
-        not stat.S_ISREG(current.st_mode)
-        or (current.st_dev, current.st_ino) != (observed.st_dev, observed.st_ino)
+    if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (
+        observed.st_dev,
+        observed.st_ino,
     ):
         raise _output_changed_error(output_path)
     if current.st_nlink != 1:
@@ -280,9 +277,7 @@ def _overwrite_output_file(tmp_path: Path, output_path: Path, *, mode: int) -> N
     raise OSError(errno.EAGAIN, f"output path changed repeatedly: {output_path}")
 
 
-def _install_output_file(
-    tmp_path: Path, output_path: Path, *, overwrite: bool, mode: int
-) -> None:
+def _install_output_file(tmp_path: Path, output_path: Path, *, overwrite: bool, mode: int) -> None:
     if overwrite:
         _overwrite_output_file(tmp_path, output_path, mode=mode)
         return
@@ -346,7 +341,7 @@ def write_output_json(
         ) as tmp_file:
             tmp_path = Path(tmp_file.name)
             tmp_file.write(output_text)
-        os.chmod(tmp_path, mode)
+            os.fchmod(tmp_file.fileno(), mode)
         _install_output_file(tmp_path, output_path, overwrite=overwrite, mode=mode)
     except BaseException:
         if tmp_path is not None:
