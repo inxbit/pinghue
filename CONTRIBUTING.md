@@ -50,7 +50,7 @@ git config gpg.format ssh
 python -m pip install --require-hashes -r requirements-build.txt
 python -m pip install --require-hashes -r requirements.txt
 python -m pip install --no-deps --no-build-isolation -e .
-pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
+pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85
 ruff check .
 mypy src
 pip-audit --strict --disable-pip -r requirements.txt

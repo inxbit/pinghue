@@ -9,10 +9,16 @@ on:
 permissions:
   contents: read
 
+# Superseded pull-request runs are cancelled; pushes to main always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +48,7 @@ jobs:
       - name: Mypy
         run: mypy src
       - name: Tests
-        run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80
+        run: pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85
       - name: Build
         run: python -m build --no-isolation
         env:
@@ -57,6 +63,7 @@ jobs:
   reproducible-build:
     name: Reproducible distributions
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

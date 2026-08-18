@@ -114,6 +114,36 @@ def test_publish_workflow_has_attestations_and_concurrency() -> None:
     assert "artifact-metadata: write" not in publish_job
 
 
+def test_every_workflow_job_has_a_timeout() -> None:
+    for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        job_count = len(re.findall(r"^    runs-on: ", workflow, re.MULTILINE))
+        timeout_count = len(re.findall(r"^    timeout-minutes: \d+$", workflow, re.MULTILINE))
+
+        assert job_count > 0, workflow_path
+        assert timeout_count == job_count, workflow_path
+
+
+def test_ci_cancels_superseded_pull_request_runs_but_not_main_pushes() -> None:
+    workflow = read(".github/workflows/ci.yml")
+
+    assert "concurrency:" in workflow
+    assert "group: ci-${{ github.ref }}" in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+
+
+def test_coverage_gate_is_consistent_across_ci_and_docs() -> None:
+    gate = "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85"
+
+    for path in (
+        ".github/workflows/ci.yml",
+        ".github/workflows/publish.yml",
+        "CONTRIBUTING.md",
+        "docs/release-checklist.md",
+    ):
+        assert gate in read(path), path
+
+
 def test_dependency_audit_workflow_runs_pip_audit_weekly() -> None:
     workflow = read(".github/workflows/dependency-audit.yml")
 
@@ -274,7 +304,7 @@ def test_publish_workflow_revalidates_the_exact_tagged_commit() -> None:
     assert "python -m pip install --no-deps --no-build-isolation -e ." in validate_job
     assert "ruff check ." in validate_job
     assert "mypy src" in validate_job
-    assert "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=80" in validate_job
+    assert "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85" in validate_job
     assert "- validate" in publish_job
 
 
