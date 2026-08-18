@@ -71,8 +71,7 @@ async def test_tui_resolution_preserves_aggregate_sample_budget(monkeypatch) -> 
         mode=ProbeMode.ICMP,
     )
     app.targets = [
-        TargetRun(target, status=TargetStatus.RESOLVING)
-        for target in app.args_config.targets
+        TargetRun(target, status=TargetStatus.RESOLVING) for target in app.args_config.targets
     ]
     app_module.apply_retained_sample_budget(app.targets)
 

@@ -31,31 +31,20 @@ def _source_date_epoch() -> int:
     except ValueError as exc:
         raise NormalizationError("SOURCE_DATE_EPOCH must be an integer") from exc
     if not 0 <= epoch <= MAX_GZIP_MTIME:
-        raise NormalizationError(
-            f"SOURCE_DATE_EPOCH must be between 0 and {MAX_GZIP_MTIME}"
-        )
+        raise NormalizationError(f"SOURCE_DATE_EPOCH must be between 0 and {MAX_GZIP_MTIME}")
     return epoch
 
 
 def _canonical_member_name(member: tarfile.TarInfo) -> tuple[str, tuple[str, ...]]:
     name = member.name[:-1] if member.isdir() and member.name.endswith("/") else member.name
-    if (
-        not name
-        or name.startswith("/")
-        or "\\" in name
-        or "\x00" in name
-    ):
+    if not name or name.startswith("/") or "\\" in name or "\x00" in name:
         raise NormalizationError(f"unsafe archive member path: {member.name!r}")
 
     raw_parts = tuple(name.split("/"))
     if any(part in {"", ".", ".."} for part in raw_parts):
         raise NormalizationError(f"unsafe archive member path: {member.name!r}")
     path = PurePosixPath(name)
-    if (
-        path.is_absolute()
-        or PureWindowsPath(name).drive
-        or tuple(path.parts) != raw_parts
-    ):
+    if path.is_absolute() or PureWindowsPath(name).drive or tuple(path.parts) != raw_parts:
         raise NormalizationError(f"unsafe archive member path: {member.name!r}")
     return name, raw_parts
 
@@ -76,9 +65,7 @@ def _normalized_members(
         member_count = 0
         for member_count, member in enumerate(source, start=1):
             if member_count > MAX_MEMBERS:
-                raise NormalizationError(
-                    f"source distribution has more than {MAX_MEMBERS} members"
-                )
+                raise NormalizationError(f"source distribution has more than {MAX_MEMBERS} members")
             name, parts = _canonical_member_name(member)
             if name in names:
                 raise NormalizationError(f"duplicate archive member: {name}")
@@ -107,18 +94,12 @@ def _normalized_members(
                 if len(payload) != member.size:
                     raise NormalizationError(f"truncated archive member: {name}")
             else:
-                raise NormalizationError(
-                    f"unsupported archive member type for {name!r}"
-                )
+                raise NormalizationError(f"unsupported archive member type for {name!r}")
 
             output = tarfile.TarInfo(name)
             output.type = tarfile.DIRTYPE if member.isdir() else tarfile.REGTYPE
             output.size = 0 if payload is None else len(payload)
-            output.mode = (
-                0o755
-                if member.isdir() or bool(member.mode & 0o111)
-                else 0o644
-            )
+            output.mode = 0o755 if member.isdir() or bool(member.mode & 0o111) else 0o644
             output.uid = 0
             output.gid = 0
             output.uname = "root"
@@ -140,14 +121,10 @@ def _normalized_members(
                 )
 
     if len(roots) != 1:
-        raise NormalizationError(
-            "source distribution must contain exactly one top-level directory"
-        )
+        raise NormalizationError("source distribution must contain exactly one top-level directory")
     root = next(iter(roots))
     if root_directories != {root}:
-        raise NormalizationError(
-            "source distribution must contain its top-level directory entry"
-        )
+        raise NormalizationError("source distribution must contain its top-level directory entry")
     return sorted(normalized, key=lambda item: item[0].name)
 
 
@@ -221,13 +198,11 @@ def normalize_sdist(archive_path: Path, *, epoch: int) -> None:
         os.chmod(gzip_path, stat.S_IMODE(observed.st_mode))
 
         current = archive_path.lstat()
-        if (
-            not stat.S_ISREG(current.st_mode)
-            or (current.st_dev, current.st_ino) != (observed.st_dev, observed.st_ino)
+        if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (
+            observed.st_dev,
+            observed.st_ino,
         ):
-            raise NormalizationError(
-                "source distribution path changed during normalization"
-            )
+            raise NormalizationError("source distribution path changed during normalization")
         os.replace(gzip_path, archive_path)
         temporary_paths.remove(gzip_path)
 

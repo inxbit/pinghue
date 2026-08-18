@@ -25,10 +25,8 @@ def _load_launcher_module() -> ModuleType:
 def _build_fake_pinghue_package(root: Path) -> Path:
     package_root = root / "src" / "pinghue"
     package_root.mkdir(parents=True)
-    (package_root / "__init__.py").write_text("__version__ = \"0.0.0\"\n")
-    (package_root / "cli.py").write_text(
-        "def main() -> int:\n    return 123\n"
-    )
+    (package_root / "__init__.py").write_text('__version__ = "0.0.0"\n')
+    (package_root / "cli.py").write_text("def main() -> int:\n    return 123\n")
     return package_root.parent.parent
 
 
@@ -77,9 +75,7 @@ def test_launcher_uses_editable_direct_url_for_missing_early_import(
         raise ModuleNotFoundError("No module named", name="pinghue")
 
     try:
-        entrypoint = launcher._load_main_entrypoint(
-            importer=_raise_missing_pinghue
-        )
+        entrypoint = launcher._load_main_entrypoint(importer=_raise_missing_pinghue)
         assert entrypoint() == 123
     finally:
         for name in list(launcher.sys.modules):
@@ -133,10 +129,7 @@ def test_launcher_shows_clear_error_when_direct_url_metadata_is_missing(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert (
-        "pinghue: unable to start: pinghue package metadata is not available"
-        in captured.err
-    )
+    assert "pinghue: unable to start: pinghue package metadata is not available" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -236,9 +229,7 @@ def test_launcher_removes_failed_candidate_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     launcher = _load_launcher_module()
-    payload = json.dumps(
-        {"dir_info": {"editable": True}, "url": "file:///missing/pinghue"}
-    )
+    payload = json.dumps({"dir_info": {"editable": True}, "url": "file:///missing/pinghue"})
     monkeypatch.setattr(
         launcher.metadata,
         "distribution",
@@ -267,9 +258,7 @@ def test_launcher_does_not_mask_a_missing_dependency_inside_pinghue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     launcher = _load_launcher_module()
-    payload = json.dumps(
-        {"dir_info": {"editable": True}, "url": "file:///missing/pinghue"}
-    )
+    payload = json.dumps({"dir_info": {"editable": True}, "url": "file:///missing/pinghue"})
     monkeypatch.setattr(
         launcher.metadata,
         "distribution",

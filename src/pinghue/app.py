@@ -96,11 +96,7 @@ class PinghueTextualApp(App[None]):
         self.targets: list[TargetRun] = []
         self.started_at = datetime.now(timezone.utc)
         self.ended_at = self.started_at
-        self._deadline_at = (
-            None
-            if args.duration is None
-            else _monotonic_time() + args.duration
-        )
+        self._deadline_at = None if args.duration is None else _monotonic_time() + args.duration
         self.exit_reason = "user_quit"
         self.show_address = False
         self._semaphore = asyncio.Semaphore(args.concurrency)
@@ -205,9 +201,7 @@ class PinghueTextualApp(App[None]):
             self._probe_tasks.append(task)
 
         if self.args_config.count is not None:
-            self._completion_task = asyncio.create_task(
-                self._finish_when_probe_tasks_complete()
-            )
+            self._completion_task = asyncio.create_task(self._finish_when_probe_tasks_complete())
 
     async def _stop_probe_tasks(self) -> None:
         self._stop_event.set()
@@ -374,9 +368,5 @@ class PinghueApp:
     async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
         app = PinghueTextualApp(args=self.args, mode=self.mode)
         await app.run_async()
-        ended_at = (
-            app.ended_at
-            if app.ended_at != app.started_at
-            else datetime.now(timezone.utc)
-        )
+        ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)
         return app.targets, app.exit_reason, app.started_at, ended_at

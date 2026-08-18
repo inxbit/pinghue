@@ -139,9 +139,7 @@ def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
 
 
 async def resolve_runs(args: RunConfig) -> list[TargetRun]:
-    runs = await asyncio.gather(
-        *(resolve_run_target(target, args) for target in args.targets)
-    )
+    runs = await asyncio.gather(*(resolve_run_target(target, args) for target in args.targets))
     apply_retained_sample_budget(runs)
     return runs
 
@@ -167,8 +165,7 @@ async def probe_once(
     now = _monotonic_time()
     last_resolve_time = target._last_resolve_time
     resolve_cooldown_elapsed = (
-        last_resolve_time is None
-        or now - last_resolve_time >= DNS_RETRY_INTERVAL_SECONDS
+        last_resolve_time is None or now - last_resolve_time >= DNS_RETRY_INTERVAL_SECONDS
     )
     needs_resolution = not target.resolved_address
     refresh_stale_resolution = (
@@ -458,9 +455,7 @@ async def _resolve_runs_until_shutdown(
     pending_runs: list[TargetRun] | None = None,
 ) -> tuple[list[TargetRun], str | None]:
     """Resolve targets while honoring both process signals and run duration."""
-    unresolved = (
-        pending_runs if pending_runs is not None else _pending_target_runs(args.targets)
-    )
+    unresolved = pending_runs if pending_runs is not None else _pending_target_runs(args.targets)
     loop = asyncio.get_running_loop()
     if stop_event.is_set():
         return unresolved, "interrupted"
@@ -470,11 +465,7 @@ async def _resolve_runs_until_shutdown(
     resolution = asyncio.create_task(resolve_runs(args))
     stop_wait = asyncio.create_task(stop_event.wait())
     try:
-        timeout = (
-            None
-            if deadline_at is None
-            else max(0.0, deadline_at - loop.time())
-        )
+        timeout = None if deadline_at is None else max(0.0, deadline_at - loop.time())
         await asyncio.wait(
             (resolution, stop_wait),
             timeout=timeout,

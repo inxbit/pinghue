@@ -234,9 +234,7 @@ async def test_run_no_tui_yields_after_slow_iteration(
     sleeps: list[float] = []
 
     def spy_iteration_sleep(*, interval: float, iteration_elapsed: float) -> float:
-        sleep_for = original_iteration_sleep(
-            interval=interval, iteration_elapsed=iteration_elapsed
-        )
+        sleep_for = original_iteration_sleep(interval=interval, iteration_elapsed=iteration_elapsed)
         sleeps.append(sleep_for)
         return sleep_for
 
@@ -347,9 +345,7 @@ async def test_run_no_tui_skips_probes_when_stop_is_already_requested(
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(
-        runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers
-    )
+    monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
     monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
@@ -387,9 +383,7 @@ async def test_run_no_tui_reports_interrupted_when_count_final_probe_requests_st
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(
-        runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers
-    )
+    monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
     monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
@@ -427,9 +421,7 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
         # when the fast target's probe requests the stop.
         return [blocked, fast]
 
-    async def fake_probe_once(
-        target: TargetRun, *_: object, **__: object
-    ) -> ProbeSample:
+    async def fake_probe_once(target: TargetRun, *_: object, **__: object) -> ProbeSample:
         if target is blocked:
             try:
                 await asyncio.Event().wait()
@@ -447,9 +439,7 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
         installed_stop_event.set()
         return sample
 
-    monkeypatch.setattr(
-        runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers
-    )
+    monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
     monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
@@ -490,9 +480,7 @@ async def test_run_no_tui_cancels_an_active_probe_when_stop_is_requested(
             probe_cancelled.set()
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr(
-        runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers
-    )
+    monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
     monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
     monkeypatch.setattr(runner, "probe_once", blocked_probe)
     args = no_tui_args(port=443, timeout=30.0)
@@ -581,11 +569,14 @@ async def test_run_no_tui_duration_cancels_active_resolution(
     targets, exit_reason, _, _ = run_task.result()
     assert [target.target for target in targets] == ["example.com"]
     assert [target.status for target in targets] == [TargetStatus.RESOLVING]
-    assert runner.exit_code_for_targets(
-        targets,
-        fail_on_any_down=True,
-        fail_on_all_down=False,
-    ) == runner.EXIT_TARGETS_DOWN
+    assert (
+        runner.exit_code_for_targets(
+            targets,
+            fail_on_any_down=True,
+            fail_on_all_down=False,
+        )
+        == runner.EXIT_TARGETS_DOWN
+    )
     assert exit_reason == "deadline"
     assert resolution_cancelled.is_set()
 

@@ -443,9 +443,7 @@ async def test_resolve_target_stuck_resolver_is_abandoned(
     # The daemon-thread lookup must be abandonable: wait_for times out even
     # though the resolver call is still blocked in its thread.
     with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(
-            resolve_target("stuck.example", AddressFamily.AUTO), timeout=0.05
-        )
+        await asyncio.wait_for(resolve_target("stuck.example", AddressFamily.AUTO), timeout=0.05)
     release.set()
 
 

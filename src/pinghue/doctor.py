@@ -247,8 +247,7 @@ def run_check(
         icmp_ready = loopback_error is None
         if is_root:
             lines.append(
-                f"  {_status(OK, use_color=use_color)}    "
-                "ICMP datagram sockets available (root)"
+                f"  {_status(OK, use_color=use_color)}    ICMP datagram sockets available (root)"
             )
         else:
             lines.append(
@@ -318,12 +317,12 @@ def run_check(
     lines.extend(["", "DNS"])
     if dns_error:
         lines.append(
-            f'  {_status(WARN, use_color=use_color)}  '
+            f"  {_status(WARN, use_color=use_color)}  "
             f'getaddrinfo("{display_dns_name}") failed: {sanitize_display(dns_error)}'
         )
     else:
         lines.append(
-            f'  {_status(OK, use_color=use_color)}    '
+            f"  {_status(OK, use_color=use_color)}    "
             f'getaddrinfo("{display_dns_name}") → '
             f"{sanitize_display(address or '')} ({dns_ms:.0f} ms)"
         )

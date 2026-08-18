@@ -60,9 +60,7 @@ def test_help_describes_every_option_and_shows_defaults() -> None:
     parser = _parser()
 
     undocumented = [
-        action.option_strings
-        for action in parser._actions
-        if action.help in (None, "")
+        action.option_strings for action in parser._actions if action.help in (None, "")
     ]
     assert undocumented == []
 
@@ -190,9 +188,7 @@ def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
         server.listen()
         port = server.getsockname()[1]
 
-        exit_code = main(
-            ["-p", str(port), "127.0.0.1", "-c", "1", "--no-tui", "--output", "-"]
-        )
+        exit_code = main(["-p", str(port), "127.0.0.1", "-c", "1", "--no-tui", "--output", "-"])
 
     assert exit_code == 0
     captured = capsys.readouterr()

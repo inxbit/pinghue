@@ -109,9 +109,7 @@ class _DaemonWorkerPool:
                     self._outstanding_work_count -= 1
                 raise
 
-        self._work_queue.put(
-            _DaemonWorkItem(loop=loop, future=future, function=function)
-        )
+        self._work_queue.put(_DaemonWorkItem(loop=loop, future=future, function=function))
         return await future
 
     @staticmethod
@@ -120,9 +118,7 @@ class _DaemonWorkerPool:
             future.set_result(result)
 
     @staticmethod
-    def _deliver_exception(
-        future: asyncio.Future[Any], exception: BaseException
-    ) -> None:
+    def _deliver_exception(future: asyncio.Future[Any], exception: BaseException) -> None:
         if not future.done():
             future.set_exception(exception)
 
@@ -251,9 +247,7 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
         partial(socket.getaddrinfo, target, None, family=family, type=socket.SOCK_STREAM),
         name="pinghue-dns",
         slots=_dns_thread_slots,
-        unavailable_error=(
-            f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"
-        ),
+        unavailable_error=(f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"),
     )
 
 
@@ -330,11 +324,7 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
             error=str(exc) or "connection refused",
         )
     except OSError as exc:
-        status = (
-            SampleStatus.UNREACHABLE
-            if exc.errno in UNREACHABLE_ERRNOS
-            else SampleStatus.ERROR
-        )
+        status = SampleStatus.UNREACHABLE if exc.errno in UNREACHABLE_ERRNOS else SampleStatus.ERROR
         return ProbeSample(
             timestamp=timestamp,
             latency_ms=None,

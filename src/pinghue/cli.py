@@ -125,10 +125,7 @@ def _parser() -> argparse.ArgumentParser:
         "--history-style",
         choices=HISTORY_STYLES,
         default="bar",
-        help=(
-            "history cell glyphs: bar (default), dots, or none; "
-            "sparkline is an alias of bar"
-        ),
+        help=("history cell glyphs: bar (default), dots, or none; sparkline is an alias of bar"),
     )
     parser.add_argument(
         "-n",

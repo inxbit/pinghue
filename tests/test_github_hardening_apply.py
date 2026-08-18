@@ -111,9 +111,7 @@ def _run_apply(
         capture_output=True,
         text=True,
     )
-    invocations = [
-        json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()
-    ]
+    invocations = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     return result, invocations
 
 
@@ -176,10 +174,9 @@ def test_apply_hardening_reconciles_the_tracked_reviewer_identity(
 
     assert result.returncode == 0, result.stderr
     assert not any("repos/example/project/rulesets/77" in args for args in invocations)
-    assert sum(
-        _called([args], "POST", "repos/example/project/rulesets")
-        for args in invocations
-    ) == 2
+    assert (
+        sum(_called([args], "POST", "repos/example/project/rulesets") for args in invocations) == 2
+    )
 
     payload = json.loads(environment_capture.read_text(encoding="utf-8"))
     assert "can_admins_bypass" not in payload
@@ -193,8 +190,7 @@ def test_apply_hardening_reconciles_the_tracked_reviewer_identity(
         assert _called(
             invocations,
             "DELETE",
-            "repos/example/project/environments/pypi/"
-            f"deployment-branch-policies/{policy_id}",
+            f"repos/example/project/environments/pypi/deployment-branch-policies/{policy_id}",
         )
     assert _called(
         invocations,

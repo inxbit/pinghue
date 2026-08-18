@@ -219,11 +219,7 @@ def target_row_cells(
     """Return rendered cells for one target row."""
     stats = target.stats
     last = next(
-        (
-            sample
-            for sample in reversed(target.samples)
-            if sample.latency_ms is not None
-        ),
+        (sample for sample in reversed(target.samples) if sample.latency_ms is not None),
         None,
     )
     address = target.resolved_address if show_address else ""
@@ -254,10 +250,7 @@ def target_row_cells(
 
 
 def _uses_ipv6(targets: Sequence[TargetRun]) -> bool:
-    return any(
-        (target.resolved_address and ":" in target.resolved_address)
-        for target in targets
-    )
+    return any((target.resolved_address and ":" in target.resolved_address) for target in targets)
 
 
 def _target_width(targets: Sequence[TargetRun]) -> int:

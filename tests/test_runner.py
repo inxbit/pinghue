@@ -199,8 +199,7 @@ def test_short_all_failed_run_is_down_and_trips_fail_on_any_down() -> None:
 
     assert target.status == TargetStatus.DOWN
     assert (
-        runner.exit_code_for_targets([target], fail_on_any_down=True, fail_on_all_down=False)
-        == 3
+        runner.exit_code_for_targets([target], fail_on_any_down=True, fail_on_all_down=False) == 3
     )
 
 
@@ -307,6 +306,7 @@ async def test_probe_once_attempts_dns_re_resolution_on_failure(
             latency_ms=10.0,
             status=SampleStatus.OK,
         )
+
     monkeypatch.setattr(runner, "_probe_address", fake_probe_address)
 
     sample2 = await runner.probe_once(

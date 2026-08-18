@@ -37,18 +37,14 @@ def _read_regular_file(path: Path) -> bytes:
             raise ValueError(f"host file must be a regular file: {path}")
 
         if file_stat.st_size > MAX_HOST_FILE_BYTES:
-            raise ValueError(
-                f"host file too large; maximum is {MAX_HOST_FILE_BYTES} bytes: {path}"
-            )
+            raise ValueError(f"host file too large; maximum is {MAX_HOST_FILE_BYTES} bytes: {path}")
 
         with os.fdopen(fd, "rb") as file:
             fd = -1
             data = file.read(MAX_HOST_FILE_BYTES + 1)
 
         if len(data) > MAX_HOST_FILE_BYTES:
-            raise ValueError(
-                f"host file too large; maximum is {MAX_HOST_FILE_BYTES} bytes: {path}"
-            )
+            raise ValueError(f"host file too large; maximum is {MAX_HOST_FILE_BYTES} bytes: {path}")
 
         return data
     finally:
