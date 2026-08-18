@@ -252,6 +252,14 @@ def test_publish_workflow_verifies_annotated_tag_identity_and_main_ancestry() ->
     assert "merge-base --is-ancestor" in workflow
 
 
+def test_workflow_actions_are_pinned_to_full_commit_shas() -> None:
+    # Repo policy is full-SHA pinning; assert it across every workflow rather
+    # than hardcoding one SHA per structural test.
+    for path in sorted(Path(".github/workflows").glob("*.yml")):
+        for used in re.findall(r"uses: (\S+)", path.read_text(encoding="utf-8")):
+            assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", used), f"{path}: {used}"
+
+
 def test_publish_workflow_revalidates_the_exact_tagged_commit() -> None:
     workflow = read(".github/workflows/publish.yml")
 
@@ -259,7 +267,7 @@ def test_publish_workflow_revalidates_the_exact_tagged_commit() -> None:
     publish_job = workflow.split("  publish:", 1)[1].split("  release:", 1)[0]
 
     assert "needs: build" in validate_job
-    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in validate_job
+    assert re.search(r"actions/checkout@[0-9a-f]{40}", validate_job) is not None
     assert "persist-credentials: false" in validate_job
     assert "python -m pip install --require-hashes -r requirements-build.txt" in validate_job
     assert "python -m pip install --require-hashes -r requirements.txt" in validate_job
@@ -347,7 +355,7 @@ def test_publish_workflow_keeps_package_check_out_of_build_job() -> None:
     assert "twine==6.2.0" not in build_job
     assert "twine check dist/*" not in build_job
     assert "python -m build --no-isolation" in build_job
-    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in check_and_publish
+    assert re.search(r"actions/checkout@[0-9a-f]{40}", check_and_publish) is not None
     assert "persist-credentials: false" in check_and_publish
     assert (
         "python -m pip install --require-hashes -r requirements.txt"
