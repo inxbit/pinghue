@@ -107,10 +107,7 @@ def test_publish_workflow_has_attestations_and_concurrency() -> None:
 
     assert "concurrency:" in workflow
     assert "attestations: write" in workflow
-    assert (
-        "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8"
-        in workflow
-    )
+    assert "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8" in workflow
     assert "subject-path: dist/*" in workflow
 
     publish_job = workflow.split("  publish:", 1)[1].split("  release:", 1)[0]
@@ -163,14 +160,9 @@ def test_dependency_audits_are_required_for_every_pull_request() -> None:
     status_rule = next(
         rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks"
     )
-    contexts = {
-        check["context"]
-        for check in status_rule["parameters"]["required_status_checks"]
-    }
+    contexts = {check["context"] for check in status_rule["parameters"]["required_status_checks"]}
 
-    pull_request_trigger = workflow.split("pull_request:", 1)[1].split(
-        "permissions:", 1
-    )[0]
+    pull_request_trigger = workflow.split("pull_request:", 1)[1].split("permissions:", 1)[0]
     assert "paths:" not in pull_request_trigger
     assert "name: Dependency audit / Python ${{ matrix.python-version }}" in workflow
     assert {
@@ -262,7 +254,7 @@ def test_publish_workflow_verifies_tag_and_hash_pins_build() -> None:
 
     # L13: the build must fail when the tag disagrees with the package version.
     assert "Verify tag matches package version" in workflow
-    assert 'GITHUB_REF_NAME#v' in workflow
+    assert "GITHUB_REF_NAME#v" in workflow
     # L14: the artifact-producing toolchain is installed from the hash-pinned lock.
     assert "pip install --require-hashes -r requirements-build.txt" in workflow
     assert 'SOURCE_DATE_EPOCH: "0"' in workflow
@@ -307,6 +299,7 @@ def test_publish_workflow_revalidates_the_exact_tagged_commit() -> None:
     assert "python -m pip install --require-hashes -r requirements.txt" in validate_job
     assert "python -m pip install --no-deps --no-build-isolation -e ." in validate_job
     assert "ruff check ." in validate_job
+    assert "ruff format --check ." in validate_job
     assert "mypy src" in validate_job
     assert "pytest --cov=pinghue --cov-report=term-missing --cov-fail-under=85" in validate_job
     assert "- validate" in publish_job
@@ -359,9 +352,7 @@ def test_publish_sdist_smoke_installs_hash_pinned_build_backend() -> None:
     build_backend_install = check_job.index(
         "python -m pip install --require-hashes -r requirements-build.txt"
     )
-    sdist_install = check_job.index(
-        '"${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip install'
-    )
+    sdist_install = check_job.index('"${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip install')
 
     assert build_backend_install < sdist_install
 
@@ -391,10 +382,7 @@ def test_publish_workflow_keeps_package_check_out_of_build_job() -> None:
     assert "python -m build --no-isolation" in build_job
     assert re.search(r"actions/checkout@[0-9a-f]{40}", check_and_publish) is not None
     assert "persist-credentials: false" in check_and_publish
-    assert (
-        "python -m pip install --require-hashes -r requirements.txt"
-        in check_and_publish
-    )
+    assert "python -m pip install --require-hashes -r requirements.txt" in check_and_publish
     assert "pip install twine==" not in check_and_publish
     assert "twine check dist/*" in check_and_publish
     assert "needs:\n      - build\n      - check\n      - validate" in check_and_publish
@@ -426,10 +414,7 @@ def test_ci_requires_a_two_build_reproducibility_check() -> None:
     status_rule = next(
         rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks"
     )
-    contexts = {
-        check["context"]
-        for check in status_rule["parameters"]["required_status_checks"]
-    }
+    contexts = {check["context"] for check in status_rule["parameters"]["required_status_checks"]}
     job = ci.split("  reproducible-build:", 1)[1]
 
     assert "name: Reproducible distributions" in job
@@ -537,7 +522,10 @@ def test_output_schema_has_stable_v1_id_and_samples_window_contract() -> None:
     schema = json.loads(read("schemas/output-v1.schema.json"))
     run_definition = schema["$defs"]["run"]
 
-    assert schema["$id"] == "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json"
+    assert (
+        schema["$id"]
+        == "https://raw.githubusercontent.com/inxbit/pinghue/main/schemas/output-v1.schema.json"
+    )
     assert "samples_window" in run_definition["required"]
     assert run_definition["properties"]["samples_window"]["minimum"] == 0
 
@@ -565,9 +553,7 @@ def test_example_output_contains_a_possible_retained_sample_tail() -> None:
         if sent == len(samples):
             reconstructed = [
                 ProbeSample(
-                    timestamp=datetime.fromisoformat(
-                        sample["timestamp"].replace("Z", "+00:00")
-                    ),
+                    timestamp=datetime.fromisoformat(sample["timestamp"].replace("Z", "+00:00")),
                     latency_ms=sample["latency_ms"],
                     status=SampleStatus(sample["status"]),
                     error=sample["error"],
@@ -683,9 +669,7 @@ def test_hardening_scripts_paginate_ruleset_and_deployment_policy_inventories() 
         assert '"repos/${repo}/environments/pypi/deployment-branch-policies"' in script
         logical_lines = script.replace("\\\n", " ").splitlines()
         assert not any(
-            "gh api" in line
-            and "--slurp" in line
-            and ("--jq" in line or "--template" in line)
+            "gh api" in line and "--slurp" in line and ("--jq" in line or "--template" in line)
             for line in logical_lines
         )
 
@@ -716,9 +700,7 @@ def _run_repository_hardening_check(
     (tmp_path / "main.json").write_text(json.dumps(main_ruleset), encoding="utf-8")
     (tmp_path / "tag.json").write_text(json.dumps(tag_ruleset), encoding="utf-8")
     policies = (
-        [{"id": 301, "name": "v*.*.*", "type": "tag"}]
-        if pypi_policies is None
-        else pypi_policies
+        [{"id": 301, "name": "v*.*.*", "type": "tag"}] if pypi_policies is None else pypi_policies
     )
     (tmp_path / "pypi-policies.json").write_text(
         json.dumps({"branch_policies": policies}), encoding="utf-8"
@@ -910,9 +892,7 @@ def test_repository_hardening_check_rejects_untracked_rules_and_parameters(
 
     extra_check = json.loads(json.dumps(base_main))
     status_rule = next(
-        rule
-        for rule in extra_check["rules"]
-        if rule["type"] == "required_status_checks"
+        rule for rule in extra_check["rules"] if rule["type"] == "required_status_checks"
     )
     status_rule["parameters"]["required_status_checks"].append(
         {"context": "untracked check", "integration_id": 15368}
@@ -925,9 +905,7 @@ def test_repository_hardening_check_rejects_untracked_rules_and_parameters(
 
     changed_parameter = json.loads(json.dumps(base_main))
     pull_request_rule = next(
-        rule
-        for rule in changed_parameter["rules"]
-        if rule["type"] == "pull_request"
+        rule for rule in changed_parameter["rules"] if rule["type"] == "pull_request"
     )
     pull_request_rule["parameters"]["require_code_owner_review"] = True
     changed_parameter_result = _run_repository_hardening_check(

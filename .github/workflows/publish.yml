@@ -227,7 +227,9 @@ jobs:
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install --no-deps --no-build-isolation -e .
       - name: Ruff
-        run: ruff check .
+        run: |
+          ruff check .
+          ruff format --check .
       - name: Mypy
         run: mypy src
       - name: Tests
