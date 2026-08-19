@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 5.1.0 - 2026-08-18
+
 ### Added
 
 - Python 3.14 is now tested in CI on macOS and Linux and declared in the package classifiers.
