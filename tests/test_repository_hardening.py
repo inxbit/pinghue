@@ -113,7 +113,7 @@ def test_publish_workflow_has_attestations_and_concurrency() -> None:
 
     assert "concurrency:" in workflow
     assert "attestations: write" in workflow
-    assert "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8" in workflow
+    assert re.search(r"actions/attest-build-provenance@[0-9a-f]{40}", workflow) is not None
     assert "subject-path: dist/*" in workflow
 
     publish_job = workflow.split("  publish:", 1)[1].split("  release:", 1)[0]
