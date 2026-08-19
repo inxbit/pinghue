@@ -35,10 +35,12 @@
           { "context": "ubuntu-latest / Python 3.11", "integration_id": 15368 },
           { "context": "ubuntu-latest / Python 3.12", "integration_id": 15368 },
           { "context": "ubuntu-latest / Python 3.13", "integration_id": 15368 },
+          { "context": "ubuntu-latest / Python 3.14", "integration_id": 15368 },
           { "context": "macos-latest / Python 3.10", "integration_id": 15368 },
           { "context": "macos-latest / Python 3.11", "integration_id": 15368 },
           { "context": "macos-latest / Python 3.12", "integration_id": 15368 },
           { "context": "macos-latest / Python 3.13", "integration_id": 15368 },
+          { "context": "macos-latest / Python 3.14", "integration_id": 15368 },
           { "context": "Reproducible distributions", "integration_id": 15368 },
           { "context": "Dependency audit / Python 3.10", "integration_id": 15368 },
           { "context": "Dependency audit / Python 3.13", "integration_id": 15368 }
