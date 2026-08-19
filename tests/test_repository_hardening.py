@@ -438,6 +438,29 @@ def test_ci_requires_a_two_build_reproducibility_check() -> None:
     assert "Reproducible distributions" in contexts
 
 
+def test_every_ci_matrix_cell_is_a_required_status_check() -> None:
+    ci = read(".github/workflows/ci.yml")
+    ruleset = json.loads(read(".github/repo-settings/main-ruleset.json"))
+    status_rule = next(
+        rule for rule in ruleset["rules"] if rule["type"] == "required_status_checks"
+    )
+    contexts = {check["context"] for check in status_rule["parameters"]["required_status_checks"]}
+
+    test_job = ci.split("  test:", 1)[1].split("  reproducible-build:", 1)[0]
+    matrix = test_job.split("matrix:", 1)[1].split("steps:", 1)[0]
+    os_block, python_block = matrix.split("python-version:", 1)
+    operating_systems = re.findall(r"^\s+- (\S+)$", os_block, re.MULTILINE)
+    python_versions = re.findall(r'^\s+- "(\d+\.\d+)"$', python_block, re.MULTILINE)
+    assert operating_systems and python_versions
+
+    expected = {
+        f"{os_name} / Python {python_version}"
+        for os_name in operating_systems
+        for python_version in python_versions
+    }
+    assert expected <= contexts
+
+
 def test_ci_installs_only_hash_pinned_locks_before_the_local_project() -> None:
     ci = read(".github/workflows/ci.yml")
     requirements = read("requirements.txt")
