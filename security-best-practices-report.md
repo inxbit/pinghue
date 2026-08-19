@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11
+Review date: 2026-07-11; verification evidence refreshed for 5.1.0 on 2026-08-18
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -146,20 +146,22 @@ requires the next major release; it must not ship as a patch or minor version.
 
 ## Verification evidence
 
-- Full tests outside the sandbox: 325 passed; localhost TCP and Unix-socket
-  cases executed; total branch-aware coverage was 88.15% against an 80% floor.
-- Ruff: all files passed.
+Refreshed for the 5.1.0 release candidate on 2026-08-18 (the 5.0.0 evidence
+this section previously recorded is superseded):
+
+- Full tests outside the sandbox: 333 passed; localhost TCP and Unix-socket
+  cases executed; total branch-aware coverage was 88.79% against the 85% floor
+  (raised from 80% in 5.1.0). The same suite passed under CPython 3.14.7.
+- Ruff: `ruff check` and `ruff format --check` passed for all files.
 - Mypy strict mode: no issues across 14 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 2 Node tests passed.
-- Real-browser validation: desktop accessibility structure rendered, copy
-  feedback reached `Copied`, console had zero errors/warnings, and a 390 px
-  viewport had no horizontal overflow.
-- Semgrep explicit Python, security-audit, and secrets rules: 0 findings across
-  the tracked repository and explicit new-file scan.
+- Static site contract: 25 Node tests passed. The 5.1.0 site change is limited
+  to the version string in the JSON example.
+- Semgrep explicit Python, security-audit, and secrets rules: 285 rules run,
+  0 findings across the 70 tracked files.
 - Bandit recursive runtime/script scan: 0 findings.
-- Gitleaks current working tree and 70-commit history scans: 0 leaks.
+- Gitleaks working-tree and 134-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -167,20 +169,23 @@ requires the next major release; it must not ship as a patch or minor version.
   `--require-hashes` entry.
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
-- The final normalized sdist and wheel passed `twine check`; all 243 tests
+- The final normalized sdist and wheel passed `twine check`; all 244 tests
   shipped in the unpacked sdist passed; fresh wheel and sdist installs both
-  reported `pinghue 5.0.0` through the installed launcher and completed the
-  localhost TCP smoke test.
+  reported `pinghue 5.1.0` through the console-script entry point and
+  completed the localhost TCP smoke test.
 - ShellCheck and Bash syntax checks passed for shell scripts; Homebrew formula
   Ruby syntax passed.
-- The administration-readable hosted-hardening check passed after reconciling
-  the tracked baseline and disabling `pypi` administrator bypass.
+- The administration-readable hosted-hardening check passed against the
+  tracked baseline, with the Python 3.14 required checks pending the
+  maintainer-run apply (#113).
 
 ## Release decision
 
-The breaking target cap is assigned to 5.0.0 and BP-001 is closed. The local
-candidate passed the security, QA, deterministic-artifact, installed-artifact,
-and staged-formula gates. Publishing remains gated on release-PR review and
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 5.1.0 is a
+compatible release (unified probe scheduler, console-script entry point,
+Python 3.14, CI gates); no new finding was raised. The local candidate passed
+the security, QA, deterministic-artifact, installed-artifact, and
+staged-formula gates. Publishing remains gated on release-PR review and
 exact-head CI.
 
 Revisit this report if PingHue gains a listener, privileged wrapper, remote
