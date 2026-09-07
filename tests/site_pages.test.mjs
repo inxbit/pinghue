@@ -30,6 +30,8 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.equal(existsSync('docs/assets/pinghue-favicon.svg'), true);
   assert.equal(existsSync('docs/assets/pinghue-hero.svg'), true);
   assert.equal(existsSync('docs/assets/pinghue-screenshot.png'), true);
+  assert.equal(existsSync('docs/assets/pinghue-screenshot.webp'), true);
+  assert.ok(statSync('docs/assets/pinghue-screenshot.webp').size < statSync('docs/assets/pinghue-screenshot.png').size);
   assert.equal(existsSync('docs/assets/slate-texture.jpg'), true);
   assert.ok(statSync('docs/assets/slate-texture.jpg').size < 100_000);
   assert.equal(existsSync('docs/assets/pinghue-social-card.png'), true);
@@ -101,6 +103,8 @@ test('GitHub Pages site has the expected static contract', () => {
   assert.match(html, /Up to 1024/);
   assert.match(html, /Schema version 1/);
   assert.match(html, /No server or daemon/);
+  // WebP first, PNG fallback, same lazy/async contract on the img.
+  assert.match(html, /<picture>\s*<source type="image\/webp" srcset="assets\/pinghue-screenshot\.webp">\s*<img src="assets\/pinghue-screenshot\.png"/);
   assert.match(html, /src="assets\/pinghue-screenshot\.png"/);
   assert.match(html, /width="1600" height="560" loading="lazy" decoding="async"/);
 
@@ -384,7 +388,9 @@ test('the window scene stages a seekable story next to a sticky terminal', () =>
   assert.doesNotMatch(js, /Date\.now|Math\.random/);
 
   // Chapter dimming is a JS enhancement and must never hide story text without it.
-  assert.match(css, /\.js \.chapter-armed\s*\{[^}]*opacity:\s*0\.38/);
+  // 0.8 is the lowest value where muted text on the page/shell backgrounds
+  // stays above the 4.5:1 WCAG AA contrast floor (0.78 is the exact minimum).
+  assert.match(css, /\.js \.chapter-armed\s*\{[^}]*opacity:\s*0\.8/);
   assert.doesNotMatch(css, /(?<!\.js )\.chapter-armed\s*\{/);
   assert.match(
     css,
