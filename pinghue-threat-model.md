@@ -68,7 +68,7 @@ Open questions:
 | Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; schema tests |
 | Git tag -> release workflow | Source commit and package artifacts | Signed annotated-tag identity/target checks; main ancestry; exact-commit validation; protected environment; OIDC; attestations |
 | Dependency metadata -> package indexes | Locked requirements and advisory queries | Hash-enforced installs; narrow runtime ranges; Dependabot and scheduled audits |
-| Docs source -> GitHub Pages | Static HTML/CSS/JS and assets | Pinned actions; read-only build job; scoped deploy permissions; static contract tests |
+| Docs source -> GitHub Pages | Static HTML/CSS/JS and assets | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
 
 ## Assets and objectives
 
@@ -198,7 +198,7 @@ external dependencies, so fresh audits remain a release gate.
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
 | TM-008 | Vulnerable/malicious dependency | Hash locks, narrow ranges, Dependabot, three-lock audit | New advisories and index compromise remain external | Medium |
-| TM-009 | Static-site supply-chain change | Static assets, contract test, pinned actions, scoped deploy job | Compromised maintainer review remains possible | Low |
+| TM-009 | Static-site supply-chain change | Static assets, contract test, pinned actions, scoped deploy job, no edge-injected scripts (Cloudflare RUM off) | Compromised maintainer review remains possible | Low |
 
 ## Required security invariants
 
