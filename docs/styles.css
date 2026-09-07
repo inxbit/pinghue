@@ -365,7 +365,7 @@ button {
 }
 
 .js .chapter-armed {
-  opacity: 0.38;
+  opacity: 0.8;
   transition: opacity 700ms var(--ease-heavy);
 }
 
@@ -917,7 +917,6 @@ button {
 /* ---------------------------------------------------------------- scale laboratory */
 
 .scale-lab {
-  max-width: 46rem;
   margin: 0 0 2rem;
   padding: clamp(1.2rem, 2.5vw, 1.8rem);
   border: 1px solid rgba(230, 237, 243, 0.08);
@@ -1169,10 +1168,6 @@ button {
 }
 
 /* ---------------------------------------------------------------- scope */
-
-.scope-section {
-  width: min(calc(100% - 3rem), 62rem);
-}
 
 .not-list {
   max-width: 46rem;
@@ -1713,10 +1708,6 @@ button {
     padding-block: 4.5rem;
   }
 
-  .scope-section {
-    width: min(calc(100% - 2rem), 62rem);
-  }
-
   .install-row {
     grid-template-columns: 3.5rem minmax(0, 1fr) auto;
     gap: 0.5rem;
@@ -1767,12 +1758,25 @@ button {
     grid-column: 1 / -1;
   }
 
+  /* The brew command is 30 mono characters; give it the full row and let it
+     wrap at spaces instead of scrolling behind the copy button. */
   .install-stack .install-line {
-    grid-template-columns: 2.6rem minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .install-stack .install-name {
-    padding-left: 0.7rem;
+    grid-column: 1 / -1;
+    padding: 0.5rem 0 0 0.85rem;
+  }
+
+  .install-stack .install-line code {
+    padding-left: 0.85rem;
+  }
+
+  .install-line code,
+  .install-row code {
+    font-size: 0.8rem;
+    white-space: normal;
   }
 }
 

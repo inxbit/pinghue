@@ -4,6 +4,7 @@
 # Produces two authentic captures in docs/assets/ using vhs + ffmpeg:
 #   - pinghue-demo.gif        a short recording of a live probe run
 #   - pinghue-screenshot.png  the final frame of a denser run (the still)
+#   - pinghue-screenshot.webp lossless WebP of the still for the website (needs cwebp)
 #
 # The hero image (docs/assets/pinghue-hero.svg) is hand-authored and is not
 # regenerated here.
@@ -148,4 +149,12 @@ while pos < len(png):
 png_path.write_bytes(bytes(out))
 PY
 
-printf 'wrote pinghue-demo.gif and pinghue-screenshot.png to %s\n' "${assets}"
+# The website serves a lossless WebP of the still (about 30% of the PNG size)
+# with the PNG as fallback; keep the two in step.
+if command -v cwebp >/dev/null 2>&1; then
+  cwebp -quiet -z 9 -lossless -metadata none "${assets}/pinghue-screenshot.png" -o "${assets}/pinghue-screenshot.webp"
+  printf 'wrote pinghue-demo.gif, pinghue-screenshot.png and pinghue-screenshot.webp to %s\n' "${assets}"
+else
+  printf 'cwebp not found (brew install webp); pinghue-screenshot.webp NOT refreshed\n' >&2
+  printf 'wrote pinghue-demo.gif and pinghue-screenshot.png to %s\n' "${assets}"
+fi

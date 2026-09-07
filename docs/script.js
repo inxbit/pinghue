@@ -252,6 +252,16 @@
           }
         }
       };
+      // Start from a full, steady bar so the preview never reads as one lone mark.
+      if (labTrail) {
+        const startMs = Number(slider.value);
+        for (let i = 1; i < TRAIL_LENGTH; i += 1) {
+          const mark = document.createElement("span");
+          mark.className = startMs > SLOW_MS ? "g-slow" : "g-ok";
+          mark.textContent = glyphFor(startMs);
+          labTrail.appendChild(mark);
+        }
+      }
       slider.addEventListener("input", applyLatency);
       applyLatency();
     }
@@ -399,10 +409,32 @@
 
   const fmt = (n, unit) => (n === null ? "-" : n.toFixed(1) + unit);
 
-  const render = (tick) => {
-    const frag = document.createDocumentFragment();
-    snapshots[tick].forEach((h) => {
+  // Rows and history glyphs are built once and updated in place. A seek replays
+  // a tick every 90ms, and rebuilding ~250 nodes per tick was the cost.
+  const rows = [];
+  let rowsMounted = false;
+
+  const ensureRows = (count) => {
+    while (rows.length < count) {
       const tr = document.createElement("tr");
+      const cells = [];
+      for (let i = 0; i < 6; i += 1) {
+        const td = document.createElement("td");
+        tr.appendChild(td);
+        cells.push(td);
+      }
+      const hist = document.createElement("td");
+      hist.className = "t-hist";
+      tr.appendChild(hist);
+      rows.push({ tr, cells, hist, spans: [], shown: 0 });
+    }
+  };
+
+  const render = (tick) => {
+    const frame = snapshots[tick];
+    ensureRows(frame.length);
+    frame.forEach((h, i) => {
+      const row = rows[i];
       const cells = [
         ["t-host", h.name],
         ["t-num", fmt(h.last, "ms")],
@@ -411,25 +443,29 @@
         ["t-num", fmt(h.jitter, "ms")],
         [h.state.cls, h.state.label],
       ];
-      cells.forEach(([cls, text]) => {
-        const td = document.createElement("td");
-        td.className = cls;
-        td.textContent = text;
-        tr.appendChild(td);
+      cells.forEach(([cls, text], j) => {
+        const td = row.cells[j];
+        if (td.className !== cls) td.className = cls;
+        if (td.textContent !== text) td.textContent = text;
       });
 
-      const hist = document.createElement("td");
-      hist.className = "t-hist";
-      h.hist.forEach((p) => {
-        const s = document.createElement("span");
-        s.className = p.c;
-        s.textContent = p.g;
-        hist.appendChild(s);
+      while (row.spans.length < h.hist.length) {
+        row.spans.push(document.createElement("span"));
+      }
+      h.hist.forEach((p, j) => {
+        const s = row.spans[j];
+        if (s.className !== p.c) s.className = p.c;
+        if (s.textContent !== p.g) s.textContent = p.g;
       });
-      tr.appendChild(hist);
-      frag.appendChild(tr);
+      if (row.shown !== h.hist.length) {
+        row.hist.replaceChildren(...row.spans.slice(0, h.hist.length));
+        row.shown = h.hist.length;
+      }
     });
-    tbody.replaceChildren(frag);
+    if (!rowsMounted) {
+      tbody.replaceChildren(...rows.map((row) => row.tr));
+      rowsMounted = true;
+    }
 
     if (clock) {
       const secs = Math.floor(tick * SEC_PER_TICK);
@@ -449,19 +485,30 @@
     const pulses = [];
     let raf = null;
 
+    // Layout is read once per resize, never per frame.
+    let boxWidth = 0;
+    let boxHeight = 0;
     const sizeCanvas = () => {
       const box = pulseCanvas.getBoundingClientRect();
+      boxWidth = box.width;
+      boxHeight = box.height;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      pulseCanvas.width = Math.max(1, Math.round(box.width * dpr));
-      pulseCanvas.height = Math.max(1, Math.round(box.height * dpr));
+      pulseCanvas.width = Math.max(1, Math.round(boxWidth * dpr));
+      pulseCanvas.height = Math.max(1, Math.round(boxHeight * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     sizeCanvas();
-    window.addEventListener("resize", sizeCanvas);
+    let resizeFrame = null;
+    window.addEventListener("resize", () => {
+      if (resizeFrame !== null) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null;
+        sizeCanvas();
+      });
+    });
 
     const drawPulses = () => {
-      const box = pulseCanvas.getBoundingClientRect();
-      ctx.clearRect(0, 0, box.width, box.height);
+      ctx.clearRect(0, 0, boxWidth, boxHeight);
       for (let i = pulses.length - 1; i >= 0; i -= 1) {
         const p = pulses[i];
         p.r += p.speed;
@@ -485,12 +532,11 @@
 
     emitPulse = () => {
       if (document.hidden) return;
-      const box = pulseCanvas.getBoundingClientRect();
-      if (box.width < 1) return;
+      if (boxWidth < 1) return;
       if (pulses.length > 14) return;
       pulses.push({
-        x: box.width * (0.18 + rand() * 0.72),
-        y: box.height * (0.12 + rand() * 0.55),
+        x: boxWidth * (0.18 + rand() * 0.72),
+        y: boxHeight * (0.12 + rand() * 0.55),
         r: 2,
         max: 90 + rand() * 150,
         speed: 0.9 + rand() * 0.7,
