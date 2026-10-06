@@ -3,25 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
-  <title>404 - pinghue</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Page not found - pinghue</title>
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#08090a">
   <link rel="icon" type="image/svg+xml" href="/assets/pinghue-favicon.svg">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/site.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <main class="lost" id="main">
-    <a class="wordmark lost-wordmark" href="/" aria-label="PingHue home">
-      <span class="wm-ping">ping</span><span class="wm-hue">hue</span>
-    </a>
-    <div class="lost-shell">
-      <p class="kicker"><span class="glyph red">· · ·</span> # host state: down</p>
-      <h1>404: not found.</h1>
-      <pre><code><span class="prompt">$</span> pinghue this-page
-<span class="out">this-page</span> <span class="c-red">resolve failed: NXDOMAIN</span></code></pre>
-      <p><a class="lost-link" href="/">Reset and go back to pinghue.com</a></p>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<main class="lost" id="main">
+  <a class="brand lost-brand" href="/"><img src="/assets/pinghue-wordmark.svg" width="165" height="42" alt="pinghue home"></a>
+  <h1>404: no reply.</h1>
+  <p class="lost-lede">This page missed three probes in a row. pinghue would mark it down.</p>
+  <figure class="window lost-window">
+    <div class="window-bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="window-title">PingHUE v5.1.0</span></div>
+    <div class="window-body">
+      <table class="tui tui-lost">
+        <thead><tr><th scope="col">host</th><th scope="col">state</th><th scope="col">last</th><th scope="col">loss</th><th scope="col">history</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">this page</th><td class="s-down">down</td><td class="t-red">-</td><td class="t-red">100.00%</td><td><span class="bars" role="img" aria-label="last 3 probes: 3 lost"><i class="fail"></i><i class="fail"></i><i class="fail"></i></span></td></tr>
+        </tbody>
+      </table>
     </div>
-  </main>
+  </figure>
+  <a class="btn lost-link" href="/">Back to pinghue.com</a>
+</main>
+
 </body>
 </html>

@@ -14,3 +14,12 @@ dist/
 htmlcov/
 .DS_Store
 .superpowers/
+# Impeccable design work: keep the direction contract (.impeccable/surfaces/)
+# and the design sidecar (.impeccable/design.json); the rest is local evidence.
+.impeccable/build/
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/review/
+.impeccable/archive/
+.impeccable/tmp/
+.impeccable/config.local.json

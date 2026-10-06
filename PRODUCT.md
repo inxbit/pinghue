@@ -18,18 +18,21 @@ Dense, vigilant, calm at 2am. Honest about what it is not (the README has a "Wha
 
 ## Brand tokens (committed, do not reinvent)
 
-- Palette is the product's documented "Slate + Signal" palette (see README): bg `#101418`, panel `#151b22`, header `#1b2630`, border `#2a313a`, text `#e6edf3`, muted `#8ea0b8`, and four semantic signals: green `#7ee787` (healthy), amber `#f2cc60` (slow/intermittent), red `#ff7b72` (loss/down), blue `#58a6ff` (focus).
-- Rule: signal colors appear only with state meaning, never as decoration.
-- Wordmark: "ping" in text color + "hue" in the green-amber-red-blue gradient, with a gradient rule (from `docs/assets/pinghue-hero.svg`). The wordmark gradient is committed identity.
-- Type: Archivo (variable, width axis, self-hosted) + JetBrains Mono (variable, self-hosted). Mono is earned: the product is literally a terminal.
-- Signature element: live scripted terminal simulation in the hero (`docs/script.js`), using the product's real fixed latency glyph scale.
+Decided with the owner on 2026-10-06 after two rejected directions (the dark Slate + Signal scroll story, then a light glyph-terrain world). Details and the live system are in `DESIGN.md`.
+
+- Direction: the dark developer-tool page done at full craft, with linear.app as the quality bar. Dark is a standing preference; no light world.
+- Page palette: near-black `#08090a`, white `#f7f8f8`, gray `#8a8f98`, hairlines `#23252a`. The page itself stays neutral so the terminal is the only thing in color.
+- Product palette, inside terminal windows only, exactly as `src/pinghue/ui.py` and the Textual CSS paint it: green `#7ee787` (healthy, ok), amber `#f2cc60` (slow, intermittent, refused), red `#ff7b72` (loss, down), text `#e6edf3`, muted `#8ea0b8`, cursor `#58a6ff` at 22%. Signal colors appear only with state meaning, never as decoration.
+- Wordmark: "ping" in white + "hue" in the green-amber-red-blue gradient (kept at the owner's request), shipped as the outlined `docs/assets/pinghue-wordmark.svg`. The favicon keeps the four hue bars.
+- Type: Zalando Sans for display and UI, Ubuntu Sans Mono for the terminal and commands. Mono is for code and data only.
+- Signature element: the hero is the real TUI layout (columns, keys, states, fixed glyph scale) running a deterministic simulated run whose keys work; behind it, Higgsfield footage of a data-center aisle at night.
 
 ## Anti-references
 
-No SaaS gradient-blob heroes, no fake dashboards, no marketing buzzwords, no em dashes, no eyebrow-label-on-every-section scaffolding. The site must read like it was made by the people who made the tool.
+No SaaS gradient-blob heroes, no fake dashboards, no marketing buzzwords, no em dashes, no eyebrow-label-on-every-section scaffolding. The site must read like it was made by the people who made the tool. Also rejected by the owner: neon-on-slate signal styling with scroll-story chapters (the 2026-07 site), and an all-monospace light "glyph terrain" world (2026-10 round 1).
 
 ## Constraints
 
-- Static site, no build step: plain HTML/CSS/JS in `docs/`, deployed by GitHub Pages workflow.
+- Static site, no build step: plain HTML/CSS/JS in `docs/`, deployed by GitHub Pages workflow. Generators in `scripts/` (`site-rows.mjs`, `site-wordmark.py`, `gen-site-social-card.sh`) only rewrite committed files.
 - `tests/site_pages.test.mjs` is a deploy-gating contract on file structure, key copy, palette, and the no-em-dash rule. Update it deliberately alongside content changes.
 - Site changes deploy only via PR to `main` (branch protected).
