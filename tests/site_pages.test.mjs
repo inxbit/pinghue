@@ -3,6 +3,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 
+// Deploy-gating contract for pinghue.com (docs/, GitHub Pages, no build step).
+// It pins security and integrity, and it pins product truth: the page draws in
+// pinghue's own fixed glyph scale, so the numbers here are read from src/pinghue.
+
 const read = (path) => readFileSync(path, 'utf8');
 const pngDimensions = (path) => {
   const png = readFileSync(path);
@@ -12,7 +16,7 @@ const pngDimensions = (path) => {
 const stripCssComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '');
 const cssRuleBody = (source, selector) => {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = source.match(new RegExp(escaped + '\\s*\\{([^}]*)\\}'));
+  const match = source.match(new RegExp('(?:^|[\\s,}])' + escaped + '\\s*\\{([^}]*)\\}', 'm'));
   assert.ok(match, 'missing CSS rule for ' + selector);
   return match[1];
 };
@@ -20,119 +24,142 @@ const attributeCount = (source, attribute) => (
   source.match(new RegExp('\\s' + attribute + '(?=[\\s=>])', 'g')) || []
 ).length;
 
-test('GitHub Pages site has the expected static contract', () => {
-  assert.equal(existsSync('docs/index.html'), true);
-  assert.equal(existsSync('docs/styles.css'), true);
-  assert.equal(existsSync('docs/script.js'), true);
-  assert.equal(existsSync('docs/404.html'), true);
-  assert.equal(existsSync('docs/.nojekyll'), true);
+const TITLE = 'PingHue - concurrent ICMP and TCP ping monitor';
+const DESCRIPTION = 'Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.';
+const IMAGE_ALT = 'A latency terrain drawn in pinghue\'s fixed glyph scale above the table pinghue prints.';
+const CSP = 'default-src \'none\'; script-src \'self\'; style-src \'self\'; img-src \'self\'; font-src \'self\'; media-src \'self\'; base-uri \'none\'; form-action \'none\'';
+const CSP_TAG = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
+const INSTALL_COMMANDS = [
+  'uv tool install pinghue',
+  'pipx install pinghue',
+  'brew install inxbit/tap/pinghue',
+  'python -m pip install pinghue',
+];
+
+/* ------------------------------------------------ product sources */
+
+const pythonBuckets = () => {
+  const source = read('src/pinghue/history.py');
+  const block = source.match(/BAR_BUCKETS[^=]*=\s*\(([\s\S]*?)\n\)/);
+  assert.ok(block, 'BAR_BUCKETS not found in history.py');
+  const buckets = [...block[1].matchAll(/\(\s*([\d.]+)\s*,\s*"(.)"\s*\)/g)]
+    .map(([, limit, glyph]) => [Number(limit), glyph]);
+  assert.equal(buckets.length, 7);
+  return buckets;
+};
+const pythonNumber = (path, pattern) => {
+  const match = read(path).match(pattern);
+  assert.ok(match, pattern + ' not found in ' + path);
+  return Number(match[1]);
+};
+const cliDefault = (flag) => pythonNumber(
+  'src/pinghue/cli.py',
+  new RegExp('"' + flag + '",[^)]*?default=([\\d.]+)'),
+);
+
+/* ------------------------------------------------ site.js as a module */
+
+// site.js exports its pure core when a "module" global exists, then returns
+// before it touches the DOM.
+const loadSiteModule = () => {
+  const module = { exports: {} };
+  runInNewContext(read('docs/site.js'), {
+    module,
+    document: {
+      documentElement: { classList: { add: () => {} } },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    window: {},
+    navigator: {},
+    setTimeout,
+    clearTimeout,
+  });
+  for (const name of ['buildRun', 'glyphFor', 'toneFor', 'bandOf', 'fmt', 'fmtLoss', 'START', 'HISTORY', 'PERIOD']) {
+    assert.ok(name in module.exports, 'site.js must export ' + name);
+  }
+  return module.exports;
+};
+
+const TABLE_TAIL = 14;
+
+// The flat table's cells exactly as site.js renderTable() writes them.
+// JSON round trip: arrays built inside the vm context carry that realm's prototype.
+const expectedRows = (site, tick) => {
+  const run = site.buildRun();
+  return JSON.parse(JSON.stringify(run.frames[tick].map((f, i) => ({
+    host: f.host,
+    cells: [
+      ['st-' + f.state, f.state],
+      [f.last === null ? 't-fail' : f.last > 100 ? 't-slow' : '', site.fmt(f.last)],
+      [f.avg !== null && f.avg > 100 ? 't-slow' : '', site.fmt(f.avg)],
+      [f.jitter > 50 ? 't-slow' : '', site.fmt(f.jitter)],
+      [f.loss > 0 ? 't-fail' : '', site.fmtLoss(f.loss)],
+    ],
+    history: run.historyAt(i, tick).slice(-TABLE_TAIL)
+      .map((ms) => ['g-' + site.toneFor(ms), site.glyphFor(ms)]),
+  }))));
+};
+
+const staticRows = (html) => {
+  const body = html.match(/<tbody data-rows>([\s\S]*?)<\/tbody>/);
+  assert.ok(body, 'static table body missing');
+  return [...body[1].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(([, row]) => {
+    const host = row.match(/<th scope="row">([^<]*)<\/th>/);
+    assert.ok(host, 'row header missing in ' + row);
+    const tds = [...row.matchAll(/<td(?: class="([^"]*)")?>([\s\S]*?)<\/td>/g)];
+    assert.equal(tds.length, 6, 'each row has six data cells');
+    return {
+      host: host[1],
+      cells: tds.slice(0, 5).map(([, cls = '', text]) => [cls, text]),
+      history: [...tds[5][2].matchAll(/<span class="([^"]*)">([^<]*)<\/span>/g)]
+        .map(([, cls, glyph]) => [cls, glyph]),
+    };
+  });
+};
+
+/* ------------------------------------------------ static contract */
+
+test('GitHub Pages site ships the expected files', () => {
+  for (const path of [
+    'docs/index.html',
+    'docs/site.css',
+    'docs/site.js',
+    'docs/404.html',
+    'docs/.nojekyll',
+    'docs/robots.txt',
+    'docs/sitemap.xml',
+    'docs/assets/pinghue-favicon.svg',
+    'docs/assets/pinghue-social-card.png',
+    'docs/assets/terrain-poster.webp',
+    'docs/fonts/inconsolata-var-ascii.woff2',
+    'docs/media/ridge.mp4',
+    'docs/media/dawn.mp4',
+    'docs/assets/dawn-poster.webp',
+  ]) {
+    assert.equal(existsSync(path), true, path + ' must exist');
+  }
   assert.equal(read('docs/CNAME').trim(), 'pinghue.com');
-  assert.equal(existsSync('docs/assets/pinghue-favicon.svg'), true);
-  assert.equal(existsSync('docs/assets/pinghue-hero.svg'), true);
-  assert.equal(existsSync('docs/assets/pinghue-screenshot.png'), true);
-  assert.equal(existsSync('docs/assets/pinghue-screenshot.webp'), true);
-  assert.ok(statSync('docs/assets/pinghue-screenshot.webp').size < statSync('docs/assets/pinghue-screenshot.png').size);
-  assert.equal(existsSync('docs/assets/slate-texture.jpg'), true);
-  assert.ok(statSync('docs/assets/slate-texture.jpg').size < 100_000);
-  assert.equal(existsSync('docs/assets/pinghue-social-card.png'), true);
   assert.deepEqual(pngDimensions('docs/assets/pinghue-social-card.png'), { width: 1200, height: 630 });
 
-  assert.equal(existsSync('docs/fonts/archivo-var-latin.woff2'), true);
-  assert.equal(existsSync('docs/fonts/jetbrains-mono-var-latin.woff2'), true);
-
-  const html = read('docs/index.html');
-  const css = stripCssComments(read('docs/styles.css'));
-  assert.match(css, /--nav-height:\s*64px/);
-  assert.match(css, /--radius-shell:\s*24px/);
-  assert.match(css, /--radius-core:\s*18px/);
-  assert.match(css, /\.terminal-shell/);
-  assert.match(css, /\.proof-rail/);
-  assert.match(css, /\.mode-cascade/);
-  assert.match(css, /\.signal-runway/);
-  assert.match(css, /\.media-shell/);
-  assert.match(css, /\.js \.reveal-ready/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.match(css, /scroll-behavior:\s*auto/);
-  assert.doesNotMatch(css, /height:\s*100vh/);
-  assert.doesNotMatch(css, /rgba\(0,\s*0,\s*0,\s*0\.45\)/);
-  const title = 'PingHue - concurrent ICMP and TCP ping monitor';
-  const description = 'Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.';
-
-  assert.equal(html.includes('<title>' + title + '</title>'), true);
-  assert.equal(html.includes('<meta name="description" content="' + description + '">'), true);
-  assert.equal(html.includes('<meta property="og:title" content="' + title + '">'), true);
-  assert.equal(html.includes('<meta property="og:description" content="' + description + '">'), true);
-  assert.equal(html.includes('<meta name="twitter:title" content="' + title + '">'), true);
-  assert.equal(html.includes('<meta name="twitter:description" content="' + description + '">'), true);
-
-  // Mobile navigation links must remain visible when JavaScript is unavailable.
-  assert.doesNotMatch(css, /^\s*\.nav nav a:not\(\.nav-gh\)\s*\{/m);
-
-  for (const id of ['why', 'modes', 'scale', 'evidence', 'not', 'install']) {
-    assert.match(html, new RegExp('id="' + id + '"'));
+  // The old Signal Theatre build is gone, not shadowing the new one.
+  for (const path of ['docs/styles.css', 'docs/script.js', 'docs/assets/slate-texture.jpg']) {
+    assert.equal(existsSync(path), false, path + ' must not be published');
   }
 
-  const navShell = html.match(/<header(?=[^>]*\sdata-nav(?:\s|>))[^>]*>[\s\S]*?<\/header>/);
-  assert.ok(navShell);
-  assert.equal(attributeCount(html, 'data-nav'), 1);
-  assert.equal(attributeCount(html, 'data-nav-toggle'), 1);
-  assert.equal(attributeCount(html, 'data-nav-panel'), 1);
-  assert.equal(attributeCount(html, 'data-nav-close'), 1);
-  assert.equal(attributeCount(navShell[0], 'data-nav-toggle'), 1);
-  assert.equal(attributeCount(navShell[0], 'data-nav-panel'), 1);
-  assert.equal(attributeCount(navShell[0], 'data-nav-close'), 1);
-  assert.match(html, /aria-controls="site-menu"/);
-  assert.match(html, /aria-expanded="false"/);
-  assert.match(html, /id="site-menu"[^>]*data-nav-panel/);
-
-  const terminal = html.match(/<figure(?=[^>]*\sdata-terminal(?:\s|>))[^>]*>[\s\S]*?<\/figure>/);
-  assert.ok(terminal);
-  assert.equal(attributeCount(html, 'data-terminal'), 1);
-  assert.equal(attributeCount(html, 'data-rows'), 1);
-  assert.equal(attributeCount(html, 'data-clock'), 1);
-  assert.equal(attributeCount(terminal[0], 'data-rows'), 1);
-  assert.equal(attributeCount(terminal[0], 'data-clock'), 1);
-  assert.equal(attributeCount(html, 'data-static-row'), 8);
-  assert.equal(attributeCount(terminal[0], 'data-static-row'), 8);
-  assert.match(html, /<caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run\.<\/caption>/);
-
-  assert.equal(attributeCount(html, 'data-copy-status'), 1);
-  assert.match(html, /role="status"[^>]*aria-live="polite"[^>]*data-copy-status/);
-  assert.match(html, /Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes\./);
-  assert.match(html, /class="proof-rail"/);
-  assert.match(html, /Up to 1024/);
-  assert.match(html, /Schema version 1/);
-  assert.match(html, /No server or daemon/);
-  // WebP first, PNG fallback, same lazy/async contract on the img.
-  assert.match(html, /<picture>\s*<source type="image\/webp" srcset="assets\/pinghue-screenshot\.webp">\s*<img src="assets\/pinghue-screenshot\.png"/);
-  assert.match(html, /src="assets\/pinghue-screenshot\.png"/);
-  assert.match(html, /width="1600" height="560" loading="lazy" decoding="async"/);
-
-  for (const variant of ['mode-primary', 'mode-tcp', 'mode-automation']) {
-    assert.equal((html.match(new RegExp('<article class="mode ' + variant + '">', 'g')) || []).length, 1);
+  // Binary assets are what their names say, and the clip stays small.
+  const font = readFileSync('docs/fonts/inconsolata-var-ascii.woff2');
+  assert.equal(font.subarray(0, 4).toString('latin1'), 'wOF2');
+  for (const name of ['ridge', 'dawn']) {
+    const clip = readFileSync('docs/media/' + name + '.mp4');
+    assert.equal(clip.subarray(4, 8).toString('latin1'), 'ftyp');
+    assert.ok(statSync('docs/media/' + name + '.mp4').size < 1_000_000, name + '.mp4 must stay under 1 MB');
   }
-  assert.equal((html.match(/<article class="mode mode-[^"]+">/g) || []).length, 3);
-
-  assert.match(html, /class="signal-runway"/);
-  assert.equal(attributeCount(html, 'data-scale'), 1);
-  assert.equal((html.match(/class="signal-step"/g) || []).length, 10);
-
-  assert.equal(attributeCount(html, 'data-reveal'), 7);
-  for (const className of ['proof-rail', 'product-proof']) {
-    assert.match(
-      html,
-      new RegExp('<(?:div|section)(?=[^>]*class="[^"]*' + className + '[^"]*")(?=[^>]*\\sdata-reveal(?:\\s|>))[^>]*>'),
-    );
+  for (const name of ['terrain-poster', 'dawn-poster']) {
+    const poster = readFileSync('docs/assets/' + name + '.webp');
+    assert.equal(poster.subarray(0, 4).toString('latin1'), 'RIFF');
+    assert.equal(poster.subarray(8, 12).toString('latin1'), 'WEBP');
   }
-  for (const id of ['modes', 'scale', 'evidence', 'not', 'install']) {
-    assert.match(
-      html,
-      new RegExp('<section(?=[^>]*\\sid="' + id + '")(?=[^>]*\\sdata-reveal(?:\\s|>))[^>]*>'),
-    );
-  }
-  // The window scene drives itself; it must not join the reveal choreography.
-  assert.doesNotMatch(html, /<section(?=[^>]*\sid="why")(?=[^>]*\sdata-reveal(?:\s|>))[^>]*>/);
-  assert.equal((html.match(/class="kicker"/g) || []).length, 2);
 
   assert.equal(
     read('docs/robots.txt'),
@@ -145,336 +172,234 @@ test('GitHub Pages site has the expected static contract', () => {
       '  <url><loc>https://pinghue.com/</loc></url>\n' +
       '</urlset>\n',
   );
-  // Visible copy carries no em/en dashes (design contract).
-  assert.doesNotMatch(html, /[—–]/);
-  assert.doesNotMatch(read('docs/404.html'), /[—–]/);
-  assert.match(html, /Watch the/);
-  assert.match(html, /uv tool install pinghue/);
-  assert.match(html, /brew install inxbit\/tap\/pinghue/);
-  // Copyable install commands are pinned exactly; a poisoned command fails the deploy.
-  const copyCommands = [...html.matchAll(/data-copy="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(new Set(copyCommands), new Set([
-    'uv tool install pinghue',
-    'pipx install pinghue',
-    'brew install inxbit/tap/pinghue',
-    'python -m pip install pinghue',
-  ]));
-  // Only the local first-party script runs on the page.
+
+  assert.match(read('README.md'), /https:\/\/pinghue\.com/);
+});
+
+test('index.html carries the exact title, description, social and canonical meta', () => {
+  const html = read('docs/index.html');
+  for (const tag of [
+    '<title>' + TITLE + '</title>',
+    '<meta name="description" content="' + DESCRIPTION + '">',
+    '<link rel="canonical" href="https://pinghue.com/">',
+    '<link rel="icon" type="image/svg+xml" href="assets/pinghue-favicon.svg">',
+    '<meta property="og:type" content="website">',
+    '<meta property="og:url" content="https://pinghue.com/">',
+    '<meta property="og:title" content="' + TITLE + '">',
+    '<meta property="og:description" content="' + DESCRIPTION + '">',
+    '<meta property="og:image" content="https://pinghue.com/assets/pinghue-social-card.png">',
+    '<meta property="og:image:width" content="1200">',
+    '<meta property="og:image:height" content="630">',
+    '<meta property="og:image:alt" content="' + IMAGE_ALT + '">',
+    '<meta name="twitter:card" content="summary_large_image">',
+    '<meta name="twitter:title" content="' + TITLE + '">',
+    '<meta name="twitter:description" content="' + DESCRIPTION + '">',
+    '<meta name="twitter:image" content="https://pinghue.com/assets/pinghue-social-card.png">',
+    '<meta name="twitter:image:alt" content="' + IMAGE_ALT + '">',
+  ]) {
+    assert.equal(html.includes(tag), true, 'missing ' + tag);
+  }
+  assert.equal((html.match(/<title>/g) || []).length, 1);
+  assert.equal((html.match(/<meta name="description"/g) || []).length, 1);
+});
+
+test('both pages ship the identical strict CSP and nothing inline', () => {
+  const pages = { 'docs/index.html': read('docs/index.html'), 'docs/404.html': read('docs/404.html') };
+  for (const [path, html] of Object.entries(pages)) {
+    assert.equal(html.includes(CSP_TAG), true, path + ' must carry the exact CSP');
+    assert.equal((html.match(/http-equiv="Content-Security-Policy"/g) || []).length, 1, path);
+    // No inline style or script, so 'unsafe-inline' is never needed.
+    assert.doesNotMatch(html, /<style/i, path);
+    assert.doesNotMatch(html, /\sstyle=/i, path);
+    assert.doesNotMatch(html, /\son[a-z]+=/i, path + ' must not use inline event handlers');
+    assert.doesNotMatch(html, /<script(?![^>]*\ssrc=)[^>]*>/i, path + ' must not carry inline script');
+    assert.doesNotMatch(html, /fonts\.googleapis\.com|fonts\.gstatic\.com/, path);
+    // Visible copy carries no em or en dashes (site copy rule).
+    assert.doesNotMatch(html, /[—–]|&mdash;|&ndash;/, path);
+  }
+
+  const html = pages['docs/index.html'];
   const scriptSrcs = [...html.matchAll(/<script[^>]*\bsrc="([^"]*)"/g)].map((m) => m[1]);
-  assert.deepEqual(scriptSrcs, ['script.js']);
-  // Both pages ship the identical strict self-only Content-Security-Policy.
-  const csp = 'default-src \'none\'; script-src \'self\'; style-src \'self\'; img-src \'self\'; font-src \'self\'; base-uri \'none\'; form-action \'none\'';
-  const cspTag = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
-  assert.equal(html.includes(cspTag), true);
-  const notFound = read('docs/404.html');
-  assert.equal(notFound.includes(cspTag), true);
-  assert.match(notFound, /<a class="skip-link" href="#main">Skip to content<\/a>/);
-  assert.match(notFound, /<main class="lost" id="main">/);
-  assert.match(notFound, /class="wordmark lost-wordmark" href="\/" aria-label="PingHue home"/);
-  assert.match(notFound, /<div class="lost-shell">/);
-  assert.match(notFound, /class="lost-link" href="\/"/);
-  assert.match(cssRuleBody(css, '.lost'), /width:\s*min\(calc\(100% - 2rem\),\s*720px\)/);
-  assert.match(cssRuleBody(css, '.lost'), /display:\s*grid/);
-  assert.match(cssRuleBody(css, '.lost-shell'), /padding:\s*clamp\(1\.5rem,\s*5vw,\s*3rem\)/);
-  assert.match(cssRuleBody(css, '.lost-shell'), /min-width:\s*0/);
-  assert.match(cssRuleBody(css, '.lost-shell h1'), /font-size:\s*clamp\(2\.25rem,\s*10vw,\s*5\.5rem\)/);
-  assert.match(cssRuleBody(css, '.lost-shell h1'), /overflow-wrap:\s*anywhere/);
-  assert.match(cssRuleBody(css, '.lost-link'), /min-height:\s*44px/);
-  assert.match(cssRuleBody(css, '.lost-link'), /max-width:\s*100%/);
-  assert.match(cssRuleBody(css, '.lost-link'), /text-align:\s*center/);
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*400px\)[\s\S]*?\.lost-link\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*justify-content:\s*center/,
-  );
-  // No inline style/script blocks anywhere, so 'unsafe-inline' is never needed.
-  assert.doesNotMatch(html, /<style/);
-  assert.doesNotMatch(notFound, /<style/);
+  assert.deepEqual(scriptSrcs, ['site.js']);
+  const stylesheets = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(stylesheets, ['site.css']);
+});
+
+test('install commands are pinned exactly', () => {
+  const html = read('docs/index.html');
+  // Copyable commands are pinned exactly; a poisoned command fails the deploy.
+  const copyCommands = [...html.matchAll(/data-copy="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(new Set(copyCommands), new Set(INSTALL_COMMANDS));
+  // Each copy button copies the command printed next to it.
+  for (const command of INSTALL_COMMANDS) {
+    assert.match(html, new RegExp('<code>' + command.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '</code>'));
+  }
+  assert.equal(attributeCount(html, 'data-copy-status'), 1);
+  assert.match(html, /role="status"[^>]*aria-live="polite"[^>]*data-copy-status/);
+});
+
+test('page links, sections and local references resolve', () => {
+  const html = read('docs/index.html');
   assert.match(html, /href="https:\/\/github\.com\/inxbit\/pinghue"/);
   assert.match(html, /href="https:\/\/pypi\.org\/project\/pinghue\/"/);
-  assert.match(html, /<meta property="og:image" content="https:\/\/pinghue\.com\/assets\/pinghue-social-card\.png">/);
-  assert.match(html, /<meta property="og:image:width" content="1200">/);
-  assert.match(html, /<meta property="og:image:height" content="630">/);
-  assert.match(html, /<meta property="og:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window\.">/);
-  assert.match(html, /<meta name="twitter:image" content="https:\/\/pinghue\.com\/assets\/pinghue-social-card\.png">/);
-  assert.match(html, /<meta name="twitter:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window\.">/);
-  assert.match(html, /rel="canonical" href="https:\/\/pinghue\.com\/"/);
-  // The hero demonstrates the product with a JS-driven simulated run.
-  assert.match(html, /data-terminal\b/);
-  assert.match(html, /schema_version/);
+  assert.match(html, /<a class="skip-link" href="#main">Skip to content<\/a>/);
+  assert.match(html, /<main id="main">/);
+
+  for (const id of ['terrain', 'modes', 'scale', 'evidence', 'not', 'install']) {
+    assert.match(html, new RegExp('<section[^>]*\\sid="' + id + '"'), 'section #' + id);
+  }
+  const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
+  for (const [, anchor] of html.matchAll(/href="#([^"]+)"/g)) {
+    assert.equal(ids.has(anchor), true, 'dangling in-page link #' + anchor);
+  }
+
+  // Every local file the page or stylesheet asks for is published.
+  const css = stripCssComments(read('docs/site.css'));
+  const localRefs = [
+    ...[...html.matchAll(/\s(?:src|href|data-clip)="([^"#:]+)"/g)].map((m) => m[1]),
+    ...[...css.matchAll(/url\("?([^")]+)"?\)/g)].map((m) => m[1]),
+  ].filter((ref) => !ref.startsWith('/') || ref.length > 1);
+  assert.ok(localRefs.includes('media/ridge.mp4'));
+  assert.ok(localRefs.includes('media/dawn.mp4'));
+  assert.ok(localRefs.includes('assets/terrain-poster.webp'));
+  assert.ok(localRefs.includes('assets/dawn-poster.webp'));
+  assert.ok(localRefs.includes('fonts/inconsolata-var-ascii.woff2'));
+  for (const ref of localRefs) {
+    assert.equal(existsSync('docs/' + ref.replace(/^\//, '')), true, 'missing local file ' + ref);
+  }
+  assert.doesNotMatch(css, /@import|url\(\s*["']?(?:https?:)?\/\//, 'site.css loads nothing remote');
+});
+
+test('the JSON evidence and the scope section say what pinghue really does', () => {
+  const html = read('docs/index.html');
+  assert.match(html, /"schema_version"<\/span>: <span class="jn">1<\/span>/);
   assert.match(html, /"exit_reason"<\/span>: <span class="json-string">"deadline"<\/span>/);
   assert.match(html, /"status"<\/span>: <span class="json-string c-amber">"intermittent"<\/span>/);
   assert.match(html, /"loss_pct"<\/span>: <span class="jn">1\.11<\/span>/);
   assert.doesNotMatch(html, /"exit_reason"<\/span>: <span class="json-string">"duration"<\/span>/);
   assert.doesNotMatch(html, /"state"<\/span>: <span class="json-string c-amber">"intermittent"<\/span>/);
-  assert.match(html, /What pinghue is not/i);
 
-  // Self-hosted variable fonts, no third-party font CDN.
-  assert.match(css, /@font-face/);
-  assert.match(css, /Archivo/);
-  assert.doesNotMatch(html, /fonts\.googleapis\.com/);
-  // Slate + Signal palette from the README is the site palette.
-  assert.match(css, /#101418/);
-  assert.match(css, /#7ee787/);
-  assert.match(css, /#f2cc60/);
-  assert.match(css, /#ff7b72/);
-  assert.match(css, /#58a6ff/);
-  assert.match(css, /prefers-reduced-motion/);
+  // The printed loss follows from the printed counters.
+  const sent = Number(html.match(/"sent"<\/span>: <span class="jn">(\d+)<\/span>/)[1]);
+  const received = Number(html.match(/"received"<\/span>: <span class="jn">(\d+)<\/span>/)[1]);
+  assert.equal((((sent - received) / sent) * 100).toFixed(2), '1.11');
 
-  const js = read('docs/script.js');
-  // The simulation must follow the documented fixed latency scale.
-  assert.match(js, /▁/);
-  assert.match(js, /glyphFor/);
-  assert.match(js, /ms > SLOW_MS \? "g-slow" : "g-ok"/);
-  assert.match(js, /peakJitter/);
-  assert.doesNotMatch(js, /everSlow/);
-  assert.match(js, /prefers-reduced-motion/);
-  assert.match(js, /documentElement\.classList\.add\("js"\)/);
-  assert.match(js, /data-nav-toggle/);
-  assert.match(js, /aria-expanded/);
-  assert.match(js, /data-copy-status/);
-  assert.match(js, /reveal-ready/);
-  assert.match(js, /terminalVisible/);
-  assert.match(js, /documentVisible/);
-  assert.match(js, /updateTerminalTimer/);
-  assert.match(js, /navPanel\.hidden/);
-  assert.match(js, /IntersectionObserver/);
-  assert.match(js, /mobileMenu\.addListener/);
-  assert.doesNotMatch(js, /addEventListener\(["']scroll/);
+  assert.equal(pythonNumber('src/pinghue/export.py', /^SCHEMA_VERSION = (\d+)$/m), 1);
+  assert.match(read('src/pinghue/export.py'), /return 0o600/);
+  assert.match(html, /<code>0600<\/code>/);
 
-  const readme = read('README.md');
-  assert.match(readme, /https:\/\/pinghue\.com/);
+  const scope = html.match(/<section(?=[^>]*\sid="not")[^>]*>[\s\S]*?<\/section>/);
+  assert.ok(scope);
+  assert.match(scope[0], /<h2 id="not-title">what pinghue is not<\/h2>/);
+  assert.equal((scope[0].match(/<li>Not /g) || []).length, 5);
+  assert.match(scope[0], /Not a privileged daemon\./);
+  assert.match(scope[0], /Not a service that accepts remote network requests\./);
+
+  const maxConcurrency = pythonNumber('src/pinghue/cli.py', /^CONCURRENCY_MAXIMUM = (\d+)$/m);
+  assert.match(html, new RegExp('Up to ' + maxConcurrency + ' concurrent probes'));
+
+  const classifiers = [...read('pyproject.toml').matchAll(/Programming Language :: Python :: (3\.\d+)"/g)]
+    .map((m) => m[1]);
+  assert.match(html, new RegExp('Python ' + classifiers[0].replace('.', '\\.') + ' to ' + classifiers.at(-1).replace('.', '\\.')));
 });
 
-test('Signal Theatre visual contracts preserve meaning and accessibility', () => {
+test('the hero table is a real, quiet table', () => {
   const html = read('docs/index.html');
-  const css = stripCssComments(read('docs/styles.css'));
-  const gradientPattern = /linear-gradient\((?:[^()]|\([^()]*\))*\)/gs;
-  const signalReference = /var\(--(?:green|amber|red|blue)\)|rgba\(\s*88\s*,\s*166\s*,\s*255\b/;
-  const signalGradients = (css.match(gradientPattern) || []).filter((gradient) => (
-    signalReference.test(gradient)
-  ));
+  const stage = html.match(/<figure(?=[^>]*\sdata-terrain(?:\s|>))[^>]*>[\s\S]*?<\/figure>/);
+  assert.ok(stage);
+  assert.equal(attributeCount(html, 'data-terrain'), 1);
+  assert.match(stage[0], /data-clip="media\/ridge\.mp4"/);
+  assert.match(stage[0], /<canvas class="stage-canvas" aria-hidden="true"><\/canvas>/);
+  assert.match(stage[0], /<img class="stage-poster" src="assets\/terrain-poster\.webp"[^>]*\salt=""/);
+  assert.match(stage[0], /<table class="tui" data-table>/);
+  assert.match(stage[0], /<caption class="visually-hidden">[^<]+<\/caption>/);
+  assert.deepEqual(
+    [...stage[0].matchAll(/<th scope="col">([^<]*)<\/th>/g)].map((m) => m[1]),
+    ['host', 'state', 'last', 'avg', 'jitter', 'loss', 'history'],
+  );
+  assert.doesNotMatch(stage[0], /role="img"/);
+  assert.doesNotMatch(stage[0], /<table[^>]*aria-hidden/);
+  // The table repaints every second; it must not flood a screen reader.
+  assert.doesNotMatch(stage[0], /aria-live/);
+  // The head-on toggle is a JS enhancement and starts hidden.
+  assert.match(stage[0], /<button class="tilt-btn" type="button" data-tilt aria-pressed="false" hidden>/);
+  // Everything that moves can be paused (WCAG 2.2.2); the control is a JS enhancement too.
+  assert.match(stage[0], /<button class="tilt-btn" type="button" data-pause hidden>pause<\/button>/);
+  // The headline art is decorative; the real heading text is there for everyone.
+  assert.match(html, /<h1 class="hl" id="hero-title">\s*<span class="visually-hidden">The table is the terrain\.<\/span>/);
+  assert.equal((html.match(/<span class="hl-art[^"]*" aria-hidden="true">/g) || []).length, 2);
+});
 
-  // The wordmark and committed identity ribbon are the only decorative signal gradients.
-  assert.equal(signalGradients.length, 2);
-  const wordmarkRule = cssRuleBody(css, '.wm-hue');
-  const ribbonRule = cssRuleBody(css, '.hue-ribbon');
-  assert.match(wordmarkRule, /linear-gradient/);
-  assert.match(ribbonRule, /linear-gradient/);
-  assert.equal(signalGradients.every((gradient) => (
-    wordmarkRule.includes(gradient) || ribbonRule.includes(gradient)
-  )), true);
-
-  for (const selector of [
-    'body',
-    '.stamp',
-    '.chapter-fact',
-    '.lab-slider',
-    '.install-line code',
-    '.install-row code',
-    '.not-list li::before',
-    '.mode-tag',
-    '.jq',
-    '.json-string',
-    '.jn',
-    '.copy-btn.copied',
-  ]) {
-    assert.doesNotMatch(cssRuleBody(css, selector), signalReference, selector + ' must stay neutral');
+test('the stylesheet is self-hosted Inconsolata on paper and serves the 404', () => {
+  const css = stripCssComments(read('docs/site.css'));
+  const html = read('docs/index.html');
+  assert.match(css, /@font-face\s*\{[^}]*font-family:\s*"Inconsolata"[^}]*src:\s*url\("fonts\/inconsolata-var-ascii\.woff2"\)\s*format\("woff2"\)/);
+  assert.match(html, /<link rel="preload" href="fonts\/inconsolata-var-ascii\.woff2" as="font" type="font\/woff2" crossorigin>/);
+  for (const retired of [/Archivo/i, /JetBrains/i, /archivo-var-latin/, /jetbrains-mono-var-latin/]) {
+    assert.doesNotMatch(css, retired);
+    assert.doesNotMatch(html, retired);
   }
 
-  assert.equal((html.match(/<span class="mode-tag">/g) || []).length, 3);
-  assert.doesNotMatch(html, /class="mode-tag c-(?:green|amber|red|blue)"/);
-  const scopeSection = html.match(/<section(?=[^>]*\sid="not")[^>]*>[\s\S]*?<\/section>/);
-  assert.ok(scopeSection);
-  assert.doesNotMatch(scopeSection[0], /class="glyph (?:green|amber|red|blue)"/);
+  const root = cssRuleBody(css, ':root');
+  assert.match(root, /--paper:\s*#efede6/i);
+  assert.match(root, /--ink:\s*#161513/i);
+  assert.match(root, /--green:\s*#1d7a37/i);
+  assert.match(root, /--amber:\s*#9c5a00/i);
+  assert.match(root, /--red:\s*#b8322b/i);
+  assert.match(html, /<meta name="theme-color" content="#efede6">/);
+  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
 
-  const heroTitle = /<h1 id="hero-title">\s*<span class="hero-line">Watch the<\/span>\s*<span class="hero-line">whole window\.<\/span>\s*<\/h1>/;
-  assert.match(html, heroTitle);
-  assert.equal((html.match(/class="hero-line"/g) || []).length, 2);
-  assert.match(cssRuleBody(css, '.hero-line'), /display:\s*block/);
-  assert.match(cssRuleBody(css, '.hero-line'), /white-space:\s*nowrap/);
+  // The 404 page has no stylesheet of its own; these rules carry it.
+  for (const selector of ['.lost', '.lost-shell', '.lost-link', '.lost-wordmark', '.skip-link', '.visually-hidden']) {
+    cssRuleBody(css, selector);
+  }
+  assert.match(cssRuleBody(css, '.lost-link'), /min-height:\s*44px/);
+  assert.match(cssRuleBody(css, '.lost-shell h1'), /overflow-wrap:\s*anywhere/);
+});
 
-  assert.match(cssRuleBody(css, '.nav-links a'), /min-height:\s*44px/);
-  assert.match(cssRuleBody(css, '.install-row .copy-btn'), /min-height:\s*44px/);
+test('site.js stays first-party and DOM-safe', () => {
+  const js = read('docs/site.js');
+  assert.doesNotMatch(js, /https?:\/\//, 'site.js must not reach any network origin');
+  assert.doesNotMatch(js, /\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon/);
+  assert.doesNotMatch(js, /\beval\(|new Function\(|innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  assert.doesNotMatch(js, /localStorage|sessionStorage|document\.cookie/);
+  assert.match(js, /documentElement\.classList\.add\("js"\)/);
+  assert.match(js, /prefers-reduced-motion: reduce/);
+});
 
-  const classNames = [...html.matchAll(/\bclass="([^"]+)"/g)]
-    .flatMap((match) => match[1].split(/\s+/));
-  assert.equal(classNames.includes('js'), false);
-  assert.equal(classNames.filter((name) => name === 'json-string').length, 5);
+test('404 page is the down state, styled by site.css', () => {
+  const notFound = read('docs/404.html');
+  assert.match(notFound, /^<!DOCTYPE html>\n<html lang="en">/);
+  assert.match(notFound, /<meta name="robots" content="noindex">/);
+  // GitHub Pages serves this file at any missing path, so every reference is root-absolute.
+  assert.match(notFound, /<link rel="stylesheet" href="\/site\.css">/);
+  assert.match(notFound, /<link rel="icon" type="image\/svg\+xml" href="\/assets\/pinghue-favicon\.svg">/);
+  const refs = [...notFound.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
+  for (const ref of refs) {
+    assert.ok(ref === '#main' || ref.startsWith('/'), '404 reference must be root-absolute: ' + ref);
+    if (ref.length > 1 && ref.startsWith('/')) assert.equal(existsSync('docs' + ref), true, 'missing ' + ref);
+  }
+  assert.doesNotMatch(notFound, /styles\.css|script\.js|<script/);
 
-  assert.match(
-    css,
-    /@media\s*\(prefers-reduced-transparency:\s*reduce\)\s*\{[\s\S]*?\.js \.nav-panel\s*\{[^}]*background:\s*var\(--bg\)/,
-  );
+  assert.match(notFound, /<a class="skip-link" href="#main">Skip to content<\/a>/);
+  assert.match(notFound, /<main class="lost" id="main">/);
+  assert.match(notFound, /<a class="wordmark lost-wordmark" href="\/" aria-label="pinghue home">/);
+  assert.match(notFound, /<div class="lost-shell">/);
+  assert.match(notFound, /<h1>[^<]*404/);
+  assert.match(notFound, /class="lost-link" href="\/"/);
+  // The message is a probe line in pinghue's own terms: three misses, state down.
+  assert.match(notFound, /<span class="st-down">down<\/span>/);
+  assert.match(notFound, /three consecutive misses/i);
+});
 
-  const transitionProperties = [...css.matchAll(/\btransition\s*:\s*([^;]+);/gs)]
-    .flatMap((match) => match[1].split(','))
-    .map((declaration) => declaration.trim().split(/\s+/)[0]);
-  assert.equal(transitionProperties.length > 0, true);
+test('published docs tree excludes local workflow artifacts', () => {
+  const publishedPaths = readdirSync('docs', { recursive: true }).map(String);
   assert.deepEqual(
-    transitionProperties.filter((property) => !['opacity', 'transform'].includes(property)),
+    publishedPaths.filter((path) => (
+      /(^|\/)\.impeccable(\/|$)|(^|\/)\.superpowers(\/|$)|signal-theatre/i.test(path)
+    )),
     [],
   );
-
-  // The mobile headline size and bounded shells are the static 320px layout contract.
-  assert.match(cssRuleBody(css, 'body'), /min-width:\s*0/);
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.chapter h1\s*\{[^}]*font-size:\s*clamp\(2\.15rem,\s*10\.5vw,\s*4\.5rem\)/,
-  );
-});
-
-test('the window scene stages a seekable story next to a sticky terminal', () => {
-  const html = read('docs/index.html');
-  const css = stripCssComments(read('docs/styles.css'));
-  const js = read('docs/script.js');
-
-  const scene = html.match(/<section class="window"[^>]*>[\s\S]*?<\/section>/);
-  assert.ok(scene);
-  assert.match(scene[0], /id="why"/);
-  assert.equal(attributeCount(html, 'data-window'), 1);
-  assert.match(scene[0], /<canvas class="pulse-field" aria-hidden="true" data-pulse><\/canvas>/);
-
-  // Five chapters with an ascending, in-range tick script.
-  const chapters = [...scene[0].matchAll(/data-chapter data-tick-start="(\d+)" data-tick-end="(\d+)"/g)]
-    .map(([, start, end]) => [Number(start), Number(end)]);
-  assert.equal(chapters.length, 5);
-  assert.equal(attributeCount(html, 'data-chapter'), 5);
-  let previousEnd = -1;
-  for (const [start, end] of chapters) {
-    assert.equal(start > previousEnd, true, 'chapter ticks must ascend');
-    assert.equal(start <= end, true);
-    previousEnd = end;
-  }
-  assert.equal(chapters[0][0], 0);
-  assert.match(js, new RegExp('MAX_TICK = ' + chapters[chapters.length - 1][1] + ';'));
-
-  // The hero chapter carries the headline, the install line, and a skimmer exit.
-  const hero = scene[0].match(/<div class="chapter chapter-hero"[\s\S]*?<\/div>\s*<div class="chapter"/);
-  assert.ok(hero);
-  assert.match(hero[0], /<h1 id="hero-title">/);
-  assert.match(hero[0], /<div class="install-stack">/);
-  assert.match(hero[0], /data-copy="uv tool install pinghue"/);
-  assert.match(hero[0], /data-copy="brew install inxbit\/tap\/pinghue"/);
-  assert.match(hero[0], /<p class="scroll-cue">[\s\S]*?<a href="#install">[\s\S]*?<\/p>/);
-
-  // The hero autoplays the whole night and loops; chapters take over on scroll.
-  assert.match(js, /autoplay = true/);
-  assert.match(js, /HOLD_TICKS = 7/);
-
-  // Every story chapter carries a one-line log excerpt.
-  assert.equal((scene[0].match(/class="chapter-log"/g) || []).length, 4);
-
-  // Desktop: copy column and sticky terminal; mobile: terminal docks above the story.
-  assert.match(cssRuleBody(css, '.window-stage'), /grid-template-columns:\s*minmax\(0,\s*0\.95fr\)\s+minmax\(0,\s*1\.45fr\)/);
-  assert.match(cssRuleBody(css, '.terminal-shell'), /position:\s*sticky/);
-  assert.match(cssRuleBody(css, '.chapter h1'), /font-size:\s*clamp\(3rem,\s*4\.6vw,\s*4\.6rem\)/);
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.window-stage\s*\{[^}]*flex-direction:\s*column/,
-  );
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.window-copy\s*\{[^}]*display:\s*contents/,
-  );
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.terminal-shell\s*\{[^}]*order:\s*-1[^}]*position:\s*sticky/,
-  );
-
-  // The night is precomputed and deterministic: seekable both ways, no wall clock.
-  assert.match(js, /const snapshots = /);
-  assert.match(js, /snapshots\.push/);
-  assert.match(js, /rootMargin: "-42% 0px -42% 0px"/);
-  assert.doesNotMatch(js, /Date\.now|Math\.random/);
-
-  // Chapter dimming is a JS enhancement and must never hide story text without it.
-  // 0.8 is the lowest value where muted text on the page/shell backgrounds
-  // stays above the 4.5:1 WCAG AA contrast floor (0.78 is the exact minimum).
-  assert.match(css, /\.js \.chapter-armed\s*\{[^}]*opacity:\s*0\.8/);
-  assert.doesNotMatch(css, /(?<!\.js )\.chapter-armed\s*\{/);
-  assert.match(
-    css,
-    /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?\.js \.chapter-armed\s*\{[^}]*opacity:\s*1/,
-  );
-});
-
-test('the scale laboratory maps latency onto the fixed glyph runway', () => {
-  const html = read('docs/index.html');
-  const js = read('docs/script.js');
-  assert.equal(attributeCount(html, 'data-lab'), 1);
-  assert.equal(attributeCount(html, 'data-lab-slider'), 1);
-  assert.match(html, /<label class="lab-label" for="lat-slider">Probe latency<\/label>/);
-  assert.match(html, /<input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>/);
-  assert.match(js, /bandIndex/);
-  assert.match(js, /is-hit/);
-  // Dragging the slider writes a history-bar preview.
-  assert.equal(attributeCount(html, 'data-lab-trail'), 1);
-  assert.match(js, /data-lab-trail/);
-  // The stream loops the documented line format without inventing new output.
-  assert.match(html, /<span class="out" data-stream>2026-05-14T18:32:11\.420000\+00:00 example\.com ok latency=14\.08ms<\/span>/);
-  assert.match(js, /latency=14\.08ms/);
-});
-
-test('copy controls require JavaScript and mobile no-JS navigation stays one-row scrollable', () => {
-  const css = stripCssComments(read('docs/styles.css'));
-  assert.match(cssRuleBody(css, '.copy-btn'), /display:\s*none/);
-  assert.match(cssRuleBody(css, '.js .copy-btn'), /display:\s*inline-grid/);
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav-shell\s*\{[^}]*height:\s*var\(--nav-height\)[^}]*overflow:\s*hidden/,
-  );
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav\s*\{[^}]*gap:\s*0\.75rem/,
-  );
-  assert.match(
-    css,
-    /@media\s*\(max-width:\s*767px\)[\s\S]*?\.nav-links\s*\{[^}]*flex-wrap:\s*nowrap[^}]*overflow-x:\s*auto/,
-  );
-});
-
-test('mobile wordmark stays atomic and the enhanced menu resets no-JS clipping', () => {
-  const css = stripCssComments(read('docs/styles.css'));
-  assert.match(cssRuleBody(css, '.wordmark'), /flex:\s*0\s+0\s+auto/);
-  assert.match(cssRuleBody(css, '.js .nav-panel'), /overflow-y:\s*auto/);
-
-  const enhancedLinks = cssRuleBody(css, '.js .nav-panel .nav-links');
-  assert.match(enhancedLinks, /height:\s*auto/);
-  assert.match(enhancedLinks, /overflow:\s*visible/);
-});
-
-test('all public navigation and footer links meet the 44px target contract', () => {
-  const css = stripCssComments(read('docs/styles.css'));
-  for (const selector of ['.wordmark', '.nav-links a', '.footer nav a']) {
-    const rule = cssRuleBody(css, selector);
-    assert.match(rule, /min-width:\s*44px/, selector);
-    assert.match(rule, /min-height:\s*44px/, selector);
-  }
-  const notFound = read('docs/404.html');
-  assert.match(notFound, /class="wordmark lost-wordmark" href="\/" aria-label="PingHue home"/);
-});
-
-test('hero terminal exposes a real table without a live-region flood', () => {
-  const html = read('docs/index.html');
-  const terminal = html.match(/<figure(?=[^>]*\sdata-terminal(?:\s|>))[^>]*>[\s\S]*?<\/figure>/);
-  assert.ok(terminal);
-  assert.match(terminal[0], /<table class="term-table">/);
-  assert.match(terminal[0], /<caption class="visually-hidden">/);
-  assert.equal((terminal[0].match(/<th scope="col"/g) || []).length, 7);
-  assert.doesNotMatch(terminal[0], /role="img"/);
-  assert.doesNotMatch(terminal[0], /<table[^>]*aria-hidden/);
-  assert.doesNotMatch(terminal[0], /aria-live/);
-});
-
-test('social card signal uses the real fixed green and amber scale', () => {
-  const socialCard = read('scripts/site-social-card.html');
-  assert.match(
-    socialCard,
-    /<div class="signal"><span class="green">▁▂▃▄▅<\/span><span class="amber">▆▇█<\/span><\/div>/,
-  );
-  assert.match(socialCard, /\.signal \.green\s*\{[^}]*color:\s*#7ee787/);
-  assert.match(socialCard, /\.signal \.amber\s*\{[^}]*color:\s*#f2cc60/);
-  assert.doesNotMatch(socialCard, /\.signal\s*\{[^}]*color:\s*#7ee787/);
 });
 
 test('social card generator validates a same-directory temporary file before atomic replacement', () => {
@@ -491,24 +416,133 @@ test('social card generator validates a same-directory temporary file before ato
   assert.doesNotMatch(generator, /--screenshot="\$output"/);
 });
 
-test('scope kicker and ambient surface stay operational and locally textured', () => {
-  const html = read('docs/index.html');
-  const css = stripCssComments(read('docs/styles.css'));
-  const scopeSection = html.match(/<section(?=[^>]*\sid="not")[^>]*>[\s\S]*?<\/section>/);
-  assert.ok(scopeSection);
-  assert.match(scopeSection[0], /<p class="kicker"># what pinghue is not<\/p>/);
-  assert.doesNotMatch(scopeSection[0], /· · ·/);
-  assert.doesNotMatch(cssRuleBody(css, 'body'), /radial-gradient/);
-  assert.match(cssRuleBody(css, 'body::before'), /slate-texture\.jpg/);
+/* ------------------------------------------------ product truth */
+
+test('site.js scale and thresholds equal the pinghue source', () => {
+  const js = read('docs/site.js');
+  const buckets = pythonBuckets();
+
+  const jsBlock = js.match(/const BUCKETS = \[(.*?)\];/);
+  assert.ok(jsBlock, 'BUCKETS not found in site.js');
+  const jsBuckets = [...jsBlock[1].matchAll(/\[\s*([\d.]+)\s*,\s*"(.)"\s*\]/g)]
+    .map(([, limit, glyph]) => [Number(limit), glyph]);
+  assert.deepEqual(jsBuckets, buckets);
+
+  const slow = pythonNumber('src/pinghue/app.py', /^SLOW_LATENCY_MS = ([\d.]+)$/m);
+  assert.equal(Number(js.match(/const SLOW_MS = ([\d.]+);/)[1]), slow);
+  assert.equal(Number(js.match(/const JITTER_THRESHOLD = ([\d.]+);/)[1]), cliDefault('--jitter-threshold'));
+  assert.equal(Number(js.match(/const FAIL_THRESHOLD = ([\d.]+);/)[1]), cliDefault('--fail-threshold'));
+
+  // Behaviour, not just text: every bucket edge maps the way history_symbol does.
+  const history = read('src/pinghue/history.py');
+  assert.match(history, /return "█"\n/);
+  assert.match(history, /return "·"\n/);
+  assert.match(history, /REFUSED:\n\s*return "!"/);
+  const site = loadSiteModule();
+  buckets.forEach(([limit, glyph], i) => {
+    assert.equal(site.glyphFor(limit), glyph, 'glyph at ' + limit + 'ms');
+    assert.equal(site.bandOf(limit), i);
+    const above = i + 1 < buckets.length ? buckets[i + 1][1] : '█';
+    assert.equal(site.glyphFor(limit + 0.01), above, 'glyph just above ' + limit + 'ms');
+  });
+  assert.equal(site.glyphFor(0), buckets[0][1]);
+  assert.equal(site.glyphFor(null), '·');
+  assert.equal(site.toneFor(null), 'fail');
+  assert.equal(site.toneFor(slow), 'ok');
+  assert.equal(site.toneFor(slow + 0.01), 'slow');
+  assert.equal(site.toneFor(0), 'ok');
+
+  // The scale lab's band labels are the same buckets.
+  const labLimits = JSON.parse('[' + js.match(/const LIMITS = \[(.*?)\];/)[1] + ']');
+  assert.deepEqual(labLimits, [...buckets.map(([limit]) => '≤' + limit + 'ms'), '>' + buckets.at(-1)[0] + 'ms']);
 });
 
-test('published docs tree excludes local workflow artifacts', () => {
-  const publishedPaths = readdirSync('docs', { recursive: true }).map(String);
-  assert.deepEqual(
-    publishedPaths.filter((path) => path.includes('2026-07-11-pinghue-signal-theatre')),
-    [],
-  );
+test('the printed scale on the page is the real scale', () => {
+  const html = read('docs/index.html');
+  const buckets = pythonBuckets();
+  const slow = pythonNumber('src/pinghue/app.py', /^SLOW_LATENCY_MS = ([\d.]+)$/m);
+  const steps = [...html.matchAll(/<li data-step>[\s\S]*?<span class="rw-limit"><span class="g-(\w+)">(.)<\/span> (≤|&gt;)(\d+)ms<\/span><\/li>/g)]
+    .map(([, tone, glyph, op, limit]) => [tone, glyph, op, Number(limit)]);
+  assert.deepEqual(steps, [
+    ...buckets.map(([limit, glyph]) => [limit <= slow ? 'ok' : 'slow', glyph, '≤', limit]),
+    ['slow', '█', '&gt;', buckets.at(-1)[0]],
+  ]);
+  assert.match(html, /<span class="rw-limit"><span class="g-fail">·<\/span> loss or down<\/span>/);
+  assert.match(html, /<span class="rw-limit"><span class="g-slow">!<\/span> TCP refused<\/span>/);
+  assert.match(html, /Green up to 100ms, amber above it, red for loss\./);
+
+  const okGlyphs = buckets.filter(([limit]) => limit <= slow).map(([, glyph]) => glyph).join('');
+  const slowGlyphs = buckets.filter(([limit]) => limit > slow).map(([, glyph]) => glyph).join('') + '█';
+  // The footer mark is the whole ramp in ink: color is reserved for state.
+  assert.match(html, new RegExp('<p class="foot-mark">pinghue <span aria-hidden="true">' + okGlyphs + slowGlyphs + '</span></p>'));
+
+  // The TUI keys named on the page are real bindings.
+  const app = read('src/pinghue/app.py');
+  for (const key of ['r', 'R', 'a', 'b']) {
+    assert.match(app, new RegExp('Binding\\("' + key + '",'));
+    assert.match(html, new RegExp('<b>' + key + '</b>'));
+  }
 });
+
+test('the no-JS table is the simulated frame at START', () => {
+  const site = loadSiteModule();
+  const actual = staticRows(read('docs/index.html'));
+  const expected = expectedRows(site, site.START);
+  assert.equal(actual.length, 6);
+  assert.deepEqual(actual.map((row) => row.host), expected.map((row) => row.host));
+  actual.forEach((row, i) => {
+    assert.deepEqual(row.cells, expected[i].cells, row.host + ' cells');
+    assert.equal(row.history.length, TABLE_TAIL, row.host + ' history width');
+    assert.deepEqual(row.history, expected[i].history, row.host + ' history glyphs');
+  });
+});
+
+test('the simulated night holds pinghue state rules', () => {
+  const site = loadSiteModule();
+  const run = site.buildRun();
+  assert.equal(site.START, 176);
+  assert.equal(site.PERIOD, 240);
+  assert.equal(site.HISTORY, 56);
+  assert.equal(run.frames.length, site.PERIOD);
+
+  // Deterministic: every visitor sees the same night.
+  assert.deepEqual(site.buildRun().samples, run.samples);
+
+  const at = Object.fromEntries(run.frames[site.START].map((f) => [f.host, f]));
+  assert.deepEqual(Object.keys(at), ['edge-router-1', 'core-sw-1', 'db-primary', 'api-gw', 'backup-nas', 'dns-resolver']);
+  assert.equal(at['api-gw'].state, 'intermittent');
+  assert.ok(at['api-gw'].loss > 0);
+  assert.equal(at['backup-nas'].state, 'down');
+  assert.equal(site.fmt(at['backup-nas'].last), '-');
+  assert.equal(at['db-primary'].state, 'intermittent');
+  for (const f of Object.values(at).filter((frame) => frame.state === 'healthy')) {
+    assert.equal(site.fmtLoss(f.loss), '0.00%', f.host);
+  }
+
+  const failThreshold = cliDefault('--fail-threshold');
+  run.frames.forEach((frame, t) => {
+    frame.forEach((f, i) => {
+      // One lost probe latches intermittent until reset: a lossy host is never healthy.
+      if (f.loss > 0) assert.notEqual(f.state, 'healthy', f.host + ' at tick ' + t);
+      // Down means the last FAIL_THRESHOLD probes all failed.
+      const tail = run.samples[i].slice(Math.max(0, t - failThreshold + 1), t + 1);
+      const down = tail.length === failThreshold && tail.every((ms) => ms === null);
+      assert.equal(f.state === 'down', down, f.host + ' down at tick ' + t);
+    });
+  });
+
+  // Every glyph in every ridge follows the tone rule.
+  for (const row of run.samples) {
+    for (const ms of row) {
+      const tone = site.toneFor(ms);
+      if (ms === null) assert.equal(tone, 'fail');
+      else if (ms <= 100) assert.equal(tone, 'ok');
+      else assert.equal(tone, 'slow');
+    }
+  }
+});
+
+/* ------------------------------------------------ copy buttons */
 
 const createStubElement = (initialAttributes = {}) => {
   const attributes = new Map(Object.entries(initialAttributes));
@@ -524,9 +558,10 @@ const createStubElement = (initialAttributes = {}) => {
     setAttribute: (name, value) => attributes.set(name, value),
     addEventListener: (event, handler) => listeners.set(event, handler),
     classList: {
-      add: (name) => classes.add(name),
-      remove: (name) => classes.delete(name),
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
       toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
+      contains: (name) => classes.has(name),
     },
   };
 };
@@ -549,7 +584,8 @@ const createCopyHarness = (
   const timers = new Map();
   let nextTimerId = 1;
 
-  runInNewContext(read('docs/script.js'), {
+  // No "module" global here: site.js must run its DOM half.
+  runInNewContext(read('docs/site.js'), {
     document: {
       documentElement: { classList: { add: () => {} } },
       querySelectorAll: (selector) => selector === '.copy-btn' ? buttons : [],
@@ -557,7 +593,7 @@ const createCopyHarness = (
       addEventListener: () => {},
       hidden: false,
     },
-    window: { matchMedia: () => ({ matches: false }) },
+    window: { matchMedia: () => ({ matches: false }), addEventListener: () => {} },
     navigator: { clipboard: { writeText } },
     clearTimeout: (id) => {
       if (id !== null && id !== undefined && timers.delete(id)) {
@@ -571,6 +607,8 @@ const createCopyHarness = (
       timers.set(id, handler);
       return id;
     },
+    setInterval: () => 0,
+    clearInterval: () => {},
   });
 
   const runTimer = (id) => {
@@ -621,6 +659,18 @@ test('copy buttons announce success and reset their visible and accessible state
   assert.equal(harness.button.classes.has('copied'), false);
   assert.equal(harness.button.attributes.get('aria-label'), 'Copy install command');
   assert.equal(harness.status.textContent, '');
+});
+
+test('copy buttons copy exactly their data-copy command', async () => {
+  const copied = [];
+  const harness = createCopyHarness((text) => {
+    copied.push(text);
+    return Promise.resolve();
+  }, INSTALL_COMMANDS);
+
+  harness.buttons.forEach((button) => button.listeners.get('click')());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(copied, INSTALL_COMMANDS);
 });
 
 test('an older copy reset cannot clear a newer shared announcement', async () => {
@@ -709,410 +759,102 @@ test('an older same-button completion cannot mutate or cancel the newer result',
   assert.equal(harness.runTimer(currentReset), false);
 });
 
-const createMenuHarness = ({ legacyMedia = false } = {}) => {
-  const nav = createStubElement();
-  const toggle = createStubElement({ 'aria-expanded': 'false' });
-  const panel = createStubElement();
-  const close = createStubElement();
-  const link = createStubElement();
-  const unrelated = createStubElement();
-  const documentListeners = new Map();
-  const mediaListeners = new Map();
-  const bodyClasses = new Set();
-  let legacyChange;
-  const mobileMenu = { matches: true };
-  if (legacyMedia) {
-    mobileMenu.addListener = (handler) => { legacyChange = handler; };
-  } else {
-    mobileMenu.addEventListener = (event, handler) => mediaListeners.set(event, handler);
-  }
-  const document = {
-    documentElement: { classList: { add: () => {} } },
-    body: {
-      classList: {
-        toggle: (name, enabled) => enabled ? bodyClasses.add(name) : bodyClasses.delete(name),
-      },
-    },
-    activeElement: unrelated,
-    hidden: false,
-    querySelectorAll: () => [],
-    querySelector: (selector) => ({
-      '[data-nav]': nav,
-      '[data-nav-toggle]': toggle,
-      '[data-nav-panel]': panel,
-      '[data-nav-close]': close,
-    })[selector] || null,
-    addEventListener: (event, handler) => documentListeners.set(event, handler),
-  };
-  for (const item of [toggle, close, link, unrelated]) {
-    item.focus = () => { document.activeElement = item; };
-  }
-  panel.querySelectorAll = (selector) => (
-    selector === 'a[href]' ? [link] : [close, link]
-  );
+/* ------------------------------------------------ terrain and motion */
 
-  runInNewContext(read('docs/script.js'), {
-    document,
-    window: {
-      matchMedia: (query) => query === '(max-width: 767px)'
-        ? mobileMenu
-        : { matches: false },
-    },
-    navigator: {},
-    clearTimeout: () => {},
-    setTimeout: () => 0,
-  });
-
-  return {
-    bodyClasses,
-    close,
-    document,
-    documentListeners,
-    getMediaChange: () => legacyMedia ? legacyChange : mediaListeners.get('change'),
-    link,
-    mobileMenu,
-    panel,
-    toggle,
-    unrelated,
-  };
-};
-
-const assertClosedMobileMenu = ({ bodyClasses, document, panel, toggle }) => {
-  assert.equal(panel.hidden, true);
-  assert.equal(panel.attributes.get('data-open'), 'false');
-  assert.equal(toggle.attributes.get('aria-expanded'), 'false');
-  assert.equal(bodyClasses.has('menu-open'), false);
-  assert.equal(document.activeElement, toggle);
-};
-
-test('mobile menu synchronizes ARIA, traps focus, and restores its opener', () => {
-  const harness = createMenuHarness();
-
-  assert.equal(harness.panel.hidden, true);
-  assert.equal(harness.panel.attributes.get('data-open'), 'false');
-  assert.equal(harness.toggle.attributes.get('aria-expanded'), 'false');
-  assert.equal(harness.bodyClasses.has('menu-open'), false);
-  assert.equal(harness.document.activeElement, harness.unrelated);
-  harness.toggle.listeners.get('click')();
-  assert.equal(harness.panel.hidden, false);
-  assert.equal(harness.panel.attributes.get('data-open'), 'true');
-  assert.equal(harness.toggle.attributes.get('aria-expanded'), 'true');
-  assert.equal(harness.bodyClasses.has('menu-open'), true);
-  assert.equal(harness.document.activeElement, harness.close);
-
-  let prevented = false;
-  harness.documentListeners.get('keydown')({
-    key: 'Tab',
-    shiftKey: true,
-    preventDefault: () => { prevented = true; },
-  });
-  assert.equal(prevented, true);
-  assert.equal(harness.document.activeElement, harness.link);
-
-  prevented = false;
-  harness.documentListeners.get('keydown')({
-    key: 'Tab',
-    shiftKey: false,
-    preventDefault: () => { prevented = true; },
-  });
-  assert.equal(prevented, true);
-  assert.equal(harness.document.activeElement, harness.close);
-
-  harness.documentListeners.get('keydown')({
-    key: 'Escape',
-    shiftKey: false,
-    preventDefault: () => {},
-  });
-  assertClosedMobileMenu(harness);
-});
-
-test('mobile menu closes through every pointer dismissal path and viewport reset', () => {
-  const harness = createMenuHarness();
-  const open = () => {
-    harness.document.activeElement = harness.unrelated;
-    harness.toggle.listeners.get('click')();
-  };
-
-  open();
-  harness.close.listeners.get('click')();
-  assertClosedMobileMenu(harness);
-
-  open();
-  harness.link.listeners.get('click')();
-  assertClosedMobileMenu(harness);
-
-  open();
-  harness.panel.listeners.get('click')({ target: harness.panel });
-  assertClosedMobileMenu(harness);
-
-  open();
-  harness.mobileMenu.matches = false;
-  harness.getMediaChange()();
-  assert.equal(harness.panel.hidden, false);
-  assert.equal(harness.panel.attributes.get('data-open'), 'false');
-  assert.equal(harness.toggle.attributes.get('aria-expanded'), 'false');
-  assert.equal(harness.document.activeElement, harness.toggle);
-});
-
-test('mobile menu registers the legacy MediaQueryList change callback', () => {
-  const harness = createMenuHarness({ legacyMedia: true });
-
-  assert.equal(typeof harness.getMediaChange(), 'function');
-  harness.toggle.listeners.get('click')();
-  harness.mobileMenu.matches = false;
-  harness.getMediaChange()();
-
-  assert.equal(harness.panel.hidden, false);
-  assert.equal(harness.panel.attributes.get('data-open'), 'false');
-  assert.equal(harness.document.activeElement, harness.toggle);
-});
-
-test('reveal content resolves when motion or observer support is unavailable', () => {
-  for (const { reduced, withObserver } of [
-    { reduced: false, withObserver: false },
-    { reduced: true, withObserver: true },
-  ]) {
-    const item = createStubElement();
-    const strip = createStubElement();
-    let observerConstructions = 0;
-    function IntersectionObserver() { observerConstructions += 1; }
-    const window = { matchMedia: () => ({ matches: reduced }) };
-    const context = {
-      document: {
-        documentElement: { classList: { add: () => {} } },
-        querySelectorAll: (selector) => selector === '[data-reveal]' ? [item] : [],
-        querySelector: (selector) => selector === '[data-scale]' ? strip : null,
-        addEventListener: () => {},
-        hidden: false,
-      },
-      window,
-      navigator: {},
-      clearTimeout: () => {},
-      setTimeout: () => 0,
+// Any 2D context call is accepted and counted.
+const createContextStub = (calls) => new Proxy({}, {
+  get: (target, prop) => {
+    if (prop in target) return target[prop];
+    return (...args) => {
+      calls.set(prop, (calls.get(prop) || 0) + 1);
+      return prop === 'getImageData' ? { data: new Uint8ClampedArray(4 * 4096) } : undefined;
     };
-    if (withObserver) {
-      window.IntersectionObserver = IntersectionObserver;
-      context.IntersectionObserver = IntersectionObserver;
-    }
-
-    runInNewContext(read('docs/script.js'), context);
-
-    assert.equal(item.classes.has('reveal-ready'), true);
-    assert.equal(item.classes.has('is-revealed'), true);
-    assert.equal(strip.classes.has('in-view'), true);
-    assert.equal(observerConstructions, 0);
-  }
+  },
+  set: (target, prop, value) => {
+    target[prop] = value;
+    return true;
+  },
 });
 
-test('reveal observer resolves each intersecting target only once', () => {
-  const item = createStubElement();
-  const strip = createStubElement();
-  const observers = [];
-  function IntersectionObserver(callback, options) {
-    this.callback = callback;
-    this.options = options;
-    this.targets = new Set();
-    this.unobserved = [];
-    this.observe = (target) => this.targets.add(target);
-    this.unobserve = (target) => {
-      this.targets.delete(target);
-      this.unobserved.push(target);
-    };
-    this.deliver = (entries) => {
-      const observedEntries = entries.filter(({ target }) => this.targets.has(target));
-      this.callback(observedEntries, this);
-    };
-    observers.push(this);
-  }
-  const window = {
-    IntersectionObserver,
-    matchMedia: () => ({ matches: false }),
+const createTerrainHarness = ({ reduced }) => {
+  const ctxCalls = new Map();
+  const box = { left: 0, top: 0, right: 1200, bottom: 900, width: 1200, height: 900 };
+  const canvas = createStubElement();
+  canvas.getBoundingClientRect = () => box;
+  canvas.getContext = () => createContextStub(ctxCalls);
+  const stage = createStubElement({ 'data-clip': 'media/ridge.mp4' });
+  stage.querySelector = (selector) => selector === 'canvas' ? canvas : null;
+  const stream = createStubElement();
+  stream.textContent = '2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms';
+
+  const created = [];
+  const createElement = (tag) => {
+    created.push(tag);
+    const element = createStubElement();
+    element.tag = tag;
+    element.paused = true;
+    element.getContext = () => createContextStub(ctxCalls);
+    element.play = () => Promise.reject(new Error('autoplay blocked'));
+    return element;
   };
 
-  runInNewContext(read('docs/script.js'), {
+  const intervals = [];
+  const timeouts = [];
+  const htmlClasses = new Set();
+  runInNewContext(read('docs/site.js'), {
     document: {
-      documentElement: { classList: { add: () => {} } },
-      querySelectorAll: (selector) => selector === '[data-reveal]' ? [item] : [],
-      querySelector: (selector) => selector === '[data-scale]' ? strip : null,
+      documentElement: { classList: { add: (name) => htmlClasses.add(name) } },
+      querySelectorAll: () => [],
+      querySelector: (selector) => ({
+        '[data-terrain]': stage,
+        '[data-stream]': stream,
+      })[selector] || null,
       addEventListener: () => {},
+      createElement,
       hidden: false,
     },
-    window,
-    IntersectionObserver,
+    window: {
+      matchMedia: (query) => ({ matches: reduced && query === '(prefers-reduced-motion: reduce)' }),
+      addEventListener: () => {},
+      devicePixelRatio: 1,
+    },
     navigator: {},
+    Path2D: function Path2D() { this.moveTo = () => {}; this.lineTo = () => {}; this.closePath = () => {}; },
+    performance: { now: () => 0 },
+    requestAnimationFrame: () => 1,
+    cancelAnimationFrame: () => {},
+    setTimeout: (handler, delay) => { timeouts.push(delay); return timeouts.length; },
     clearTimeout: () => {},
-    setTimeout: () => 0,
+    setInterval: (handler, delay) => { intervals.push(delay); return intervals.length; },
+    clearInterval: () => {},
   });
 
-  const revealObserver = observers.find(({ options }) => options.threshold === 0.16);
-  const entries = [
-    { target: item, isIntersecting: true },
-    { target: strip, isIntersecting: true },
-  ];
-  assert.ok(revealObserver);
-  assert.equal(revealObserver.targets.size, 2);
-
-  revealObserver.deliver(entries);
-  assert.equal(item.classes.has('is-revealed'), true);
-  assert.equal(strip.classes.has('in-view'), true);
-  assert.deepEqual(revealObserver.unobserved, [item, strip]);
-  assert.equal(revealObserver.targets.size, 0);
-
-  revealObserver.deliver(entries);
-  assert.deepEqual(revealObserver.unobserved, [item, strip]);
-});
-
-const createTerminalHarness = ({
-  initiallyHidden = false,
-  reduced = false,
-  withObserver = true,
-} = {}) => {
-  const createNode = () => {
-    const node = createStubElement();
-    node.children = [];
-    node.appendChild = (child) => {
-      node.children.push(child);
-      return child;
-    };
-    node.replaceChildren = (...children) => { node.children = children; };
-    return node;
-  };
-  const tbody = createNode();
-  const clock = createNode();
-  const root = createNode();
-  root.querySelector = (selector) => ({
-    '[data-rows]': tbody,
-    '[data-clock]': clock,
-  })[selector] || null;
-  const documentListeners = new Map();
-  const document = {
-    documentElement: { classList: { add: () => {} } },
-    hidden: initiallyHidden,
-    querySelectorAll: () => [],
-    querySelector: (selector) => selector === '[data-terminal]' ? root : null,
-    addEventListener: (event, handler) => documentListeners.set(event, handler),
-    createDocumentFragment: createNode,
-    createElement: createNode,
-  };
-  const observers = [];
-  function IntersectionObserver(callback, options) {
-    this.callback = callback;
-    this.options = options;
-    this.targets = [];
-    this.observe = (target) => this.targets.push(target);
-    this.unobserve = (target) => {
-      this.targets = this.targets.filter((candidate) => candidate !== target);
-    };
-    observers.push(this);
-  }
-  const activeIntervals = new Set();
-  let intervalStarts = 0;
-  let intervalStops = 0;
-  let nextInterval = 1;
-  const window = {
-    matchMedia: (query) => ({
-      matches: query === '(prefers-reduced-motion: reduce)' && reduced,
-    }),
-  };
-  const context = {
-    document,
-    window,
-    navigator: {},
-    clearTimeout: () => {},
-    setTimeout: () => 0,
-    setInterval: () => {
-      intervalStarts += 1;
-      const id = nextInterval;
-      nextInterval += 1;
-      activeIntervals.add(id);
-      return id;
-    },
-    clearInterval: (id) => {
-      intervalStops += 1;
-      activeIntervals.delete(id);
-    },
-  };
-  if (withObserver) {
-    window.IntersectionObserver = IntersectionObserver;
-    context.IntersectionObserver = IntersectionObserver;
-  }
-
-  runInNewContext(read('docs/script.js'), context);
-
-  return {
-    activeIntervals,
-    clock,
-    document,
-    documentListeners,
-    getIntervalStarts: () => intervalStarts,
-    getIntervalStops: () => intervalStops,
-    observers,
-    root,
-  };
+  return { created, ctxCalls, htmlClasses, intervals, stage, stream, timeouts };
 };
 
-test('terminal interval follows observer and document visibility without duplication', () => {
-  const harness = createTerminalHarness();
-  const terminalObserver = harness.observers.find(({ options }) => options.threshold === 0.08);
+test('reduced motion draws the terrain once with no clip and no clock', async () => {
+  const harness = createTerrainHarness({ reduced: true });
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.ok(terminalObserver);
-  assert.equal(harness.clock.textContent, '05:38');
-  assert.equal(harness.getIntervalStarts(), 0);
-  assert.equal(harness.activeIntervals.size, 0);
+  // The terrain path really ran.
+  assert.equal(harness.htmlClasses.has('js'), true);
+  assert.equal(harness.stage.classes.has('is-drawn'), true);
+  assert.ok((harness.ctxCalls.get('fillRect') || 0) > 0, 'terrain must be drawn');
 
-  terminalObserver.callback([{ target: harness.root, isIntersecting: true }]);
-  assert.equal(harness.getIntervalStarts(), 1);
-  assert.equal(harness.activeIntervals.size, 1);
-
-  terminalObserver.callback([{ target: harness.root, isIntersecting: true }]);
-  assert.equal(harness.getIntervalStarts(), 1);
-  assert.equal(harness.activeIntervals.size, 1);
-
-  harness.document.hidden = true;
-  harness.documentListeners.get('visibilitychange')();
-  assert.equal(harness.getIntervalStops(), 1);
-  assert.equal(harness.activeIntervals.size, 0);
-
-  terminalObserver.callback([{ target: harness.root, isIntersecting: true }]);
-  assert.equal(harness.getIntervalStarts(), 1);
-
-  harness.document.hidden = false;
-  harness.documentListeners.get('visibilitychange')();
-  assert.equal(harness.getIntervalStarts(), 2);
-  assert.equal(harness.activeIntervals.size, 1);
-
-  terminalObserver.callback([{ target: harness.root, isIntersecting: false }]);
-  assert.equal(harness.getIntervalStops(), 2);
-  assert.equal(harness.activeIntervals.size, 0);
-
-  terminalObserver.callback([{ target: harness.root, isIntersecting: false }]);
-  assert.equal(harness.getIntervalStops(), 2);
+  // ...and nothing moves.
+  assert.equal(harness.created.filter((tag) => tag === 'video').length, 0);
+  assert.deepEqual(harness.intervals, []);
+  assert.equal(harness.stage.classes.has('is-clip'), false);
+  assert.equal(harness.stream.textContent, '2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms');
 });
 
-test('terminal interval waits for document visibility without observer support', () => {
-  const harness = createTerminalHarness({
-    initiallyHidden: true,
-    withObserver: false,
-  });
+test('without reduced motion the clip is attempted and the clock starts once it settles', async () => {
+  const harness = createTerrainHarness({ reduced: false });
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(harness.clock.textContent, '05:38');
-  assert.equal(harness.getIntervalStarts(), 0);
-  assert.equal(harness.activeIntervals.size, 0);
-
-  harness.document.hidden = false;
-  harness.documentListeners.get('visibilitychange')();
-  assert.equal(harness.getIntervalStarts(), 1);
-  assert.equal(harness.activeIntervals.size, 1);
-});
-
-test('reduced motion renders the static terminal frame without an interval', () => {
-  const harness = createTerminalHarness({ reduced: true, withObserver: true });
-
-  // The closed window: 34 ticks of 84.6 seconds is the whole 02:00 to 02:47 night.
-  assert.equal(harness.clock.textContent, '47:56');
-  assert.equal(harness.getIntervalStarts(), 0);
-  assert.equal(harness.getIntervalStops(), 0);
-  assert.equal(harness.activeIntervals.size, 0);
-  assert.equal(harness.observers.length, 0);
-  assert.equal(harness.documentListeners.has('visibilitychange'), false);
+  assert.equal(harness.stage.classes.has('is-drawn'), true);
+  assert.equal(harness.created.filter((tag) => tag === 'video').length, 1);
+  // A blocked autoplay falls through to the live terrain: clock plus line stream.
+  assert.equal(harness.stage.classes.has('is-live'), true);
+  assert.deepEqual(harness.intervals, [1000, 1000]);
 });

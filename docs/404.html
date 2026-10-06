@@ -3,24 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
   <title>404 - pinghue</title>
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#efede6">
   <link rel="icon" type="image/svg+xml" href="/assets/pinghue-favicon.svg">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/site.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <main class="lost" id="main">
-    <a class="wordmark lost-wordmark" href="/" aria-label="PingHue home">
-      <span class="wm-ping">ping</span><span class="wm-hue">hue</span>
-    </a>
+    <a class="wordmark lost-wordmark" href="/" aria-label="pinghue home">pinghue</a>
     <div class="lost-shell">
-      <p class="kicker"><span class="glyph red">· · ·</span> # host state: down</p>
-      <h1>404: not found.</h1>
-      <pre><code><span class="prompt">$</span> pinghue this-page
-<span class="out">this-page</span> <span class="c-red">resolve failed: NXDOMAIN</span></code></pre>
-      <p><a class="lost-link" href="/">Reset and go back to pinghue.com</a></p>
+      <p><code>this-page <span class="st-down">down</span> last <span class="t-fail">-</span> loss <span class="t-fail">100.00%</span> <span class="g-fail" aria-hidden="true">···</span></code></p>
+      <h1>404: no reply.</h1>
+      <p>The route answered nothing. Three consecutive misses, so pinghue marks it down until it answers again. This one will not.</p>
+      <p><a class="lost-link" href="/">reset and go back to pinghue.com</a></p>
     </div>
   </main>
 </body>

@@ -2,12 +2,129 @@
    The page is drawn in pinghue's own fixed glyph scale (src/pinghue/history.py).
    A deterministic simulated run feeds a perspective terrain (one ridge per host)
    and the flat table under it; head-on, every ridge is the history column
-   pinghue prints. On load a landscape clip is rendered through the same glyph
-   ramp, then dissolves into the data. No JavaScript shows the final frame;
-   reduced motion shows it without the clip or the clock. */
+   pinghue prints. On load a landscape clip is printed through the same glyph
+   ramp, then the data repaints over it from the horizon forward. No JavaScript
+   shows the final frame; reduced motion shows it without the clip or the clock. */
 
 (() => {
   "use strict";
+
+  /* ------------------------------------------------ the fixed scale */
+
+  // Mirrors BAR_BUCKETS in src/pinghue/history.py and SLOW_LATENCY_MS in app.py.
+  const BUCKETS = [[1, "▁"], [3, "▂"], [10, "▃"], [30, "▄"], [100, "▅"], [300, "▆"], [1000, "▇"]];
+  const SLOW_MS = 100;
+  const JITTER_THRESHOLD = 50;
+  const FAIL_THRESHOLD = 3;
+
+  const bandOf = (ms) => {
+    for (let i = 0; i < BUCKETS.length; i++) if (ms <= BUCKETS[i][0]) return i;
+    return 7;
+  };
+  const glyphFor = (ms) => (ms === null ? "·" : (BUCKETS[bandOf(ms)] || [0, "█"])[1]);
+  const toneFor = (ms) => (ms === null ? "fail" : ms > SLOW_MS ? "slow" : "ok");
+
+  /* ------------------------------------------------ the simulated run */
+
+  // One deterministic window so every visitor sees the same night. Something
+  // happens in every 56-probe stretch: db-primary climbs four ridges, api-gw
+  // drops three probes, backup-nas goes down twice and stays down the second time.
+  const PERIOD = 240;
+  const START = 176;
+  const HISTORY = 56;
+
+  const buildRun = () => {
+    let seed = 20261005;
+    const rand = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const wobble = (base, spread) => base + (rand() - 0.5) * 2 * spread;
+    const ridge = (t, at, width, peak) => peak * Math.exp(-(((t - at) / width) ** 2));
+    const hump = (t, period, phase, power) => Math.max(0, Math.sin(t / period + phase)) ** power;
+
+    const hosts = [
+      { name: "edge-router-1", at: (t) => wobble(6.8, 2) + 24 * hump(t, 5.6, 0, 2) },
+      { name: "core-sw-1", at: (t) => wobble(1.7, 0.5) + 7 * hump(t, 4.3, 1, 2) },
+      {
+        name: "db-primary",
+        at: (t) => {
+          const climb = ridge(t, 150, 8.5, 1040) + ridge(t, 64, 4, 70) + ridge(t, 30, 6, 420)
+            + ridge(t, 95, 5, 300) + ridge(t, 210, 5, 260);
+          return Math.max(9, wobble(16, 5) + 50 * hump(t, 6.2, 2, 2) + climb * (0.86 + rand() * 0.28));
+        },
+      },
+      { name: "api-gw", at: (t) => (t === 20 || t === 100 || t === 146 ? null : wobble(15, 4) + 68 * hump(t, 7.1, 0.4, 2)) },
+      {
+        name: "backup-nas",
+        at: (t) => ((t >= 60 && t < 84) || (t >= 152 && t < 233) ? null : wobble(4.2, 1.4) + 24 * hump(t, 5.1, 2.2, 2)),
+      },
+      { name: "dns-resolver", at: (t) => Math.max(0.3, wobble(0.75, 0.25) + 5.5 * hump(t, 6.7, 0.8, 2)) },
+    ];
+
+    const samples = hosts.map((h) => {
+      const row = [];
+      for (let t = 0; t < PERIOD; t++) {
+        const v = h.at(t);
+        row.push(v === null ? null : Math.round(v * 100) / 100);
+      }
+      return row;
+    });
+
+    // Whole-run statistics, the way pinghue keeps them, for every tick.
+    const frames = [];
+    const acc = hosts.map(() => ({
+      sent: 0, received: 0, sum: 0, last: null, prev: null, jitter: 0,
+      fails: 0, seen: false, latched: false,
+    }));
+    for (let t = 0; t < PERIOD; t++) {
+      frames.push(hosts.map((h, i) => {
+        const a = acc[i];
+        const ms = samples[i][t];
+        a.sent += 1;
+        if (ms === null) {
+          a.fails += 1;
+          a.last = null;
+          a.latched = true;
+        } else {
+          a.received += 1;
+          a.sum += ms;
+          a.fails = 0;
+          a.seen = true;
+          if (a.prev !== null) a.jitter += (Math.abs(ms - a.prev) - a.jitter) / 16;
+          if (a.jitter > JITTER_THRESHOLD) a.latched = true;
+          a.prev = ms;
+          a.last = ms;
+        }
+        const down = a.seen ? a.fails >= FAIL_THRESHOLD : true;
+        return {
+          host: h.name,
+          state: down ? "down" : a.latched ? "intermittent" : "healthy",
+          last: a.last,
+          avg: a.received ? a.sum / a.received : null,
+          jitter: a.received > 1 ? a.jitter : 0,
+          loss: ((a.sent - a.received) / a.sent) * 100,
+        };
+      }));
+    }
+
+    const historyAt = (i, t) => {
+      const out = [];
+      for (let k = t - HISTORY + 1; k <= t; k++) out.push(samples[i][((k % PERIOD) + PERIOD) % PERIOD]);
+      return out;
+    };
+
+    return { hosts, samples, frames, historyAt };
+  };
+
+  const fmt = (n) => (n === null ? "-" : n.toFixed(2));
+  const fmtLoss = (n) => n.toFixed(2) + "%";
+
+  // The pure core is importable (tests, the static-frame generator) without a DOM.
+  if (typeof module === "object" && module.exports) {
+    module.exports = { buildRun, glyphFor, toneFor, bandOf, fmt, fmtLoss, START, HISTORY, PERIOD };
+    return;
+  }
 
   const doc = document;
   doc.documentElement.classList.add("js");
@@ -85,124 +202,14 @@
     });
   });
 
-  /* ------------------------------------------------ the fixed scale */
-
-  // Mirrors BAR_BUCKETS in src/pinghue/history.py and SLOW_LATENCY_MS in app.py.
-  const BUCKETS = [[1, "▁"], [3, "▂"], [10, "▃"], [30, "▄"], [100, "▅"], [300, "▆"], [1000, "▇"]];
-  const SLOW_MS = 100;
-  const JITTER_THRESHOLD = 50;
-  const FAIL_THRESHOLD = 3;
-
-  const bandOf = (ms) => {
-    for (let i = 0; i < BUCKETS.length; i++) if (ms <= BUCKETS[i][0]) return i;
-    return 7;
-  };
-  const glyphFor = (ms) => (ms === null ? "·" : (BUCKETS[bandOf(ms)] || [0, "█"])[1]);
-  const toneFor = (ms) => (ms === null ? "fail" : ms > SLOW_MS ? "slow" : "ok");
-
-  /* ------------------------------------------------ the simulated run */
-
-  // One deterministic window so every visitor sees the same night:
-  // api-gw drops one probe, db-primary climbs a ridge, backup-nas goes down.
-  const PERIOD = 240;
-  const START = 176;
-  const HISTORY = 56;
-
-  const buildRun = () => {
-    let seed = 20261005;
-    const rand = () => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed / 4294967296;
-    };
-    const wobble = (base, spread) => base + (rand() - 0.5) * 2 * spread;
-    const ridge = (t, at, width, peak) => peak * Math.exp(-(((t - at) / width) ** 2));
-
-    const hump = (t, period, phase, power) => Math.max(0, Math.sin(t / period + phase)) ** power;
-    const hosts = [
-      { name: "edge-router-1", at: (t) => wobble(6.8, 2) + 24 * hump(t, 5.6, 0, 2) },
-      { name: "core-sw-1", at: (t) => wobble(1.7, 0.5) + 7 * hump(t, 4.3, 1, 2) },
-      {
-        name: "db-primary",
-        at: (t) => {
-          const climb = ridge(t, 150, 8.5, 1040) + ridge(t, 64, 4, 70);
-          return Math.max(9, wobble(16, 5) + 50 * hump(t, 6.2, 2, 2) + climb * (0.86 + rand() * 0.28));
-        },
-      },
-      { name: "api-gw", at: (t) => (t === 146 ? null : wobble(15, 4) + 68 * hump(t, 7.1, 0.4, 2)) },
-      { name: "backup-nas", at: (t) => (t >= 152 && t < 233 ? null : wobble(4.2, 1.4) + 24 * hump(t, 5.1, 2.2, 2)) },
-      { name: "dns-resolver", at: (t) => Math.max(0.3, wobble(0.75, 0.25) + 5.5 * hump(t, 6.7, 0.8, 2)) },
-    ];
-
-    const samples = hosts.map((h) => {
-      const row = [];
-      for (let t = 0; t < PERIOD; t++) {
-        const v = h.at(t);
-        row.push(v === null ? null : Math.round(v * 100) / 100);
-      }
-      return row;
-    });
-
-    // Whole-run statistics, the way pinghue keeps them, for every tick.
-    const frames = [];
-    const acc = hosts.map(() => ({
-      sent: 0, received: 0, sum: 0, last: null, prev: null, jitter: 0,
-      fails: 0, seen: false, latched: false,
-    }));
-    for (let t = 0; t < PERIOD; t++) {
-      frames.push(hosts.map((h, i) => {
-        const a = acc[i];
-        const ms = samples[i][t];
-        a.sent += 1;
-        if (ms === null) {
-          a.fails += 1;
-          a.last = null;
-          a.latched = true;
-        } else {
-          a.received += 1;
-          a.sum += ms;
-          a.fails = 0;
-          a.seen = true;
-          if (a.prev !== null) a.jitter += (Math.abs(ms - a.prev) - a.jitter) / 16;
-          if (a.jitter > JITTER_THRESHOLD) a.latched = true;
-          a.prev = ms;
-          a.last = ms;
-        }
-        const down = a.seen ? a.fails >= FAIL_THRESHOLD : true;
-        return {
-          host: h.name,
-          state: down ? "down" : a.latched ? "intermittent" : "healthy",
-          last: a.last,
-          avg: a.received ? a.sum / a.received : null,
-          jitter: a.received > 1 ? a.jitter : 0,
-          loss: ((a.sent - a.received) / a.sent) * 100,
-        };
-      }));
-    }
-
-    const historyAt = (i, t) => {
-      const out = [];
-      for (let k = t - HISTORY + 1; k <= t; k++) out.push(samples[i][((k % PERIOD) + PERIOD) % PERIOD]);
-      return out;
-    };
-
-    return { hosts, samples, frames, historyAt };
-  };
-
-  const fmt = (n) => (n === null ? "-" : n.toFixed(2));
-  const fmtLoss = (n) => n.toFixed(2) + "%";
-
-  if (typeof module === "object" && module.exports) {
-    module.exports = { buildRun, glyphFor, toneFor, bandOf, fmt, fmtLoss, START, HISTORY, PERIOD };
-    return;
-  }
-
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const stacked = () => window.matchMedia("(max-width: 1099px)").matches;
   const run = buildRun();
+  let paused = false;
 
   /* ------------------------------------------------ the flat table */
 
   const tableBody = doc.querySelector("[data-rows]");
-  const clock = doc.querySelector("[data-clock]");
   const TABLE_TAIL = 14;
 
   const renderTable = (t) => {
@@ -234,10 +241,73 @@
         span.className = "g-" + toneFor(ms);
       });
     });
-    if (clock) {
-      const secs = t % PERIOD;
-      clock.textContent = "02:" + String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
+  };
+
+  /* ------------------------------------------------ printing a clip in glyphs */
+
+  // One frame of a video printed through pinghue's ramp: equalized so form
+  // reads instead of one dark slab, ridgelines (light above dark) printed full,
+  // the darkest tenths hatched. Bars are bottom-anchored like the real glyphs.
+  const printClip = (ctx, video, scratch, f) => {
+    const { x0, y0, cols, rows, cw, ch } = f;
+    if (cols <= 0 || rows <= 0) return;
+    if (scratch.canvas.width !== cols || scratch.canvas.height !== rows) {
+      scratch.canvas.width = cols;
+      scratch.canvas.height = rows;
     }
+    const vw = video.videoWidth || 16;
+    const vh = video.videoHeight || 9;
+    const boxAspect = (cols * cw) / (rows * ch);
+    let sh = vh * f.cropHeight;
+    let sw = sh * boxAspect;
+    if (sw > vw) {
+      sw = vw;
+      sh = sw / boxAspect;
+    }
+    const sy = Math.min(vh - sh, vh * f.cropTop);
+    scratch.ctx.drawImage(video, (vw - sw) / 2, sy, sw, sh, 0, 0, cols, rows);
+    const px = scratch.ctx.getImageData(0, 0, cols, rows).data;
+    const n = cols * rows;
+    if (!scratch.lums || scratch.lums.length !== n) {
+      scratch.lums = new Float32Array(n);
+      scratch.sorted = new Float32Array(n);
+    }
+    const lums = scratch.lums;
+    for (let i = 0; i < n; i++) {
+      const o = i * 4;
+      lums[i] = (0.2126 * px[o] + 0.7152 * px[o + 1] + 0.0722 * px[o + 2]) / 255;
+    }
+    scratch.sorted.set(lums);
+    scratch.sorted.sort();
+    const cuts = [];
+    for (let q = 1; q < 10; q++) cuts.push(scratch.sorted[Math.floor((n - 1) * (1 - q / 10))]);
+    const barW = cw * 0.72;
+    for (let y = 0; y < rows; y++) {
+      const yb = y0 + (y + 1) * ch;
+      for (let x = 0; x < cols; x++) {
+        const i = y * cols + x;
+        const lum = lums[i];
+        let level = 0;
+        while (level < 9 && lum <= cuts[level]) level++;
+        level -= 1;
+        const ridge = y > 1 && lum < cuts[3] && lums[i - cols] - lum > 0.045;
+        if (ridge) level = 9;
+        else if (f.hatch && level >= 8 && (x + 2 * y) % 3 === 0) continue;
+        if (level <= 0) continue;
+        const cx = x0 + x * cw;
+        if (level === 1) {
+          ctx.fillRect(cx + cw * 0.3, yb - ch * 0.16, cw * 0.2, ch * 0.1);
+          continue;
+        }
+        const h = (level - 1) / 8 * ch * 0.9;
+        ctx.fillRect(cx, yb - h, barW, h);
+      }
+    }
+  };
+
+  const makeScratch = () => {
+    const el = doc.createElement("canvas");
+    return { canvas: el, ctx: el.getContext("2d", { willReadFrequently: true }), lums: null, sorted: null };
   };
 
   /* ------------------------------------------------ the terrain */
@@ -246,21 +316,35 @@
   const canvas = stage && stage.querySelector("canvas");
   const ctx = canvas && canvas.getContext("2d");
   const ink = {
-    paper: "#efede6",
     ink: "#161513",
     muted: "#5d5b55",
-    floor: "#bcb8ad",
-    guide: "#a29e93",
-    red: "#c0302a",
-    // Green carries every band at or under 100ms, amber every band over it.
-    band: ["#5aa865", "#4d9f59", "#40964e", "#358c44", "#2b823b", "#e0a93a", "#c97f1f", "#86450f"],
-    top: ["#1f6a2c", "#1c6429", "#195e26", "#165823", "#135220", "#a8690d", "#8a4c09", "#4f2605"],
+    floor: "#a9a59a",
+    plane: "#c6c2b7",
+    red: "#b8322b",
+    ok: "#1d7a37",
+    slow: "#9c5a00",
   };
+  // Cells per glyph band: height still orders exactly like ▁▂▃▄▅▆▇█.
+  const STACK = [1, 2, 4, 5, 7, 9, 11, 13];
+  // Each stack shades from its band's light foot to a dark crest.
+  const FOOT = ["#7dbb88", "#6db07a", "#5ea66d", "#4f9c60", "#409154", "#e5b24c", "#d08b2b", "#9a5518"];
+  const CREST = ["#1f6a2c", "#1c6429", "#195e26", "#165823", "#135220", "#a8690d", "#7a3d08", "#3b1c04"];
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const SHADES = FOOT.map((foot, b) => {
+    const a = hex(foot);
+    const c = hex(CREST[b]);
+    const n = STACK[b];
+    return Array.from({ length: n }, (_, s) => {
+      const k = n === 1 ? 1 : s / (n - 1);
+      return "rgb(" + a.map((v, j) => Math.round(v + (c[j] - v) * k)).join(",") + ")";
+    });
+  });
 
   let geo = null;
   let dpr = 1;
   let shownTick = START;
-  let tilt = 1; // 1 = perspective terrain, 0 = head-on (flat over the table)
+  let tilt = 1; // 1 = perspective terrain, 0 = head-on (landed on the table)
+  let landed = false;
 
   const lerp = (a, b, k) => a + (b - a) * k;
   // Row anchors measured from the approved comp, as fractions of the stage box.
@@ -272,14 +356,14 @@
     { y: 0.495, l: 0.219, r: 0.988 },
     { y: 0.597, l: 0.178, r: 0.983 },
   ];
-  // Phones have no table inside the stage, so the terrain takes its full height.
+  // Stacked layouts have no table inside the stage, so the terrain takes its full height.
   const NARROW_ROWS = [
-    { y: 0.2, l: 0.44, r: 0.985 },
-    { y: 0.33, l: 0.41, r: 0.985 },
-    { y: 0.5, l: 0.37, r: 0.985 },
-    { y: 0.64, l: 0.34, r: 0.985 },
-    { y: 0.78, l: 0.31, r: 0.985 },
-    { y: 0.92, l: 0.28, r: 0.985 },
+    { y: 0.22, l: 0.44, r: 0.985 },
+    { y: 0.35, l: 0.41, r: 0.985 },
+    { y: 0.52, l: 0.37, r: 0.985 },
+    { y: 0.66, l: 0.34, r: 0.985 },
+    { y: 0.8, l: 0.31, r: 0.985 },
+    { y: 0.93, l: 0.28, r: 0.985 },
   ];
 
   const measure = () => {
@@ -289,20 +373,26 @@
     canvas.width = Math.round(box.width * dpr);
     canvas.height = Math.round(box.height * dpr);
     const table = doc.querySelector("[data-table]");
-    const histCells = table ? [...table.querySelectorAll("tbody td:last-child")] : [];
     const head = table ? table.querySelector("thead") : null;
     const hb = head ? head.getBoundingClientRect() : null;
     const tb = table ? table.getBoundingClientRect() : null;
+    const histCells = table ? [...table.querySelectorAll("tbody td:last-child")] : [];
     geo = {
       w: box.width,
       h: box.height,
-      narrow: box.width < 640,
+      narrow: stacked(),
       tableTop: hb ? hb.top - box.top : box.height,
       tableLeft: tb ? tb.left - box.left : box.width * 0.13,
       tableRight: tb ? tb.right - box.left : box.width,
+      // Where the table's real history glyphs sit, so head-on lands on them.
       flat: histCells.map((td) => {
-        const r = td.getBoundingClientRect();
-        return { x: r.left - box.left, w: r.width, y: r.bottom - box.top - r.height * 0.18, h: r.height * 0.62 };
+        const spans = td.children;
+        if (!spans.length) return null;
+        const first = spans[0].getBoundingClientRect();
+        const last = spans[spans.length - 1].getBoundingClientRect();
+        const fs = parseFloat(getComputedStyle(spans[0]).fontSize) || 16;
+        const baseline = first.top + 0.859 * fs;
+        return { x: first.left - box.left, w: last.right - first.left, y: baseline + 0.4 * fs - box.top, unit: 0.175 * fs };
       }),
     };
   };
@@ -314,103 +404,122 @@
       left: a.l * geo.w,
       right: a.r * geo.w,
       base: a.y * geo.h,
-      unit: lerp(0.0078, 0.0118, d) * geo.w * (geo.narrow ? 1.3 : 1),
+      unit: geo.narrow ? lerp(0.0105, 0.0155, d) * geo.h : lerp(0.0062, 0.0094, d) * geo.w,
     };
-    if (tilt >= 1 || !geo.flat[r]) return persp;
     const f = geo.flat[r];
-    const flat = { left: f.x, right: f.x + f.w, base: f.y, unit: f.h / 8 };
+    if (tilt >= 1 || !f) return persp;
     const k = tilt;
     return {
-      left: lerp(flat.left, persp.left, k),
-      right: lerp(flat.right, persp.right, k),
-      base: lerp(flat.base, persp.base, k),
-      unit: lerp(flat.unit, persp.unit, k),
+      left: lerp(f.x, persp.left, k),
+      right: lerp(f.x + f.w, persp.right, k),
+      base: lerp(f.y, persp.base, k),
+      unit: lerp(f.unit, persp.unit, k),
     };
   };
 
-  const drawTerrain = (t) => {
+  const drawLabels = () => {
+    if (tilt <= 0.5 || landed) return;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = (tilt - 0.5) * 2;
+    ctx.fillStyle = ink.ink;
+    ctx.font = Math.round(geo.narrow ? 11 : Math.max(11, geo.w * 0.0198)) + "px Inconsolata, ui-monospace, monospace";
+    ctx.fontStretch = "semi-condensed";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "alphabetic";
+    for (let r = 0; r < ROWS.length; r++) {
+      const g = rowGeometry(r);
+      ctx.fillText(run.hosts[r].name, g.left - geo.w * 0.008, g.base - g.unit * 3);
+    }
+    ctx.restore();
+  };
+
+  const drawTerrain = (t, withLabels = true) => {
     if (!ctx || !geo) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, geo.w, geo.h);
+    if (landed) return;
 
-    // Guides from the terrain's front edge down to the table.
+    const n = Math.max(TABLE_TAIL, Math.round(lerp(TABLE_TAIL, HISTORY, tilt)));
+    const front = rowGeometry(ROWS.length - 1);
+    const back = rowGeometry(0);
+
+    // The plane: dotted column lines receding to the back row, and guides
+    // that carry them down onto the table.
     if (tilt > 0.02) {
-      const front = rowGeometry(ROWS.length - 1);
       ctx.save();
       ctx.globalAlpha = tilt;
-      ctx.strokeStyle = ink.guide;
       ctx.lineWidth = 1;
-      ctx.setLineDash([1, 4]);
-      const targets = [
-        [front.left, geo.tableLeft],
-        [lerp(front.left, front.right, 0.25), lerp(geo.tableLeft, geo.tableRight, 0.25)],
-        [lerp(front.left, front.right, 0.55), lerp(geo.tableLeft, geo.tableRight, 0.55)],
-        [lerp(front.left, front.right, 0.8), lerp(geo.tableLeft, geo.tableRight, 0.8)],
-        [front.right, geo.tableRight],
-      ];
-      const back = rowGeometry(0);
+      ctx.setLineDash([1, 3]);
+      ctx.strokeStyle = ink.plane;
       ctx.beginPath();
-      ctx.moveTo(back.left, back.base);
-      ctx.lineTo(front.left, front.base);
-      ctx.moveTo(back.right, back.base);
-      ctx.lineTo(front.right, front.base);
-      targets.forEach(([x0, x1]) => {
-        ctx.moveTo(x0, front.base + 4);
-        ctx.lineTo(x1, geo.tableTop - 6);
-      });
+      for (let c = 0; c <= HISTORY; c += 11) {
+        for (let r = 0; r < ROWS.length; r++) {
+          const g = rowGeometry(r);
+          const x = g.left + (c / HISTORY) * (g.right - g.left);
+          if (r === 0) ctx.moveTo(x, g.base + 2);
+          else ctx.lineTo(x, g.base + 2);
+        }
+      }
       ctx.stroke();
+      if (!geo.narrow) {
+        ctx.strokeStyle = ink.muted;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(back.left, back.base + 2);
+        ctx.lineTo(front.left, front.base + 2);
+        ctx.moveTo(back.right, back.base + 2);
+        ctx.lineTo(front.right, front.base + 2);
+        for (let c = 0; c <= HISTORY; c += 11) {
+          const k = c / HISTORY;
+          ctx.moveTo(lerp(front.left, front.right, k), front.base + 6);
+          ctx.lineTo(lerp(geo.tableLeft, geo.tableRight, k), geo.tableTop - 6);
+        }
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
+    const flatness = 1 - tilt;
     for (let r = 0; r < ROWS.length; r++) {
       const g = rowGeometry(r);
-      const hist = run.historyAt(r, t);
-      const col = (g.right - g.left) / HISTORY;
-      const cellW = Math.max(1, col * 0.66);
-      const cellH = Math.max(1, g.unit * 0.74);
+      const hist = run.historyAt(r, t).slice(-n);
+      const col = (g.right - g.left) / n;
+      const cellW = Math.max(1, col * lerp(0.66, 1, flatness));
+      const cellH = Math.max(1, g.unit * lerp(0.78, 1.02, flatness));
 
-      // Floor: one faint dot per column, plus a second line for depth.
-      ctx.fillStyle = ink.floor;
-      for (let c = 0; c < HISTORY; c++) {
-        const x = g.left + c * col + cellW / 2;
-        ctx.fillRect(x, g.base + 2, 1, 1);
-        if (tilt > 0.5) ctx.fillRect(x, g.base + 2 + g.unit * 1.6, 1, 1);
+      // Floor: one dot per column.
+      if (tilt > 0.3) {
+        ctx.fillStyle = ink.floor;
+        for (let c = 0; c < n; c++) ctx.fillRect(g.left + c * col + cellW / 2, g.base + 2, 1, 1);
       }
 
-      for (let c = 0; c < HISTORY; c++) {
+      for (let c = 0; c < n; c++) {
         const ms = hist[c];
         const x = g.left + c * col;
         if (ms === null) {
           ctx.fillStyle = ink.red;
-          const s = Math.max(1.5, cellW * 0.42);
-          ctx.fillRect(x + (cellW - s) / 2, g.base - s - 1, s, s);
-          if (tilt > 0.5) ctx.fillRect(x + (cellW - s) / 2, g.base + g.unit * 0.9, s, s);
+          const s = Math.max(1.5, Math.min(cellW, g.unit * 2) * 0.42);
+          ctx.fillRect(x + (cellW - s) / 2, g.base - s - g.unit * lerp(0.2, 2.6, flatness), s, s);
           continue;
         }
         const b = bandOf(ms);
-        const stack = b + 1;
+        const stack = Math.max(b + 1, Math.round(lerp(b + 1, STACK[b], tilt)));
+        const shades = SHADES[b];
         for (let s = 0; s < stack; s++) {
-          ctx.fillStyle = s === stack - 1 ? ink.top[b] : ink.band[b];
+          ctx.fillStyle = tilt < 0.35
+            ? (b > 4 ? ink.slow : ink.ok)
+            : shades[Math.round((s / Math.max(1, stack - 1)) * (shades.length - 1))];
           ctx.fillRect(x, g.base - (s + 1) * g.unit, cellW, cellH);
         }
       }
-
-      if (tilt > 0.5) {
-        ctx.save();
-        ctx.globalAlpha = (tilt - 0.5) * 2;
-        ctx.fillStyle = ink.ink;
-        ctx.font = Math.round(geo.narrow ? 11 : Math.max(11, geo.w * 0.0198)) + "px Inconsolata, ui-monospace, monospace";
-        ctx.textAlign = "right";
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText(run.hosts[r].name, g.left - geo.w * 0.008, g.base - g.unit * 2.2);
-        ctx.restore();
-      }
     }
+    if (withLabels) drawLabels();
   };
 
-  /* ------------------------------------------------ the landscape clip, in glyphs */
+  /* ------------------------------------------------ the landscape clip, then the data */
 
-  const RAMP = [" ", " ", "·", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  let intro = null;
 
   const playIntro = (onDone) => {
     const src = stage && stage.getAttribute("data-clip");
@@ -420,168 +529,150 @@
     video.playsInline = true;
     video.preload = "auto";
     video.src = src;
-    const sample = doc.createElement("canvas");
-    const sctx = sample.getContext("2d", { willReadFrequently: true });
+    const scratch = makeScratch();
     let finished = false;
+    let playing = false;
     let raf = 0;
-    let lums = null;
-    let sorted = null;
+    let layout = null;
 
-    const grid = () => {
+    // The clip is printed only inside the terrain's footprint, from the horizon down.
+    const plan = () => {
       const cw = geo.narrow ? 6 : Math.max(6, geo.w * 0.0072);
       const ch = cw * 1.62;
-      const zoneH = geo.tableTop - 4;
-      return { cw, ch, cols: Math.ceil(geo.w / cw), rows: Math.ceil(zoneH / ch) };
-    };
-
-    // The terrain's footprint: the clip is drawn only where the ridges will stand.
-    const footprint = () => {
       const back = rowGeometry(0);
       const front = rowGeometry(ROWS.length - 1);
       const top = Math.max(0, back.base - back.unit * 9);
+      const bottom = front.base + 6;
+      const startCol = Math.floor(front.left / cw);
       const path = new Path2D();
       path.moveTo(back.left, top);
       path.lineTo(geo.w, top);
-      path.lineTo(geo.w, front.base + 6);
-      path.lineTo(front.left, front.base + 6);
+      path.lineTo(geo.w, bottom);
+      path.lineTo(front.left, bottom);
       path.closePath();
-      return { path, top, bottom: front.base + 6 };
+      return {
+        cw, ch, top, path,
+        x0: startCol * cw,
+        cols: Math.ceil(geo.w / cw) - startCol,
+        rows: Math.ceil((bottom - top) / ch),
+        gridCols: Math.ceil(geo.w / cw),
+      };
     };
 
     const frame = () => {
       if (finished) return;
-      const { cw, ch } = grid();
-      const fp = footprint();
-      const x0 = Math.floor(rowGeometry(ROWS.length - 1).left / cw);
-      const cols = Math.ceil(geo.w / cw) - x0;
-      const rows = Math.ceil((fp.bottom - fp.top) / ch);
-      if (sample.width !== cols || sample.height !== rows) {
-        sample.width = cols;
-        sample.height = rows;
-      }
-      // Cover-crop the 16:9 clip into the footprint's own box.
-      const vw = video.videoWidth || 16;
-      const vh = video.videoHeight || 9;
-      const boxAspect = (cols * cw) / (rows * ch);
-      let sw = vw;
-      let sh = vw / boxAspect;
-      if (sh > vh) {
-        sh = vh;
-        sw = vh * boxAspect;
-      }
-      sctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, cols, rows);
-      const px = sctx.getImageData(0, 0, cols, rows).data;
-      // Equalize each frame so ridgelines and mist read as form, not one dark slab.
-      const n = cols * rows;
-      if (!lums || lums.length !== n) {
-        lums = new Float32Array(n);
-        sorted = new Float32Array(n);
-      }
-      for (let i = 0; i < n; i++) {
-        const o = i * 4;
-        lums[i] = (0.2126 * px[o] + 0.7152 * px[o + 1] + 0.0722 * px[o + 2]) / 255;
-      }
-      sorted.set(lums);
-      sorted.sort();
-      const cuts = [];
-      for (let q = 1; q < 10; q++) cuts.push(sorted[Math.floor((n - 1) * (1 - q / 10))]);
+      layout = plan();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, geo.w, geo.h);
       ctx.save();
-      ctx.clip(fp.path);
+      ctx.clip(layout.path);
       ctx.fillStyle = ink.ink;
-      const barW = cw * 0.72;
-      for (let y = 0; y < rows; y++) {
-        const yb = fp.top + (y + 1) * ch;
-        for (let x = 0; x < cols; x++) {
-          const i = y * cols + x;
-          const lum = lums[i];
-          let level = 0;
-          while (level < 9 && lum <= cuts[level]) level++;
-          level -= 1;
-          // A step from light to dark going down is a ridgeline: print it full.
-          if (y > 1 && lum < cuts[3] && lums[i - cols] - lum > 0.045) level = 9;
-          if (level <= 0) continue;
-          const cx = (x0 + x) * cw;
-          if (level === 1) {
-            ctx.fillRect(cx + cw * 0.3, yb - ch * 0.16, cw * 0.2, ch * 0.1);
-            continue;
-          }
-          const h = (level - 1) / 8 * ch * 0.9;
-          ctx.fillRect(cx, yb - h, barW, h);
-        }
-      }
+      printClip(ctx, video, scratch, {
+        x0: layout.x0, y0: layout.top, cols: layout.cols, rows: layout.rows,
+        cw: layout.cw, ch: layout.ch, cropTop: 0, cropHeight: 0.62, hatch: true,
+      });
       ctx.restore();
       raf = requestAnimationFrame(frame);
     };
 
-    const dissolve = () => {
-      finished = true;
-      cancelAnimationFrame(raf);
-      // Snapshot the last glyph frame, then let the data show through it,
-      // cell by cell, the way a terminal repaints.
-      const snap = doc.createElement("canvas");
-      snap.width = canvas.width;
-      snap.height = canvas.height;
-      snap.getContext("2d").drawImage(canvas, 0, 0);
-      const { cw, ch, cols, rows } = grid();
-      const top = footprint().top;
-      const order = [];
-      for (let i = 0; i < cols * rows; i++) order.push(i);
-      let s = 7;
-      for (let i = order.length - 1; i > 0; i--) {
-        s = (Math.imul(s, 1103515245) + 12345) >>> 0;
-        const j = s % (i + 1);
-        [order[i], order[j]] = [order[j], order[i]];
-      }
-      const hidden = new Uint8Array(cols * rows);
-      const t0 = performance.now();
-      const DURATION = 1300;
-      const step = (now) => {
-        const k = Math.min(1, (now - t0) / DURATION);
-        const upto = Math.floor(order.length * (1 - Math.pow(1 - k, 2)));
-        for (let i = 0; i < upto; i++) hidden[order[i]] = 1;
-        drawTerrain(shownTick);
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        for (let i = 0; i < hidden.length; i++) {
-          if (hidden[i]) continue;
-          const x = (i % cols) * cw * dpr;
-          const y = (top + Math.floor(i / cols) * ch) * dpr;
-          const w = cw * dpr + 1;
-          const h = ch * dpr + 1;
-          ctx.clearRect(x, y, w, h);
-          ctx.drawImage(snap, x, y, w, h, x, y, w, h);
-        }
-        if (k < 1) requestAnimationFrame(step);
-        else onDone();
-      };
-      requestAnimationFrame(step);
+    const stopVideo = () => {
+      try {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      } catch (e) { /* already gone */ }
     };
 
     const bail = () => {
       if (finished) return;
       finished = true;
       cancelAnimationFrame(raf);
+      stopVideo();
+      intro = null;
       onDone();
     };
 
+    // The data prints over the clip line by line, from the horizon forward.
+    const dissolve = () => {
+      if (finished) return;
+      finished = true;
+      cancelAnimationFrame(raf);
+      stopVideo();
+      if (!layout) layout = plan();
+      const { cw, ch, top, gridCols, rows } = layout;
+      const snap = doc.createElement("canvas");
+      snap.width = canvas.width;
+      snap.height = canvas.height;
+      snap.getContext("2d").drawImage(canvas, 0, 0);
+      const count = gridCols * rows;
+      const keys = new Float32Array(count);
+      let s = 7;
+      for (let i = 0; i < count; i++) {
+        s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+        keys[i] = Math.floor(i / gridCols) + ((i % gridCols) / gridCols) * 0.9 + (s / 4294967296) * 0.35;
+      }
+      const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => keys[a] - keys[b]);
+      const shown = new Uint8Array(count);
+      const t0 = performance.now();
+      const DURATION = 1300;
+      intro = { abort: () => { intro = null; onDone(); } };
+      const step = (now) => {
+        if (!intro) return;
+        if (canvas.width !== snap.width || canvas.height !== snap.height) {
+          intro.abort();
+          return;
+        }
+        const k = Math.min(1, (now - t0) / DURATION);
+        const upto = Math.floor(count * k);
+        for (let i = 0; i < upto; i++) shown[order[i]] = 1;
+        drawTerrain(shownTick, false);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        for (let i = 0; i < count; i++) {
+          if (shown[i]) continue;
+          const x = (i % gridCols) * cw * dpr;
+          const y = (top + Math.floor(i / gridCols) * ch) * dpr;
+          const w = cw * dpr + 1;
+          const h = ch * dpr + 1;
+          ctx.clearRect(x, y, w, h);
+          ctx.drawImage(snap, x, y, w, h, x, y, w, h);
+        }
+        drawLabels();
+        if (k < 1) requestAnimationFrame(step);
+        else {
+          intro = null;
+          onDone();
+        }
+      };
+      requestAnimationFrame(step);
+    };
+
+    intro = { abort: bail };
     video.addEventListener("playing", () => {
-      stage.classList.add("is-clip");
+      if (finished) return;
+      playing = true;
+      stage.classList.add("is-drawn", "is-clip");
       raf = requestAnimationFrame(frame);
+      setTimeout(dissolve, 4500);
     }, { once: true });
+    // Hold the landscape about three seconds, then repaint it as data.
+    video.addEventListener("timeupdate", () => {
+      if (playing && video.currentTime >= 2.8) dissolve();
+    });
     video.addEventListener("ended", dissolve, { once: true });
     video.addEventListener("error", bail, { once: true });
     const started = video.play();
     if (started && started.catch) started.catch(bail);
-    setTimeout(() => { if (!finished && video.paused) bail(); }, 2500);
+    setTimeout(() => { if (!playing) bail(); }, 2500);
   };
 
-  /* ------------------------------------------------ clock and visibility */
+  /* ------------------------------------------------ clock, visibility, pause */
 
   let timer = null;
   let stageVisible = !("IntersectionObserver" in window);
   let documentVisible = !doc.hidden;
   let live = false;
+  const toggle = doc.querySelector("[data-tilt]");
+  const pauseBtn = doc.querySelector("[data-pause]");
 
   const tick = () => {
     shownTick = (shownTick + 1) % PERIOD;
@@ -590,7 +681,7 @@
   };
 
   const updateTimer = () => {
-    const shouldRun = live && !reduced && stageVisible && documentVisible;
+    const shouldRun = live && !reduced && !paused && stageVisible && documentVisible;
     if (shouldRun && !timer) timer = setInterval(tick, 1000);
     if (!shouldRun && timer) {
       clearInterval(timer);
@@ -600,9 +691,10 @@
 
   const goLive = () => {
     stage.classList.remove("is-clip");
-    stage.classList.add("is-live");
+    stage.classList.add("is-drawn", "is-live");
     drawTerrain(shownTick);
     live = true;
+    if (toggle) toggle.hidden = geo.narrow;
     updateTimer();
   };
 
@@ -610,24 +702,40 @@
     renderTable(shownTick);
     const ready = () => {
       measure();
-      stage.classList.add("is-drawn");
       if (reduced) {
         drawTerrain(shownTick);
+        stage.classList.add("is-drawn");
+        if (toggle) toggle.hidden = geo.narrow;
       } else {
         playIntro(goLive);
       }
     };
-    if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(ready, ready);
-    else ready();
+    if (doc.fonts && doc.fonts.ready) {
+      Promise.race([doc.fonts.ready, new Promise((resolve) => setTimeout(resolve, 3000))]).then(ready, ready);
+    } else {
+      ready();
+    }
 
+    const relayout = () => {
+      measure();
+      if (live || reduced) drawTerrain(shownTick);
+      if (toggle && (live || reduced)) toggle.hidden = geo.narrow;
+    };
     let resizeFrame = 0;
     window.addEventListener("resize", () => {
       cancelAnimationFrame(resizeFrame);
-      resizeFrame = requestAnimationFrame(() => {
-        measure();
-        if (live || reduced) drawTerrain(shownTick);
-      });
+      resizeFrame = requestAnimationFrame(relayout);
     });
+    // A move to a screen with another pixel density fires no resize.
+    const watchDpr = () => {
+      const mq = window.matchMedia("(resolution: " + (window.devicePixelRatio || 1) + "dppx)");
+      if (!mq || !mq.addEventListener) return;
+      mq.addEventListener("change", () => {
+        relayout();
+        watchDpr();
+      }, { once: true });
+    };
+    watchDpr();
 
     if ("IntersectionObserver" in window) {
       new IntersectionObserver((entries) => {
@@ -640,22 +748,38 @@
       updateTimer();
     });
 
-    // Head-on: tilt the terrain flat onto the table's history column.
-    const toggle = doc.querySelector("[data-tilt]");
+    // Pause stops every moving thing on the page (WCAG 2.2.2), the clip included.
+    if (pauseBtn && !reduced) {
+      pauseBtn.hidden = false;
+      pauseBtn.addEventListener("click", () => {
+        paused = !paused;
+        pauseBtn.textContent = paused ? "resume" : "pause";
+        if (paused && intro) intro.abort();
+        updateTimer();
+      });
+    }
+
+    // Head-on: tilt the terrain flat onto the table's history column, then
+    // hand over to the real glyphs.
     if (toggle) {
-      toggle.hidden = false;
       let anim = 0;
       toggle.addEventListener("click", () => {
         const flat = toggle.getAttribute("aria-pressed") !== "true";
         toggle.setAttribute("aria-pressed", String(flat));
-        toggle.textContent = flat ? "view terrain" : "view head-on";
         stage.classList.toggle("is-flat", flat);
+        stage.classList.remove("is-landed");
+        landed = false;
         measure();
         const from = tilt;
         const to = flat ? 0 : 1;
-        if (reduced) {
+        const finish = () => {
           tilt = to;
+          landed = flat;
+          stage.classList.toggle("is-landed", flat);
           drawTerrain(shownTick);
+        };
+        if (reduced) {
+          finish();
           return;
         }
         cancelAnimationFrame(anim);
@@ -665,8 +789,88 @@
           tilt = lerp(from, to, 1 - Math.pow(1 - k, 3));
           drawTerrain(shownTick);
           if (k < 1) anim = requestAnimationFrame(step);
+          else finish();
         };
         anim = requestAnimationFrame(step);
+      });
+    }
+  }
+
+  /* ------------------------------------------------ dawn: the window closes */
+
+  const dawn = doc.querySelector("[data-dawn]");
+  if (dawn && !reduced && "IntersectionObserver" in window) {
+    const dcanvas = dawn.querySelector("canvas");
+    const dctx = dcanvas && dcanvas.getContext("2d");
+    const src = dawn.getAttribute("data-clip");
+    let video = null;
+    let scratch = null;
+    let playing = false;
+    let raf = 0;
+
+    const paint = () => {
+      const box = dcanvas.getBoundingClientRect();
+      const ddpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = Math.round(box.width * ddpr);
+      const h = Math.round(box.height * ddpr);
+      if (dcanvas.width !== w || dcanvas.height !== h) {
+        dcanvas.width = w;
+        dcanvas.height = h;
+      }
+      const cw = Math.max(5, box.width * 0.0058);
+      const ch = cw * 1.62;
+      dctx.setTransform(ddpr, 0, 0, ddpr, 0, 0);
+      dctx.clearRect(0, 0, box.width, box.height);
+      dctx.fillStyle = ink.ink;
+      printClip(dctx, video, scratch, {
+        x0: 0, y0: 0, cols: Math.floor(box.width / cw), rows: Math.floor(box.height / ch),
+        cw, ch, cropTop: 0.29, cropHeight: 1, hatch: false,
+      });
+    };
+
+    const loop = () => {
+      if (!playing) return;
+      paint();
+      raf = requestAnimationFrame(loop);
+    };
+
+    const start = () => {
+      if (playing || paused || !src || !dctx) return;
+      if (!video) {
+        video = doc.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "auto";
+        video.src = src;
+        scratch = makeScratch();
+        video.addEventListener("playing", () => {
+          playing = true;
+          dawn.classList.add("is-drawn");
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(loop);
+        });
+        video.addEventListener("ended", () => {
+          playing = false;
+          cancelAnimationFrame(raf);
+          paint();
+        });
+        video.addEventListener("error", () => { playing = false; });
+      }
+      try { video.currentTime = 0; } catch (e) { /* not seekable yet */ }
+      const p = video.play();
+      if (p && p.catch) p.catch(() => {});
+    };
+
+    new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) start();
+    }, { threshold: 0.45 }).observe(dawn);
+    if (pauseBtn) {
+      pauseBtn.addEventListener("click", () => {
+        if (paused && video && playing) {
+          video.pause();
+          playing = false;
+          cancelAnimationFrame(raf);
+        }
       });
     }
   }
@@ -678,7 +882,7 @@
     let n = 0;
     const lat = [14.08, 13.91, 14.22, 13.87, 14.4, 14.02];
     setInterval(() => {
-      if (doc.hidden) return;
+      if (doc.hidden || paused) return;
       n += 1;
       const d = new Date(Date.UTC(2026, 4, 14, 18, 32, 11 + n, 420));
       const stamp = d.toISOString().replace("Z", "000+00:00");
@@ -698,8 +902,8 @@
     const steps = [...doc.querySelectorAll("[data-step]")];
     const LIMITS = ["≤1ms", "≤3ms", "≤10ms", "≤30ms", "≤100ms", "≤300ms", "≤1000ms", ">1000ms"];
     const history = [];
-    // The slider is logarithmic: equal travel per band of the fixed scale.
-    const msAt = (v) => Math.round(Math.pow(10, (v / 1000) * 3.6 - 0.6) * 100) / 100;
+    // The slider is logarithmic: roughly equal travel per band, all eight reachable.
+    const msAt = (v) => Math.round(Math.pow(10, (v / 1000) * 4.08 - 0.6) * 100) / 100;
     const update = (write) => {
       const ms = msAt(Number(slider.value));
       const b = bandOf(ms);
