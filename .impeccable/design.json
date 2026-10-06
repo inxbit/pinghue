@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-05T00:00:00Z",
+  "title": "Design System: pinghue.com",
+  "extensions": {
+    "colorMeta": {
+      "paper": { "role": "neutral", "displayName": "Warm Paper", "canonical": "#efede6", "tonalRamp": ["#2a2925", "#45433d", "#625f57", "#807c72", "#9f9b8f", "#bfbbaf", "#d9d6cc", "#efede6"] },
+      "ink": { "role": "primary", "displayName": "Typewriter Ink", "canonical": "#161513", "tonalRamp": ["#161513", "#2b2a27", "#4f4d48", "#6d6a64", "#8d8a83", "#adaaa2", "#cfccc4", "#efede6"] },
+      "ink-2": { "role": "secondary", "displayName": "Faded Ink", "canonical": "#4f4d48", "tonalRamp": ["#1d1c1a", "#33322f", "#4f4d48", "#6a6862", "#86847d", "#a3a099", "#c4c1b9", "#e3e1da"] },
+      "rule": { "role": "neutral", "displayName": "Pencil Rule", "canonical": "#b3afa4", "tonalRamp": ["#2e2c28", "#47453f", "#625f57", "#7d796f", "#989489", "#b3afa4", "#cdcac0", "#e6e4dc"] },
+      "green": { "role": "tertiary", "displayName": "Healthy Green", "canonical": "#1d7a37", "tonalRamp": ["#135220", "#165823", "#1c6429", "#1d7a37", "#409154", "#5ea66d", "#6db07a", "#7dbb88"] },
+      "amber": { "role": "tertiary", "displayName": "Slow Amber", "canonical": "#9c5a00", "tonalRamp": ["#3b1c04", "#7a3d08", "#9c5a00", "#a8690d", "#d08b2b", "#e5b24c", "#f0cc80", "#f8e6c0"] },
+      "red": { "role": "tertiary", "displayName": "Down Red", "canonical": "#b8322b", "tonalRamp": ["#3d0f0c", "#621a16", "#8a251f", "#b8322b", "#d0564e", "#e0847d", "#edb3ae", "#f8e0de"] },
+      "blue": { "role": "neutral", "displayName": "Focus Blue", "canonical": "#1f5fbf", "tonalRamp": ["#0b2146", "#12346e", "#184896", "#1f5fbf", "#4a80d3", "#7ea4e0", "#b2c9ed", "#e1eaf8"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Block-glyph display", "purpose": "The block-glyph headline only: rows of full-block glyphs cut into cells by the cell mask; 16.28u first line, 14.08u second; stacked min((100cqw - 32px) / 49, 19px); narrow min((100cqw - 32px) / 33, 16px)." },
+      "headline": { "displayName": "Section heading", "purpose": "Lowercase section headings at width 100; 22px when stacked." },
+      "title": { "displayName": "Top line", "purpose": "Wordmark and top line at width 100; nav at 25u; 17px when stacked." },
+      "body": { "displayName": "Body", "purpose": "All prose and commands, width 80, tabular numerals; 15px stacked, 16px from 700px. Commands a visitor copies sit at 28.1u." },
+      "label": { "displayName": "Label", "purpose": "Faded-ink labels: deck, install via column, runway limits." },
+      "table": { "displayName": "Table", "purpose": "The TUI table; 13px stacked, 14px from 700px. Transcripts at max(12.5px, 18.5u), JSON at max(12.5px, 21u)." }
+    },
+    "units": [
+      { "name": "frame", "value": "min(100cqw, 1840px)", "purpose": "Desktop page frame, measured on the body inline-size container." },
+      { "name": "u", "value": "calc(var(--frame) / 1586)", "purpose": "Desktop comp unit; every desktop measure is calc(N * var(--u))." },
+      { "name": "u-stacked", "value": "calc(100cqw / 760)", "purpose": "Unit below 1100px, where most sizes switch to literal px." },
+      { "name": "cell-x", "value": "linear-gradient(90deg, transparent 0 4%, #000 4% 90%, transparent 90% 100%)", "purpose": "Horizontal cell mask, tiled at 0.5em." },
+      { "name": "cell-y", "value": "linear-gradient(180deg, #000 0 85%, transparent 85% 100%)", "purpose": "Vertical cell mask, tiled at font-size times 0.84 to 0.92, intersected with cell-x." }
+    ],
+    "shadows": [],
+    "motion": [
+      { "name": "clock", "value": "1000ms interval", "purpose": "Advances the simulated run and the no-TUI stream; stops when paused, off screen, or tab hidden; never runs under reduced motion." },
+      { "name": "clip-hold", "value": "2.8s (cap 4.5s, bail if not playing in 2.5s)", "purpose": "Landscape clip printed through the glyph ramp before the dissolve." },
+      { "name": "dissolve", "value": "1300ms, linear over cells ordered horizon forward with jitter", "purpose": "Terrain data repaints over the clip." },
+      { "name": "tilt", "value": "700ms, ease-out cubic 1 - (1 - k)^3", "purpose": "Head-on toggle tilts the terrain flat onto the history column; instant under reduced motion." },
+      { "name": "runway-lift", "value": "160ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Active runway step lifts 8u; transition removed under reduced motion." },
+      { "name": "report-print", "value": "140ms per line", "purpose": "JSON report prints line by line on first view; skipped under reduced motion and in print." },
+      { "name": "copy-reset", "value": "1800ms", "purpose": "Copy button returns from Copied to its label." }
+    ],
+    "breakpoints": [
+      { "name": "stacked", "value": "max-width: 1099px" },
+      { "name": "stacked-mid", "value": "700px to 1099px" },
+      { "name": "narrow", "value": "max-width: 699px" },
+      { "name": "404-small", "value": "max-width: 400px" },
+      { "name": "frame-cap", "value": "1840px" }
+    ],
+    "canvasInks": [
+      { "name": "ink", "value": "#161513", "purpose": "Clip print and labels." },
+      { "name": "muted", "value": "#5d5b55", "purpose": "Terrain guide lines." },
+      { "name": "floor", "value": "#a9a59a", "purpose": "Terrain floor marks." },
+      { "name": "plane", "value": "#c6c2b7", "purpose": "Dotted perspective plane." },
+      { "name": "band-foot", "value": "#7dbb88 #6db07a #5ea66d #4f9c60 #409154 #e5b24c #d08b2b #9a5518", "purpose": "Light foot of each band's cell stack." },
+      { "name": "band-crest", "value": "#1f6a2c #1c6429 #195e26 #165823 #135220 #a8690d #7a3d08 #3b1c04", "purpose": "Dark crest of each band's cell stack." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Copy Button",
+      "kind": "button",
+      "refersTo": "copy-button",
+      "description": "Lowercase bracketed word beside a command; inverts on hover; solid underline once copied.",
+      "html": "<span class=\"ds-cmd\">uv tool install pinghue</span> <button class=\"ds-copy-btn\" type=\"button\">Copy</button>",
+      "css": ".ds-cmd { font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; color: var(--ink, #161513); } .ds-copy-btn { appearance: none; border: 0; border-radius: 0; background: none; padding: 10px 0.15em; margin: -10px 0 -10px 0.4em; font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-stretch: 80%; font-size: inherit; color: var(--ink, #161513); text-transform: lowercase; cursor: pointer; } .ds-copy-btn::before { content: \"[\"; } .ds-copy-btn::after { content: \"]\"; } .ds-copy-btn:hover { background: var(--ink, #161513); color: var(--paper, #efede6); } .ds-copy-btn:focus-visible { outline: 2px solid var(--blue, #1f5fbf); outline-offset: 3px; } .ds-copy-btn.copied { text-decoration: underline solid; text-underline-offset: 0.22em; }"
+    },
+    {
+      "name": "Toggle Button",
+      "kind": "button",
+      "refersTo": "tilt-toggle",
+      "description": "Head-on and pause controls: bracketed, dotted underline at rest, solid when pressed.",
+      "html": "<button class=\"ds-toggle\" type=\"button\" aria-pressed=\"false\">head-on</button> <button class=\"ds-toggle\" type=\"button\" aria-pressed=\"true\">head-on</button>",
+      "css": ".ds-toggle { appearance: none; border: 0; border-radius: 0; background: none; padding: 10px 0; margin: 0 0.8em 0 0; font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-stretch: 80%; font-size: 15px; color: var(--ink, #161513); text-decoration: underline dotted; text-underline-offset: 0.22em; cursor: pointer; } .ds-toggle::before { content: \"[\"; display: inline-block; } .ds-toggle::after { content: \"]\"; display: inline-block; } .ds-toggle:hover { background: var(--ink, #161513); color: var(--paper, #efede6); } .ds-toggle:focus-visible { outline: 2px solid var(--blue, #1f5fbf); outline-offset: 3px; } .ds-toggle[aria-pressed=\"true\"] { text-decoration-style: solid; }"
+    },
+    {
+      "name": "Top Line Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link",
+      "description": "Wordmark left, lowercase anchors right, 44px tall, inversion on hover.",
+      "html": "<header class=\"ds-top\"><a class=\"ds-wordmark\" href=\"#\">pinghue</a><nav class=\"ds-nav\"><a href=\"#\">map</a><a href=\"#\">modes</a><a href=\"#\">evidence</a><a href=\"#\">install</a><a href=\"#\">github</a></nav></header>",
+      "css": ".ds-top { display: flex; align-items: baseline; justify-content: space-between; gap: 0 28px; flex-wrap: wrap; padding: 10px 16px 0; background: var(--paper, #efede6); font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-size: 17px; color: var(--ink, #161513); } .ds-wordmark { color: inherit; text-decoration: none; letter-spacing: 0.01em; } .ds-nav { display: flex; gap: 18px; font-size: 15px; } .ds-nav a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: none; } .ds-nav a:hover, .ds-wordmark:hover { background: var(--ink, #161513); color: var(--paper, #efede6); } .ds-nav a:focus-visible, .ds-wordmark:focus-visible { outline: 2px solid var(--blue, #1f5fbf); outline-offset: 3px; }"
+    },
+    {
+      "name": "Inline Link",
+      "kind": "custom",
+      "description": "Body link: inherits ink, dotted underline, solid on hover.",
+      "html": "<p class=\"ds-p\">Then run the <a class=\"ds-link\" href=\"#\">environment doctor</a>.</p>",
+      "css": ".ds-p { font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-stretch: 80%; font-size: 15px; line-height: 1.45; color: var(--ink-2, #4f4d48); } .ds-link { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 0.22em; } .ds-link:hover { text-decoration-style: solid; } .ds-link:focus-visible { outline: 2px solid var(--blue, #1f5fbf); outline-offset: 3px; }"
+    },
+    {
+      "name": "TUI Table",
+      "kind": "custom",
+      "refersTo": "table-cell",
+      "description": "pinghue's exact columns, dotted row rules, state color only on state and over-threshold values, history in scale glyphs.",
+      "html": "<table class=\"ds-tui\"><thead><tr><th>host</th><th>state</th><th>last</th><th>loss</th><th>history</th></tr></thead><tbody><tr><th>core-sw-1</th><td class=\"ds-ok\">healthy</td><td>1.58</td><td>0.00%</td><td class=\"ds-ok\">▂▂▃▂▂▃▂</td></tr><tr><th>db-primary</th><td class=\"ds-slow\">intermittent</td><td>12.62</td><td>0.00%</td><td><span class=\"ds-slow\">▆</span><span class=\"ds-ok\">▅▄▄</span><span class=\"ds-slow\">▆▆</span></td></tr><tr><th>backup-nas</th><td class=\"ds-fail\">down</td><td class=\"ds-fail\">-</td><td class=\"ds-fail\">27.68%</td><td class=\"ds-fail\">·······</td></tr></tbody></table>",
+      "css": ".ds-tui { border-collapse: collapse; width: 100%; font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-stretch: 80%; font-variant-numeric: tabular-nums; font-size: 14px; line-height: 26px; white-space: nowrap; color: var(--ink, #161513); background: var(--paper, #efede6); } .ds-tui th, .ds-tui td { padding: 0 0 0 6px; text-align: left; font-weight: 400; border-bottom: 1px dotted var(--rule, #b3afa4); } .ds-tui thead th { border-bottom: 1px solid var(--rule, #b3afa4); } .ds-tui tbody td:last-child { letter-spacing: 0.04em; } .ds-ok { color: var(--green, #1d7a37); } .ds-slow { color: var(--amber, #9c5a00); } .ds-fail { color: var(--red, #b8322b); }"
+    },
+    {
+      "name": "Scale Slider",
+      "kind": "input",
+      "refersTo": "range-thumb",
+      "description": "Dashed 1px ink track, square ink thumb, 44px hit area.",
+      "html": "<input class=\"ds-slider\" type=\"range\" min=\"0\" max=\"1000\" value=\"450\" aria-label=\"latency\">",
+      "css": ".ds-slider { width: 100%; height: 44px; margin: 0; background: transparent; appearance: none; -webkit-appearance: none; cursor: ew-resize; } .ds-slider::-webkit-slider-runnable-track { height: 1px; background: repeating-linear-gradient(90deg, var(--ink, #161513) 0 2px, transparent 2px 6px); } .ds-slider::-moz-range-track { height: 1px; background: repeating-linear-gradient(90deg, var(--ink, #161513) 0 2px, transparent 2px 6px); } .ds-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 30px; margin-top: -15px; background: var(--ink, #161513); border: 0; border-radius: 0; } .ds-slider::-moz-range-thumb { width: 18px; height: 30px; background: var(--ink, #161513); border: 0; border-radius: 0; } .ds-slider:focus-visible { outline: 2px solid var(--blue, #1f5fbf); outline-offset: 3px; }"
+    },
+    {
+      "name": "Transcript Block",
+      "kind": "custom",
+      "description": "Command, output and comment set against a 1px ink left edge; prompts in faded ink.",
+      "html": "<div class=\"ds-tx\"><p class=\"ds-tx-cmd\"><span class=\"ds-prompt\">$ </span>pinghue 1.1.1.1 8.8.8.8</p><p class=\"ds-tx-out\">1.1.1.1   <span class=\"ds-ok\">healthy</span>   4.08   0.00%   <span class=\"ds-ok\">▂▂▂▃▂▂</span></p><p class=\"ds-tx-note\"><span class=\"ds-prompt\"># </span>icmp is the default: every host at once.</p></div>",
+      "css": ".ds-tx { border-left: 1px solid var(--ink, #161513); padding-left: 10px; font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-stretch: 80%; font-size: 15px; line-height: 1.45; color: var(--ink, #161513); background: var(--paper, #efede6); } .ds-tx p { margin: 0; } .ds-tx-out { font-size: 12px; line-height: 22px; white-space: pre; overflow-x: auto; } .ds-tx-note { color: var(--ink-2, #4f4d48); max-width: 78ch; } .ds-prompt { color: var(--ink-2, #4f4d48); } .ds-ok { color: var(--green, #1d7a37); }"
+    },
+    {
+      "name": "Block-Glyph Headline",
+      "kind": "custom",
+      "description": "Signature letterforms: rows of full-block glyphs cut into cells by the intersected cell mask.",
+      "html": "<span class=\"ds-hl\"><span class=\"ds-row\">██████ ███ ███</span><span class=\"ds-row\">  ██   ███ ███</span><span class=\"ds-row\">  ██   ███████</span><span class=\"ds-row\">  ██   ███ ███</span><span class=\"ds-row\">  ██   ███ ███</span></span>",
+      "css": ".ds-hl { --f: 20px; --k: 0.88; display: block; font-family: \"Inconsolata\", ui-monospace, Menlo, monospace; font-stretch: 100%; font-size: var(--f); line-height: 1; white-space: pre; color: var(--ink, #161513); -webkit-mask-image: linear-gradient(90deg, transparent 0 4%, #000 4% 90%, transparent 90% 100%), linear-gradient(180deg, #000 0 85%, transparent 85% 100%); -webkit-mask-size: 0.5em 100%, 100% calc(var(--f) * var(--k)); -webkit-mask-composite: source-in; mask-image: linear-gradient(90deg, transparent 0 4%, #000 4% 90%, transparent 90% 100%), linear-gradient(180deg, #000 0 85%, transparent 85% 100%); mask-size: 0.5em 100%, 100% calc(var(--f) * var(--k)); mask-composite: intersect; } .ds-row { display: block; height: calc(var(--f) * var(--k)); overflow: hidden; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Table Is the Terrain",
+    "overview": "pinghue.com is a printed page from a terminal. Black typewriter ink sits on warm paper, everything is set on one monospace grid, and the page is drawn with pinghue's own fixed latency ramp (▁▂▃▄▅▆▇█). The signature move is a canvas terrain, one ridge per host, that tilts flat into the exact table pinghue prints: head-on, each ridge is the history column. The headline is not set in a display face; it is typed in full-block glyphs and cut into cells by a CSS mask, so even the letterforms are made of the tool's own marks.\n\nThe density is that of a terminal at 2am: tight line heights, tabular numerals, commands shown exactly as they are typed, prompts (`$ `, `# `, `- `) in secondary ink. Color is withheld from everything except state. There are no boxes, cards, glows, shadows or gradient fills; structure comes from rule lines and the grid. Interactive controls are plain words in square brackets that invert to paper-on-ink when touched.\n\nThe page refuses the dark headline-left, terminal-right dev-tool hero and the SaaS gradient-blob hero. It reads as if the people who wrote the tool also printed its manual.",
+    "keyCharacteristics": [
+      "Ink on warm paper, one monospace face, width axis doing the work of a type pairing.",
+      "Green, amber and red appear only on latency data and state words.",
+      "The glyph ramp is the house silhouette: headline, terrain, runway, history column, footer mark, 404.",
+      "Desktop geometry is the approved comp's own pixels (1u = frame/1586); below 1100px the page stacks.",
+      "Flat: depth is drawn (perspective plane, tonal ridges), never cast.",
+      "Everything that moves on a clock can be paused, and reduced motion gets the final frame."
+    ],
+    "rules": [
+      { "name": "The Color Is State Rule", "body": "Green, amber and red appear only where they carry pinghue's latency meaning: a state word, a value past a threshold, or a glyph in the scale. Never on a heading, a link, a button, a border or a decoration.", "section": "colors" },
+      { "name": "The Focus Only Blue Rule", "body": "Blue exists for the keyboard focus ring and nothing else.", "section": "colors" },
+      { "name": "The Inversion Rule", "body": "Hover, selection and the active runway step are all the same treatment: ink fill, paper text. There is no other highlight color.", "section": "colors" },
+      { "name": "The One Face Rule", "body": "Inconsolata is the only family. Contrast comes from the width axis (80% text, 100% display) and from ink versus faded ink, never from a second face. Weight stays 400 everywhere except 600 on inline key names in transcript notes.", "section": "typography" },
+      { "name": "The Lowercase Voice Rule", "body": "Headings, nav, controls, deck, labels and state words are lowercase; running prose is sentence case. Capitals as display appear only in the block-glyph letterforms.", "section": "typography" },
+      { "name": "The Block Loading Rule", "body": "The font loads with `font-display: block`; the glyph art is cut on a 0.5em grid and a fallback face mis-tiles it.", "section": "typography" },
+      { "name": "The No Dash Rule", "body": "Visible copy carries no em or en dashes, literal or as entities; `tests/site_pages.test.mjs` enforces it on both pages. Use a period, a comma, or a colon. The hyphen `-` is the null value in a failed table cell.", "section": "typography" },
+      { "name": "The Comp Unit Rule", "body": "Desktop measures are multiples of u, not px or rem. Floors (`max(12px, ...)`) are allowed only to keep small text legible.", "section": "layout" },
+      { "name": "The 44px Rule", "body": "Every link and control in a row of text gets a 44px hit area, by min-height or by negative margin plus padding, without growing the line.", "section": "layout" },
+      { "name": "The Drawn Depth Rule", "body": "If something needs to read as nearer or deeper, draw it in the terrain or rule it with a line. Never lift it with a shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** size every desktop measure as `calc(N * var(--u))` against the 1586-unit frame, capped at 1840px, and switch to the stacked pixel layout below 1100px.",
+      "**Do** keep color to the state meanings: green healthy, amber slow or intermittent, red loss or down.",
+      "**Do** write controls as lowercase words in square brackets that invert to paper on ink.",
+      "**Do** draw new display art in block glyphs through the cell mask, generated by `scripts/site-headline.mjs`, with the real text in a visually hidden span.",
+      "**Do** give anything that moves on a clock a pause that stops all of it, the clip included, and stop the clock off screen and in hidden tabs.",
+      "**Do** honor reduced motion by drawing the terrain once with no clip, no clock, no printing and no transitions.",
+      "**Do** carry the shell prefixes (`$ `, `# `, `- `) in faded ink for commands, comments and lists."
+    ],
+    "donts": [
+      "**Don't** use green, amber or red on anything that is not latency data or a state word.",
+      "**Don't** add boxes, cards, rounded corners, shadows or glows.",
+      "**Don't** fill a surface or text with a gradient; tonal shading lives only inside state-colored terrain data, and gradients appear only as masks or dash patterns.",
+      "**Don't** add a second typeface or use icon fonts; the only glyph marks are pinghue's own (▁▂▃▄▅▆▇█, `·`, `!`).",
+      "**Don't** put eyebrow labels above section headings.",
+      "**Don't** use em or en dashes in visible copy.",
+      "**Don't** put `aria-live` on the ticking table.",
+      "**Don't** build the dark headline-left, terminal-right dev-tool hero."
+    ]
+  }
+}

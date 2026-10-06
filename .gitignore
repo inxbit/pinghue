@@ -15,5 +15,10 @@ htmlcov/
 .DS_Store
 .superpowers/
 
-# Impeccable design workflow scratch (mocks, build state, review captures)
-.impeccable/
+# Impeccable design workflow scratch (mocks, build state, review captures).
+# The direction contract (surfaces/) and the design sidecar (design.json) are kept.
+.impeccable/build/
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/review/
+.impeccable/tmp/
