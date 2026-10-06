@@ -14,3 +14,6 @@ dist/
 htmlcov/
 .DS_Store
 .superpowers/
+
+# Impeccable design workflow scratch (mocks, build state, review captures)
+.impeccable/

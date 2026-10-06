@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
   <title>PingHue - concurrent ICMP and TCP ping monitor</title>
   <meta name="description" content="Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.">
+  <meta name="theme-color" content="#efede6">
   <link rel="canonical" href="https://pinghue.com/">
   <link rel="icon" type="image/svg+xml" href="assets/pinghue-favicon.svg">
 
@@ -16,239 +17,144 @@
   <meta property="og:image" content="https://pinghue.com/assets/pinghue-social-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window.">
+  <meta property="og:image:alt" content="A latency terrain drawn in pinghue's fixed glyph scale above the table pinghue prints.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="PingHue - concurrent ICMP and TCP ping monitor">
   <meta name="twitter:description" content="Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.">
   <meta name="twitter:image" content="https://pinghue.com/assets/pinghue-social-card.png">
-  <meta name="twitter:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window.">
+  <meta name="twitter:image:alt" content="A latency terrain drawn in pinghue's fixed glyph scale above the table pinghue prints.">
 
-  <link rel="preload" href="fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="fonts/jetbrains-mono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="preload" href="fonts/inconsolata-var-ascii.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="site.css">
 </head>
 <body>
 
 <a class="skip-link" href="#main">Skip to content</a>
 
-<header class="nav-shell" data-nav>
-  <div class="nav">
-    <a class="wordmark" href="/" aria-label="PingHue home">
-      <span class="wm-ping">ping</span><span class="wm-hue">hue</span>
-    </a>
-    <button class="nav-toggle" type="button" aria-controls="site-menu" aria-expanded="false" data-nav-toggle>
-      <span>Menu</span>
-      <span class="menu-mark" aria-hidden="true"><i></i><i></i></span>
-    </button>
-    <div class="nav-panel" id="site-menu" data-nav-panel>
-      <button class="nav-close" type="button" aria-label="Close navigation" data-nav-close>Close</button>
-      <nav class="nav-links" aria-label="Site">
-        <a href="#why">The window</a>
-        <a href="#modes">Modes</a>
-        <a href="#scale">Scale</a>
-        <a href="#evidence">Evidence</a>
-        <a href="#install">Install</a>
-        <a class="nav-gh" href="https://github.com/inxbit/pinghue">GitHub</a>
-      </nav>
-    </div>
-  </div>
+<header class="top">
+  <a class="wordmark" href="/" aria-label="pinghue home">pinghue</a>
+  <nav class="nav" aria-label="Site">
+    <a href="#terrain">map</a>
+    <a href="#modes">modes</a>
+    <a href="#evidence">evidence</a>
+    <a href="#install">install</a>
+    <a href="https://github.com/inxbit/pinghue">github</a>
+  </nav>
 </header>
 
 <main id="main">
 
-  <!-- ============================== the window ============================== -->
-  <!-- One scripted maintenance window, 02:00 to 02:47. The terminal stays on
-       stage; scrolling replays the night. Without JavaScript the whole story
-       reads top to bottom next to the final frame of the run. -->
-  <section class="window" id="why" aria-labelledby="hero-title" data-window>
-    <canvas class="pulse-field" aria-hidden="true" data-pulse></canvas>
-    <div class="window-stage">
-      <div class="window-copy">
+  <section class="hero" id="terrain" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <h1 class="hl" id="hero-title">
+        <span class="visually-hidden">The table is the terrain.</span>
+        <span class="hl-art hl-wide" aria-hidden="true"><span class="hl-line hl-big"><span class="hl-row">███████ ███ ███ ███████    ███████  █████  ██████  ███     ███████</span><span class="hl-row">███████ ███ ███ ███████    ███████ ███████ ███████ ███     ███████</span><span class="hl-row">  ███   ███ ███ ███          ███   ███ ███ ███ ███ ███     ███</span><span class="hl-row">  ███   ███ ███ ███          ███   ███ ███ ███ ███ ███     ███</span><span class="hl-row">  ███   ███████ ██████       ███   ███ ███ ██████  ███     ██████</span><span class="hl-row">  ███   ███████ ██████       ███   ███████ ██████  ███     ██████</span><span class="hl-row">  ███   ███ ███ ███          ███   ███████ ███ ███ ███     ███</span><span class="hl-row">  ███   ███ ███ ███          ███   ███ ███ ███ ███ ███     ███</span><span class="hl-row">  ███   ███ ███ ███████      ███   ███ ███ ███████ ███████ ███████</span><span class="hl-row">  ███   ███ ███ ███████      ███   ███ ███ ██████  ███████ ███████</span></span><span class="hl-line"><span class="hl-row">███  ██████    ███████ ███ ███ ███████    ███████ ███████ ██████  ██████   █████  ███ ███  ███</span><span class="hl-row">███ ███████    ███████ ███ ███ ███████    ███████ ███████ ███████ ███████ ███████ ███ ███  ███</span><span class="hl-row">███ ███          ███   ███ ███ ███          ███   ███     ███ ███ ███ ███ ███ ███ ███ ████ ███</span><span class="hl-row">███ ███          ███   ███ ███ ███          ███   ███     ███ ███ ███ ███ ███ ███ ███ ████ ███</span><span class="hl-row">███ ██████       ███   ███████ ██████       ███   ██████  ███████ ███████ ███ ███ ███ ████████</span><span class="hl-row">███  ██████      ███   ███████ ██████       ███   ██████  ██████  ██████  ███████ ███ ████████</span><span class="hl-row">███     ███      ███   ███ ███ ███          ███   ███     ███ ██  ███ ██  ███████ ███ ███ ████</span><span class="hl-row">███     ███      ███   ███ ███ ███          ███   ███     ███ ███ ███ ███ ███ ███ ███ ███ ████</span><span class="hl-row">███ ███████      ███   ███ ███ ███████      ███   ███████ ███ ███ ███ ███ ███ ███ ███ ███  ███ ███</span><span class="hl-row">███ ██████       ███   ███ ███ ███████      ███   ███████ ███ ███ ███ ███ ███ ███ ███ ███  ███ ███</span></span></span>
+        <span class="hl-art hl-narrow" aria-hidden="true"><span class="hl-line"><span class="hl-row">███████ ███ ███ ███████    ███████  █████  ██████  ███     ███████</span><span class="hl-row">███████ ███ ███ ███████    ███████ ███████ ███████ ███     ███████</span><span class="hl-row">  ███   ███ ███ ███          ███   ███ ███ ███ ███ ███     ███</span><span class="hl-row">  ███   ███ ███ ███          ███   ███ ███ ███ ███ ███     ███</span><span class="hl-row">  ███   ███████ ██████       ███   ███ ███ ██████  ███     ██████</span><span class="hl-row">  ███   ███████ ██████       ███   ███████ ██████  ███     ██████</span><span class="hl-row">  ███   ███ ███ ███          ███   ███████ ███ ███ ███     ███</span><span class="hl-row">  ███   ███ ███ ███          ███   ███ ███ ███ ███ ███     ███</span><span class="hl-row">  ███   ███ ███ ███████      ███   ███ ███ ███████ ███████ ███████</span><span class="hl-row">  ███   ███ ███ ███████      ███   ███ ███ ██████  ███████ ███████</span></span><span class="hl-line"><span class="hl-row">███  ██████    ███████ ███ ███ ███████</span><span class="hl-row">███ ███████    ███████ ███ ███ ███████</span><span class="hl-row">███ ███          ███   ███ ███ ███</span><span class="hl-row">███ ███          ███   ███ ███ ███</span><span class="hl-row">███ ██████       ███   ███████ ██████</span><span class="hl-row">███  ██████      ███   ███████ ██████</span><span class="hl-row">███     ███      ███   ███ ███ ███</span><span class="hl-row">███     ███      ███   ███ ███ ███</span><span class="hl-row">███ ███████      ███   ███ ███ ███████</span><span class="hl-row">███ ██████       ███   ███ ███ ███████</span></span><span class="hl-line"><span class="hl-row">███████ ███████ ██████  ██████   █████  ███ ███  ███</span><span class="hl-row">███████ ███████ ███████ ███████ ███████ ███ ███  ███</span><span class="hl-row">  ███   ███     ███ ███ ███ ███ ███ ███ ███ ████ ███</span><span class="hl-row">  ███   ███     ███ ███ ███ ███ ███ ███ ███ ████ ███</span><span class="hl-row">  ███   ██████  ███████ ███████ ███ ███ ███ ████████</span><span class="hl-row">  ███   ██████  ██████  ██████  ███████ ███ ████████</span><span class="hl-row">  ███   ███     ███ ██  ███ ██  ███████ ███ ███ ████</span><span class="hl-row">  ███   ███     ███ ███ ███ ███ ███ ███ ███ ███ ████</span><span class="hl-row">  ███   ███████ ███ ███ ███ ███ ███ ███ ███ ███  ███ ███</span><span class="hl-row">  ███   ███████ ███ ███ ███ ███ ███ ███ ███ ███  ███ ███</span></span></span>
+      </h1>
+      <ol class="steps">
+        <li class="step">
+          <span class="step-n" aria-hidden="true">01</span>
+          <code><span class="prompt" aria-hidden="true">$ </span>uv tool install pinghue</code>
+          <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv install command">Copy</button>
+        </li>
+        <li class="step">
+          <span class="step-n" aria-hidden="true">02</span>
+          <code><span class="prompt" aria-hidden="true">$ </span>pinghue -f hosts.txt</code>
+        </li>
+        <li class="step">
+          <span class="step-n" aria-hidden="true">03</span>
+          <code><span class="prompt" aria-hidden="true">$ </span>pinghue -f hosts.txt <span class="nw">--duration 180</span> <span class="nw">--output</span> maintenance.json</code>
+        </li>
+      </ol>
+    </div>
 
-        <div class="chapter chapter-hero" data-chapter data-tick-start="0" data-tick-end="8">
-          <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
-          <h1 id="hero-title">
-            <span class="hero-line">Watch the</span>
-            <span class="hero-line">whole window.</span>
-          </h1>
-          <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
-          <div class="install-stack">
-            <div class="install-line">
-              <span class="install-name">uv</span>
-              <code id="hero-install">uv tool install pinghue</code>
-              <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv install command">Copy</button>
-            </div>
-            <div class="install-line">
-              <span class="install-name">brew</span>
-              <code>brew install inxbit/tap/pinghue</code>
-              <button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew install command">Copy</button>
-            </div>
-          </div>
-          <p class="scroll-cue"><span class="cue-glyph" aria-hidden="true">▼</span> the story continues below · <a href="#install">skip to install</a></p>
-        </div>
+    <figure class="stage" data-terrain data-clip="media/ridge.mp4">
+      <img class="stage-poster" src="assets/terrain-poster.webp" width="1200" height="922" alt="" decoding="async">
+      <canvas class="stage-canvas" aria-hidden="true"></canvas>
+      <table class="tui" data-table>
+        <caption class="visually-hidden">Simulated pinghue run: six hosts with state, last, average, jitter, loss, and the history column drawn in the fixed glyph scale.</caption>
+        <thead><tr><th scope="col">host</th><th scope="col">state</th><th scope="col">last</th><th scope="col">avg</th><th scope="col">jitter</th><th scope="col">loss</th><th scope="col">history</th></tr></thead>
+        <tbody data-rows>
+          <tr><th scope="row">edge-router-1</th><td class="st-healthy">healthy</td><td>6.19</td><td>12.77</td><td>1.61</td><td>0.00%</td><td><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span></td></tr>
+          <tr><th scope="row">core-sw-1</th><td class="st-healthy">healthy</td><td>1.58</td><td>3.54</td><td>0.64</td><td>0.00%</td><td><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▂</span></td></tr>
+          <tr><th scope="row">db-primary</th><td class="st-intermittent">intermittent</td><td>12.62</td><td class="t-slow">119.19</td><td>33.94</td><td>0.00%</td><td><span class="g-slow">▆</span><span class="g-ok">▅</span><span class="g-ok">▅</span><span class="g-ok">▅</span><span class="g-ok">▅</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span></td></tr>
+          <tr><th scope="row">api-gw</th><td class="st-intermittent">intermittent</td><td>15.21</td><td>31.72</td><td>3.08</td><td class="t-fail">0.56%</td><td><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span><span class="g-ok">▄</span></td></tr>
+          <tr><th scope="row">backup-nas</th><td class="st-down">down</td><td class="t-fail">-</td><td>9.61</td><td>1.60</td><td class="t-fail">14.12%</td><td><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span><span class="g-fail">·</span></td></tr>
+          <tr><th scope="row">dns-resolver</th><td class="st-healthy">healthy</td><td>5.37</td><td>2.28</td><td>0.37</td><td>0.00%</td><td><span class="g-ok">▁</span><span class="g-ok">▁</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▂</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span><span class="g-ok">▃</span></td></tr>
+        </tbody>
+      </table>
+      <figcaption class="stage-caption">
+        <span>simulated run. head-on, each ridge is the history column pinghue prints.</span>
+        <button class="tilt-btn" type="button" data-tilt aria-pressed="false" hidden>view head-on</button>
+      </figcaption>
+    </figure>
+  </section>
 
-        <div class="chapter" data-chapter data-tick-start="9" data-tick-end="12">
-          <p class="stamp">02:12</p>
-          <h2>api-gw drops one probe.</h2>
-          <p>One lost echo out of seven hundred. Loss ticks up, the state flips to <span class="c-amber">intermittent</span>, and the history bar keeps the dot. A blip you would have missed is now on the record.</p>
-          <p class="chapter-log">02:12:41 · api-gw · 1 echo lost · loss 3% · <span class="c-amber">intermittent</span></p>
-          <p class="chapter-fact">Host states reflect the whole run, not the last few probes.</p>
-        </div>
-
-        <div class="chapter" data-chapter data-tick-start="13" data-tick-end="19">
-          <p class="stamp">02:18</p>
-          <h2>db-primary starts to drag.</h2>
-          <p>Latency climbs from 18ms into the 300s. The glyphs go amber on the fixed scale, jitter spikes, and the average remembers it. No rescaling, no smoothing: slow looks slow.</p>
-          <p class="chapter-log">02:18:23 · db-primary · last 438ms · jitter 37ms · <span class="c-amber">▆▆▇</span></p>
-          <p class="chapter-fact">Latency maps to a fixed glyph scale that never changes between runs.</p>
-        </div>
-
-        <div class="chapter" data-chapter data-tick-start="24" data-tick-end="28">
-          <p class="stamp">02:31</p>
-          <h2>backup-nas stops answering.</h2>
-          <p>Three consecutive failures and the state goes <span class="c-red">down</span>. It stays down until the host answers again, not until the graph scrolls past.</p>
-          <p class="chapter-log">02:31:04 · backup-nas · 3 consecutive fails · <span class="c-red">down</span></p>
-          <p class="chapter-fact">Fail-on-down exit codes let cron and CI act on it.</p>
-        </div>
-
-        <div class="chapter" data-chapter data-tick-start="29" data-tick-end="34">
-          <p class="stamp">02:47</p>
-          <h2>The window closes. The table remembers.</h2>
-          <p>Forty-seven minutes, eight hosts, every probe accounted for. Export the evidence, attach it to the change ticket, and go back to bed.</p>
-          <p class="chapter-log">02:47:56 · window closed · 8 hosts · 2 <span class="c-amber">intermittent</span> · 1 <span class="c-red">down</span> · evidence written</p>
-          <p class="chapter-fact"><a href="#evidence">See the report it writes</a>.</p>
-        </div>
-
+  <section class="sheet modes" id="modes" aria-labelledby="modes-title">
+    <h2 id="modes-title">modes</h2>
+    <ul class="mode-index">
+      <li><code>pinghue 1.1.1.1 8.8.8.8</code></li>
+      <li><code>pinghue -p 443 example.com</code></li>
+      <li><code>pinghue -p 443 example.com -c 3 --no-tui</code></li>
+    </ul>
+    <div class="mode-detail">
+      <div class="mode">
+        <h3>icmp</h3>
+        <p>The default. Concurrent echo probes to every host at once, in the full TUI with history, states, and keyboard control: <b>r</b> reset, <b>R</b> reset all, <b>a</b> addresses, <b>b</b> probe now.</p>
       </div>
-
-      <div class="terminal-shell" data-terminal-shell>
-        <figure class="terminal" data-terminal aria-label="Simulated PingHue maintenance-window run">
-          <figcaption class="term-bar">
-            <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
-            <span class="term-clock" data-clock>47:56</span>
-          </figcaption>
-          <div class="term-body">
-            <table class="term-table">
-              <caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run.</caption>
-              <thead><tr><th scope="col">HOST</th><th scope="col">LAST</th><th scope="col">AVG</th><th scope="col">LOSS</th><th scope="col">JITTER</th><th scope="col">STATE</th><th scope="col" class="th-hist">HISTORY</th></tr></thead>
-              <tbody data-rows>
-                <tr data-static-row><td class="t-host">edge-router-1</td><td class="t-num">9.1ms</td><td class="t-num">9.4ms</td><td class="t-num">0%</td><td class="t-num">0.2ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▃▃▃▃</span></td></tr>
-                <tr data-static-row><td class="t-host">edge-router-2</td><td class="t-num">12.4ms</td><td class="t-num">11.8ms</td><td class="t-num">0%</td><td class="t-num">0.3ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-                <tr data-static-row><td class="t-host">core-sw-1</td><td class="t-num">2.1ms</td><td class="t-num">2.0ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▂▂▂▂</span></td></tr>
-                <tr data-static-row><td class="t-host">db-primary</td><td class="t-num">18.6ms</td><td class="t-num">61.2ms</td><td class="t-num">0%</td><td class="t-num">2.1ms</td><td class="s-intermittent">intermittent</td><td class="t-hist"><span class="g-ok">▄▄</span><span class="g-slow">▆▆</span></td></tr>
-                <tr data-static-row><td class="t-host">cdn-edge</td><td class="t-num">23.8ms</td><td class="t-num">24.1ms</td><td class="t-num">0%</td><td class="t-num">0.5ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-                <tr data-static-row><td class="t-host">api-gw</td><td class="t-num">30.7ms</td><td class="t-num">31.0ms</td><td class="t-num">3%</td><td class="t-num">0.4ms</td><td class="s-intermittent">intermittent</td><td class="t-hist"><span class="g-ok">▅▅</span><span class="g-fail">·</span><span class="g-ok">▅</span></td></tr>
-                <tr data-static-row><td class="t-host">backup-nas</td><td class="t-num">-</td><td class="t-num">6.1ms</td><td class="t-num">41%</td><td class="t-num">0.2ms</td><td class="s-down">down</td><td class="t-hist"><span class="g-ok">▃▃</span><span class="g-fail">··</span></td></tr>
-                <tr data-static-row><td class="t-host">dns-resolver</td><td class="t-num">1.0ms</td><td class="t-num">1.1ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▁▁▁▁</span></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="term-footer" aria-hidden="true">
-            <span><b>q</b> quit</span><span><b>a</b> addresses</span><span><b>r</b> reset</span><span><b>R</b> reset all</span><span><b>b</b> probe</span><span><b>B</b> probe all</span>
-          </div>
-        </figure>
+      <div class="mode">
+        <h3>tcp <span class="dim">-p PORT</span></h3>
+        <p>Connect checks on any port from 1 to 65535. No privileges needed. A refused connection gets its own <span class="g-slow">!</span> marker, distinct from loss.</p>
+      </div>
+      <div class="mode">
+        <h3>lines <span class="dim">--no-tui</span></h3>
+        <p>One line per probe for cron and CI, with fail-on-down exit codes and <code>--output</code> for the report.</p>
+        <p class="stream" data-stream>2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms</p>
       </div>
     </div>
   </section>
 
-  <section class="proof-rail" aria-label="Verified product facts" data-reveal>
-    <p><strong>Up to 1024</strong><span>concurrent probes</span></p>
-    <p><strong>Schema version 1</strong><span>stable JSON evidence</span></p>
-    <p><strong>macOS and Linux</strong><span>supported platforms</span></p>
-    <p><strong>No server or daemon</strong><span>local by design</span></p>
+  <section class="sheet scale" id="scale" aria-labelledby="scale-title">
+    <h2 id="scale-title">one scale, every run</h2>
+    <p class="sheet-lede">Latency maps to eight fixed glyphs. The scale never rescales, so a row from tonight reads the same as a row from last month. Green up to 100ms, amber above it, red for loss.</p>
+    <ol class="runway" aria-label="The fixed latency scale">
+      <li data-step><span class="rw-stack g-ok" aria-hidden="true"><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-ok">▁</span> ≤1ms</span></li>
+      <li data-step><span class="rw-stack g-ok" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-ok">▂</span> ≤3ms</span></li>
+      <li data-step><span class="rw-stack g-ok" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-ok">▃</span> ≤10ms</span></li>
+      <li data-step><span class="rw-stack g-ok" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-ok">▄</span> ≤30ms</span></li>
+      <li data-step><span class="rw-stack g-ok" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-ok">▅</span> ≤100ms</span></li>
+      <li data-step><span class="rw-stack g-slow" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-slow">▆</span> ≤300ms</span></li>
+      <li data-step><span class="rw-stack g-slow" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-slow">▇</span> ≤1000ms</span></li>
+      <li data-step><span class="rw-stack g-slow" aria-hidden="true"><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span><span class="hl-row">████</span></span><span class="rw-limit"><span class="g-slow">█</span> &gt;1000ms</span></li>
+      <li class="rw-mark"><span class="rw-stack g-fail" aria-hidden="true"><span class="hl-row">  ██</span></span><span class="rw-limit"><span class="g-fail">·</span> loss or down</span></li>
+      <li class="rw-mark"><span class="rw-stack g-slow" aria-hidden="true"><span class="hl-row">  ██</span><span class="hl-row">  ██</span><span class="hl-row">  ██</span><span class="hl-row">  ██</span><span class="hl-row">  ██</span><span class="hl-row"> </span><span class="hl-row">  ██</span></span><span class="rw-limit"><span class="g-slow">!</span> TCP refused</span></li>
+    </ol>
+    <div class="lab" data-lab>
+      <label class="lab-label" for="lat">drag a probe across the scale</label>
+      <input class="lab-slider" id="lat" type="range" min="0" max="1000" step="1" value="450">
+      <p class="lab-readout" aria-hidden="true"><span class="lab-glyph g-ok" data-lab-glyph>▄</span><span class="lab-ms" data-lab-ms>14ms</span><span class="lab-band" data-lab-band>≤30ms, ok</span></p>
+      <p class="lab-trail" aria-hidden="true"><span class="lab-trail-label">history</span><span class="lab-trail-glyphs" data-lab-trail></span></p>
+    </div>
+    <p class="note">A host that drops one probe stays <span class="st-intermittent">intermittent</span> until you reset it. Three failures in a row and it is <span class="st-down">down</span> until it answers again. The report reflects the whole run, not the last few seconds.</p>
   </section>
 
-  <div class="hue-ribbon" role="presentation"></div>
-
-  <!-- ============================== modes ============================== -->
-  <section class="section modes-section" id="modes" data-reveal>
-    <h2>TUI when you watch. Lines when you script.</h2>
-    <div class="modes mode-cascade">
-      <article class="mode mode-primary">
-        <h3><span class="mode-tag">ICMP</span> the default</h3>
-        <pre><code><span class="prompt">$</span> pinghue 1.1.1.1 8.8.8.8 example.com</code></pre>
-        <p>Concurrent echo probes with the full TUI: history bars, states, and keyboard control.</p>
-      </article>
-      <article class="mode mode-tcp">
-        <h3><span class="mode-tag">TCP</span> no privileges needed</h3>
-        <pre><code><span class="prompt">$</span> pinghue -p 443 example.com api.internal</code></pre>
-        <p>Connect checks against any port, 1 to 65535. Refused connections get their own amber marker.</p>
-      </article>
-      <article class="mode mode-automation">
-        <h3><span class="mode-tag">--no-tui</span> for cron and CI</h3>
-        <pre><code><span class="prompt">$</span> pinghue -p 443 example.com -c 3 --no-tui
-<span class="out" data-stream>2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms</span></code></pre>
-        <p>One line per probe, fail-on-down exit codes, and <code>--output</code> for the report.</p>
-      </article>
-    </div>
-  </section>
-
-  <!-- ============================== fixed scale ============================== -->
-  <section class="section scale-section" id="scale" data-reveal>
-    <h2>One fixed scale, every run.</h2>
-    <p class="section-lede">
-      Latency maps to a fixed glyph scale. It never rescales, so rows stay comparable
-      across hosts, and across runs. Try it:
-    </p>
-    <div class="scale-lab" data-lab>
-      <div class="lab-readout" aria-hidden="true">
-        <span class="lab-glyph glyph green" data-lab-glyph>▄</span>
-        <span class="lab-ms" data-lab-ms>14ms</span>
-        <span class="lab-band" data-lab-band>within the 30ms band</span>
-      </div>
-      <label class="lab-label" for="lat-slider">Probe latency</label>
-      <input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>
-      <div class="lab-trail" aria-hidden="true">
-        <span class="lab-trail-label">history preview</span>
-        <span class="lab-trail-glyphs" data-lab-trail></span>
-      </div>
-      <p class="lab-note visually-hidden" role="status" aria-live="off" data-lab-status>14 milliseconds maps to glyph 4 of 8, green.</p>
-    </div>
-    <div class="signal-runway" aria-label="Fixed latency scale" data-scale>
-      <div class="signal-step"><span class="glyph green">▁</span><span>≤1ms</span></div>
-      <div class="signal-step"><span class="glyph green">▂</span><span>≤3ms</span></div>
-      <div class="signal-step"><span class="glyph green">▃</span><span>≤10ms</span></div>
-      <div class="signal-step"><span class="glyph green">▄</span><span>≤30ms</span></div>
-      <div class="signal-step"><span class="glyph green">▅</span><span>≤100ms</span></div>
-      <div class="signal-step"><span class="glyph amber">▆</span><span>≤300ms</span></div>
-      <div class="signal-step"><span class="glyph amber">▇</span><span>≤1000ms</span></div>
-      <div class="signal-step"><span class="glyph amber">█</span><span>&gt;1000ms</span></div>
-      <div class="signal-step"><span class="glyph red">·</span><span>loss / down</span></div>
-      <div class="signal-step"><span class="glyph amber">!</span><span>TCP refused</span></div>
-    </div>
-    <p class="scale-note">
-      A host that blips once stays <span class="c-amber">intermittent</span> until you reset it.
-      A maintenance-window report should reflect everything that happened, not only the final moments.
-    </p>
-  </section>
-
-  <section class="product-proof section" aria-label="PingHue product capture" data-reveal>
-    <div class="media-shell">
-      <picture>
-        <source type="image/webp" srcset="assets/pinghue-screenshot.webp">
-        <img src="assets/pinghue-screenshot.png" width="1600" height="560" loading="lazy" decoding="async" alt="PingHue monitoring sixteen hosts in a dense terminal table with latency, loss, state, and history columns.">
-      </picture>
-    </div>
-  </section>
-
-  <!-- ============================== evidence ============================== -->
-  <section class="section evidence-section" id="evidence" data-reveal>
-    <h2>Close the window with a report.</h2>
-    <div class="evidence">
+  <section class="sheet evidence" id="evidence" aria-labelledby="evidence-title">
+    <h2 id="evidence-title">close the window with a report</h2>
+    <div class="evidence-grid">
       <pre class="json" data-print><code><span class="jl"><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json</span><span class="jl"><span class="jk">{</span></span><span class="jl">  <span class="jq">"schema_version"</span>: <span class="jn">1</span>,</span><span class="jl">  <span class="jq">"pinghue_version"</span>: <span class="json-string">"5.1.0"</span>,</span><span class="jl">  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="json-string">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="json-string">"deadline"</span>, <span class="jc">…</span> },</span><span class="jl">  <span class="jq">"targets"</span>: [</span><span class="jl">    { <span class="jq">"target"</span>: <span class="json-string">"db-primary"</span>, <span class="jq">"status"</span>: <span class="json-string c-amber">"intermittent"</span>,</span><span class="jl">      <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.11</span>, <span class="jc">…</span> } }</span><span class="jl">  ]</span><span class="jl"><span class="jk">}</span></span></code></pre>
-      <ul class="evidence-points">
-        <li><b>Versioned contract.</b> JSON uses <code>schema_version: 1</code>. Breaking changes require a new schema version.</li>
-        <li><b>Whole-run stats.</b> <code>stats</code> covers every probe in the run; <code>samples</code> is the recent tail.</li>
-        <li><b>Private by default.</b> Output files are written <code>0600</code>, and existing files are never replaced without <code>--overwrite</code>.</li>
-      </ul>
+      <dl class="facts">
+        <dt>versioned contract</dt>
+        <dd>The JSON carries <code>schema_version: 1</code>. A breaking change requires a new schema version.</dd>
+        <dt>whole-run stats</dt>
+        <dd><code>stats</code> covers every probe in the run. <code>samples</code> is the recent tail.</dd>
+        <dt>private by default</dt>
+        <dd>Reports are written <code>0600</code>, and an existing file is never replaced without <code>--overwrite</code>.</dd>
+      </dl>
     </div>
   </section>
 
-  <!-- ============================== not ============================== -->
-  <section class="section scope-section" id="not" data-reveal>
-    <p class="kicker"># what pinghue is not</p>
-    <h2>Small on purpose.</h2>
+  <section class="sheet not" id="not" aria-labelledby="not-title">
+    <h2 id="not-title">what pinghue is not</h2>
     <ul class="not-list">
       <li>Not a Prometheus, Smokeping, Zabbix, or NMS replacement.</li>
       <li>Not a long-running metrics database or alerting system.</li>
@@ -256,55 +162,35 @@
       <li>Not a packet capture or traceroute tool.</li>
       <li>Not a service that accepts remote network requests.</li>
     </ul>
-    <p class="not-note">A focused local tool for maintenance windows, migrations, and quick reachability checks. Nothing more, on purpose.</p>
+    <p class="note">A small local tool for maintenance windows, migrations, and quick reachability checks. Up to 1024 concurrent probes, no server, no daemon.</p>
   </section>
 
-  <!-- ============================== install ============================== -->
-  <section class="section install-section" id="install" data-reveal>
-    <h2>Sixty seconds to a live table.</h2>
-    <div class="install-panel">
-      <div class="install-row">
-        <span class="install-name">uv</span>
-        <code>uv tool install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv command">Copy</button>
-      </div>
-      <div class="install-row">
-        <span class="install-name">pipx</span>
-        <code>pipx install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="pipx install pinghue" aria-label="Copy pipx command">Copy</button>
-      </div>
-      <div class="install-row">
-        <span class="install-name">brew</span>
-        <code>brew install inxbit/tap/pinghue</code>
-        <button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew command">Copy</button>
-      </div>
-      <div class="install-row">
-        <span class="install-name">pip</span>
-        <code>python -m pip install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="python -m pip install pinghue" aria-label="Copy pip command">Copy</button>
-      </div>
-    </div>
-    <p class="install-note">
-      macOS and Linux, Python 3.10 to 3.14. Then run the environment doctor: <code>pinghue --check</code>.
-      On Linux, ICMP may need a one-line <code>ping_group_range</code> fix, or just use TCP mode.
-    </p>
+  <section class="sheet install" id="install" aria-labelledby="install-title">
+    <h2 id="install-title">sixty seconds to a live table</h2>
+    <ul class="install-list">
+      <li><span class="via">uv</span><code>uv tool install pinghue</code><button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv command">Copy</button></li>
+      <li><span class="via">pipx</span><code>pipx install pinghue</code><button class="copy-btn" type="button" data-copy="pipx install pinghue" aria-label="Copy pipx command">Copy</button></li>
+      <li><span class="via">brew</span><code>brew install inxbit/tap/pinghue</code><button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew command">Copy</button></li>
+      <li><span class="via">pip</span><code>python -m pip install pinghue</code><button class="copy-btn" type="button" data-copy="python -m pip install pinghue" aria-label="Copy pip command">Copy</button></li>
+    </ul>
+    <p class="note">macOS and Linux, Python 3.10 to 3.14. Then run the environment doctor: <code>pinghue --check</code>. On Linux, ICMP may need a one-line <code>ping_group_range</code> fix, or use TCP mode.</p>
   </section>
 
-  <p class="copy-status" role="status" aria-live="polite" aria-atomic="true" data-copy-status></p>
+  <p class="copy-status visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-copy-status></p>
 
 </main>
 
-<footer class="footer">
-  <div class="foot-brand"><span class="wm-ping">ping</span><span class="wm-hue">hue</span></div>
+<footer class="foot">
+  <p class="foot-mark">pinghue <span class="g-ok" aria-hidden="true">▁▂▃▄▅</span><span class="g-slow" aria-hidden="true">▆▇█</span></p>
   <nav aria-label="Footer">
-    <a href="https://github.com/inxbit/pinghue">GitHub</a>
-    <a href="https://pypi.org/project/pinghue/">PyPI</a>
-    <a href="https://github.com/inxbit/pinghue/blob/main/SECURITY.md">Security model</a>
+    <a href="https://github.com/inxbit/pinghue">github</a>
+    <a href="https://pypi.org/project/pinghue/">pypi</a>
+    <a href="https://github.com/inxbit/pinghue/blob/main/SECURITY.md">security model</a>
     <a href="https://github.com/inxbit/pinghue/blob/main/LICENSE">MIT license</a>
   </nav>
-  <p class="foot-line">Built for the 02:00 change window.</p>
+  <p class="foot-line">built for the 02:00 change window.</p>
 </footer>
 
-<script src="script.js"></script>
+<script src="site.js"></script>
 </body>
 </html>
