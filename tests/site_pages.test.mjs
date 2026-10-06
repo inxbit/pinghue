@@ -277,7 +277,8 @@ test('the hero is the real TUI, labeled as a simulated run', () => {
   assert.match(term[0], new RegExp('<span class="term-title" aria-hidden="true">PingHUE v' + escapeRegExp(projectVersion()) + '</span>'));
 
   // Every key on the page is a real binding with its real label, in order.
-  const keys = [...term[0].matchAll(/<button class="key" type="button" data-key="(\w)"><kbd>(\w)<\/kbd>([^<]+)<\/button>/g)]
+  // They ship disabled, so without the script they are the TUI footer and nothing more.
+  const keys = [...term[0].matchAll(/<button class="key" type="button" data-key="(\w)" disabled><kbd>(\w)<\/kbd>([^<]+)<\/button>/g)]
     .map(([, dataKey, key, label]) => {
       assert.equal(dataKey, key);
       return [key, label];
@@ -287,7 +288,8 @@ test('the hero is the real TUI, labeled as a simulated run', () => {
   // The table repaints every second; it must not flood a screen reader, and
   // it says plainly that the run is simulated.
   assert.doesNotMatch(term[0].match(/<table[\s\S]*?<\/table>/)[0], /aria-live/);
-  assert.match(term[0], /<figcaption id="term-cap">A simulated run in the real pinghue TUI layout[^<]*<\/figcaption>/);
+  assert.match(term[0], /<figcaption id="term-cap">A simulated run in the real pinghue TUI layout[^<]*<kbd>a<\/kbd>\. The hosts are made up\.<span class="js-only"> The keys work here too\.<\/span><\/figcaption>/);
+  assert.match(read('docs/site.js'), /btn\.disabled = false;/);
   // Everything that moves can be paused (WCAG 2.2.2); the control is a JS enhancement.
   assert.match(term[0], /<button class="term-pause" type="button" aria-label="Pause the live demo" data-pause hidden>/);
   // The footage is decoration and loads only on demand.
@@ -503,13 +505,13 @@ test('the printed scale on the page is the real scale', () => {
   const steps = [...ruler[1].matchAll(/<li><span class="bars"><i class="(ok|slow) h(\d)"><\/i><\/span><span class="band">([^<]+)<\/span><\/li>/g)]
     .map(([, tone, level, band]) => [tone, Number(level), band]);
   assert.deepEqual(steps, [
-    ...buckets.map(([limit], i) => [limit <= slow ? 'ok' : 'slow', i + 1, '≤ ' + limit + ' ms']),
-    ['slow', 8, '&gt; ' + buckets.at(-1)[0] + ' ms'],
+    ...buckets.map(([limit], i) => [limit <= slow ? 'ok' : 'slow', i + 1, 'up to ' + limit + '&nbsp;ms']),
+    ['slow', 8, 'over ' + buckets.at(-1)[0] + '&nbsp;ms'],
   ]);
   assert.match(ruler[1], /<li class="ruler-mark"><span class="bars"><i class="fail"><\/i><\/span><span class="band">lost, down<\/span><\/li>/);
   assert.match(ruler[1], /<li class="ruler-mark"><span class="bars"><i class="refused"><\/i><\/span><span class="band">TCP refused<\/span><\/li>/);
   assert.match(read('src/pinghue/history.py'), /REFUSED:\n\s*return "!"/);
-  assert.match(html, new RegExp('Green until ' + slow + ' ms, amber past it\\.'));
+  assert.match(html, new RegExp('Green until ' + slow + '&nbsp;ms, amber past it\\.'));
 });
 
 test('the no-JS hero rows are the simulated frame at START', () => {

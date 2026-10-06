@@ -125,7 +125,7 @@
       // newest probe failed and amber past SLOW_LATENCY_MS; avg and max go
       // amber past it, loss goes red, jitter goes amber past 50 ms.
       const avg = s.received ? s.mean : null;
-      const jitter = s.received >= 2 ? s.jitter : s.received ? 0 : null;
+      const jitter = s.received >= 2 ? s.jitter : null;
       return {
         host: HOSTS[i][0],
         address: HOSTS[i][1],
@@ -227,6 +227,34 @@
     });
   });
 
+  /* ------------------------------------------------ scrolling windows */
+
+  // A terminal window that has to scroll sideways becomes a named, focusable
+  // region, so keyboard users can reach the columns past the edge.
+  const scrollers = Array.from(doc.querySelectorAll("[data-scroll]"));
+  const syncScrollers = () => {
+    scrollers.forEach((el) => {
+      const scrolls = el.scrollWidth > el.clientWidth + 1;
+      if (scrolls) {
+        el.setAttribute("role", "region");
+        el.setAttribute("aria-label", el.getAttribute("data-scroll"));
+        el.tabIndex = 0;
+      } else {
+        el.removeAttribute("role");
+        el.removeAttribute("aria-label");
+        el.removeAttribute("tabindex");
+      }
+    });
+  };
+  if (scrollers.length) {
+    let pending = 0;
+    window.addEventListener("resize", () => {
+      cancelAnimationFrame(pending);
+      pending = requestAnimationFrame(syncScrollers);
+    });
+    syncScrollers();
+  }
+
   /* ------------------------------------------------ mode tabs */
 
   doc.querySelectorAll("[data-tabs]").forEach((list) => {
@@ -239,6 +267,7 @@
         tab.tabIndex = on ? 0 : -1;
         if (panes[k]) panes[k].hidden = !on;
       });
+      syncScrollers();
       if (focus) tabs[index].focus();
     };
     tabs.forEach((tab, k) => {
@@ -354,14 +383,17 @@
     if (clock) clock.textContent = clockAt(elapsed + START);
   };
 
+  // When any host runs past the simulated hour, the same night starts again.
+  const wrap = () => {
+    if (!HOSTS.some((_, i) => tickOf(i) >= RUN_SECONDS)) return;
+    elapsed = 0;
+    extra = HOSTS.map(() => 0);
+    since = HOSTS.map(() => 0);
+  };
+
   const tick = () => {
     elapsed += 1;
-    if (HOSTS.some((_, i) => tickOf(i) >= RUN_SECONDS)) {
-      // the hour is over: the same night starts again
-      elapsed = 0;
-      extra = HOSTS.map(() => 0);
-      since = HOSTS.map(() => 0);
-    }
+    wrap();
     paint();
   };
 
@@ -374,8 +406,11 @@
   const hero = doc.querySelector("[data-hero]");
   const video = hero && hero.querySelector("video");
 
+  const saveData = (navigator.connection && navigator.connection.saveData)
+    || window.matchMedia("(prefers-reduced-data: reduce)").matches;
+
   const playVideo = () => {
-    if (!video) return;
+    if (!video || saveData) return;
     if (!video.getAttribute("src")) {
       video.src = video.getAttribute("data-src") || "";
       video.addEventListener("playing", () => hero.classList.add("is-playing"), { once: true });
@@ -448,10 +483,14 @@
     else if (key === "B") extra = extra.map((x) => x + 1);
     else if (key === "ArrowDown") cursor = (cursor + 1) % n;
     else if (key === "ArrowUp") cursor = (cursor - 1 + n) % n;
+    wrap();
     paint();
   };
 
-  keys.forEach((btn) => btn.addEventListener("click", () => press(btn.getAttribute("data-key"))));
+  keys.forEach((btn) => {
+    btn.disabled = false;
+    btn.addEventListener("click", () => press(btn.getAttribute("data-key")));
+  });
 
   if (term) {
     term.addEventListener("keydown", (e) => {
