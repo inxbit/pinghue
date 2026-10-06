@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 import { renderRows } from '../scripts/site-rows.mjs';
 
@@ -293,6 +294,16 @@ test('the hero is the real TUI, labeled as a simulated run', () => {
   assert.match(html, /<div class="backdrop" aria-hidden="true">/);
   assert.match(html, /<video muted playsinline loop preload="none" data-src="media\/hero\.mp4"><\/video>/);
   assert.match(html, /<img class="still" src="assets\/hero-poster\.webp" width="2508" height="1412" alt=""/);
+});
+
+test('every version the site shows is the released one', () => {
+  // scripts/site-version.mjs rewrites these from pyproject.toml at release time.
+  const check = spawnSync(process.execPath, ['scripts/site-version.mjs', '--check'], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  const version = projectVersion();
+  assert.match(read('docs/404.html'), new RegExp('<span class="window-title">PingHUE v' + escapeRegExp(version) + '</span>'));
+  assert.match(read('scripts/site-social-card.html'), new RegExp('<span>PingHUE v' + escapeRegExp(version) + '</span>'));
+  assert.match(read('.github/release-checklist.md'), /node scripts\/site-version\.mjs/);
 });
 
 test('the evidence, modes and scope sections say what pinghue really does', () => {
