@@ -25,8 +25,8 @@
   --frame: min(100cqw, 1840px);
   --u: calc(var(--frame) / 1586);
   /* Typed cells: the ink sits inside each 0.5em cell, clear of the glyph's overhang. */
-  --cell-x: linear-gradient(90deg, transparent 0 4%, #000 4% 82%, transparent 82% 100%);
-  --cell-y: linear-gradient(180deg, #000 0 82%, transparent 82% 100%);
+  --cell-x: linear-gradient(90deg, transparent 0 4%, #000 4% 90%, transparent 90% 100%);
+  --cell-y: linear-gradient(180deg, #000 0 85%, transparent 85% 100%);
   color-scheme: light;
 }
 
@@ -169,7 +169,7 @@ h1, h2, p, ol, ul, dl, dd, figure, pre { margin: 0; }
 .hl-line,
 .rw-stack {
   --hl-f: calc(14.08 * var(--u));
-  --hl-k: 0.824;
+  --hl-k: 0.88;
   display: block;
   font-size: var(--hl-f);
   -webkit-mask-image: var(--cell-x), var(--cell-y);
@@ -182,7 +182,7 @@ h1, h2, p, ol, ul, dl, dd, figure, pre { margin: 0; }
 
 .hl-line.hl-big {
   --hl-f: calc(16.28 * var(--u));
-  --hl-k: 0.86;
+  --hl-k: 0.92;
   margin-bottom: calc(12 * var(--u));
 }
 
@@ -675,7 +675,7 @@ h1, h2, p, ol, ul, dl, dd, figure, pre { margin: 0; }
     width: auto;
     padding: 10px 16px 0;
     flex-wrap: wrap;
-    row-gap: 0;
+    gap: 0 28px;
     font-size: 17px;
   }
 
