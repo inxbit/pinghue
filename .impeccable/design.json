@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-07T00:39:53+00:00",
+  "generatedAt": "2026-10-07T03:13:17+00:00",
   "title": "Design System: pinghue",
   "extensions": {
     "colorMeta": {
@@ -424,7 +424,7 @@
       "refersTo": "key-cap",
       "description": "A TUI footer key that is also a working control; the active key takes cursor blue.",
       "html": "<div class=\"ds-keys\"><button class=\"ds-key\" type=\"button\"><kbd>a</kbd>Address</button><button class=\"ds-key is-active\" type=\"button\"><kbd>b</kbd>Probe now</button></div>",
-      "css": ".ds-keys { display: flex; gap: 10px 43px; padding: 17px 23px; background: var(--tui-bg, #0d1014); color: var(--fg-2, #b4bac4); font: 400 17px/30px var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); } .ds-key { display: inline-flex; align-items: center; gap: 17px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; } .ds-key kbd { display: inline-grid; place-items: center; min-width: 34px; height: 30px; padding: 0 8px; border: 1px solid var(--line-2, #30343c); border-radius: 6px; background: var(--key-ground, #151a20); color: var(--tui-text, #e6edf3); font: inherit; } .ds-key:hover kbd { border-color: #4a525d; background: #1c222a; } .ds-key.is-active kbd { border-color: var(--blue, #58a6ff); background: rgb(88 166 255 / 0.22); } .ds-key:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; border-radius: 6px; }"
+      "css": ".ds-keys { display: flex; gap: 10px 43px; padding: 17px 23px; background: var(--tui-bg, #0d1014); color: var(--fg-2, #b4bac4); font: 400 17px/30px var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); } .ds-key { display: inline-flex; align-items: center; gap: 17px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; } .ds-key kbd { display: inline-grid; place-items: center; min-width: 34px; height: 30px; padding: 0 8px; border: 1px solid var(--line-2, #30343c); border-radius: 6px; background: #151a20; color: var(--tui-text, #e6edf3); font: inherit; } .ds-key:hover kbd { border-color: #4a525d; background: #1c222a; } .ds-key.is-active kbd { border-color: var(--blue, #58a6ff); background: rgb(88 166 255 / 0.22); } .ds-key:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; border-radius: 6px; }"
     },
     {
       "name": "Terminal Window",
