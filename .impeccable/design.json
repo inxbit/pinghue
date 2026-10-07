@@ -1,0 +1,501 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-07T00:39:53+00:00",
+  "title": "Design System: pinghue",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Rack Black",
+        "canonical": "#08090a",
+        "tonalRamp": [
+          "oklch(15% 0.003 246.3)",
+          "oklch(26% 0.003 246.3)",
+          "oklch(38% 0.003 246.3)",
+          "oklch(50% 0.003 246.3)",
+          "oklch(62% 0.003 246.3)",
+          "oklch(74% 0.003 246.3)",
+          "oklch(85% 0.003 246.3)",
+          "oklch(95% 0.003 246.3)"
+        ],
+        "oklch": "oklch(13.9% 0.003 246.3)"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Paper White",
+        "canonical": "#f7f8f8",
+        "tonalRamp": [
+          "oklch(15% 0.001 197.1)",
+          "oklch(26% 0.001 197.1)",
+          "oklch(38% 0.001 197.1)",
+          "oklch(50% 0.001 197.1)",
+          "oklch(62% 0.001 197.1)",
+          "oklch(74% 0.001 197.1)",
+          "oklch(85% 0.001 197.1)",
+          "oklch(95% 0.001 197.1)"
+        ],
+        "oklch": "oklch(97.8% 0.001 197.1)"
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Ash",
+        "canonical": "#b4bac4",
+        "tonalRamp": [
+          "oklch(15% 0.016 260.7)",
+          "oklch(26% 0.016 260.7)",
+          "oklch(38% 0.016 260.7)",
+          "oklch(50% 0.016 260.7)",
+          "oklch(62% 0.016 260.7)",
+          "oklch(74% 0.016 260.7)",
+          "oklch(85% 0.016 260.7)",
+          "oklch(95% 0.016 260.7)"
+        ],
+        "oklch": "oklch(78.7% 0.016 260.7)"
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Steel Gray",
+        "canonical": "#8a8f98",
+        "tonalRamp": [
+          "oklch(15% 0.015 262.4)",
+          "oklch(26% 0.015 262.4)",
+          "oklch(38% 0.015 262.4)",
+          "oklch(50% 0.015 262.4)",
+          "oklch(62% 0.015 262.4)",
+          "oklch(74% 0.015 262.4)",
+          "oklch(85% 0.015 262.4)",
+          "oklch(95% 0.015 262.4)"
+        ],
+        "oklch": "oklch(64.9% 0.015 262.4)"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#23252a",
+        "tonalRamp": [
+          "oklch(15% 0.010 268.3)",
+          "oklch(26% 0.010 268.3)",
+          "oklch(38% 0.010 268.3)",
+          "oklch(50% 0.010 268.3)",
+          "oklch(62% 0.010 268.3)",
+          "oklch(74% 0.010 268.3)",
+          "oklch(85% 0.010 268.3)",
+          "oklch(95% 0.010 268.3)"
+        ],
+        "oklch": "oklch(26.4% 0.010 268.3)"
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "#30343c",
+        "tonalRamp": [
+          "oklch(15% 0.015 264.3)",
+          "oklch(26% 0.015 264.3)",
+          "oklch(38% 0.015 264.3)",
+          "oklch(50% 0.015 264.3)",
+          "oklch(62% 0.015 264.3)",
+          "oklch(74% 0.015 264.3)",
+          "oklch(85% 0.015 264.3)",
+          "oklch(95% 0.015 264.3)"
+        ],
+        "oklch": "oklch(32.4% 0.015 264.3)"
+      },
+      "chip": {
+        "role": "neutral",
+        "displayName": "Smoked Chip",
+        "canonical": "rgb(14 16 18 / 0.86)",
+        "tonalRamp": [
+          "oklch(15% 0.005 248.1)",
+          "oklch(26% 0.005 248.1)",
+          "oklch(38% 0.005 248.1)",
+          "oklch(50% 0.005 248.1)",
+          "oklch(62% 0.005 248.1)",
+          "oklch(74% 0.005 248.1)",
+          "oklch(85% 0.005 248.1)",
+          "oklch(95% 0.005 248.1)"
+        ]
+      },
+      "tui-ground": {
+        "role": "neutral",
+        "displayName": "Window Ground",
+        "canonical": "#0d1014",
+        "tonalRamp": [
+          "oklch(15% 0.010 255.7)",
+          "oklch(26% 0.010 255.7)",
+          "oklch(38% 0.010 255.7)",
+          "oklch(50% 0.010 255.7)",
+          "oklch(62% 0.010 255.7)",
+          "oklch(74% 0.010 255.7)",
+          "oklch(85% 0.010 255.7)",
+          "oklch(95% 0.010 255.7)"
+        ],
+        "oklch": "oklch(17.2% 0.010 255.7)"
+      },
+      "tui-bar": {
+        "role": "neutral",
+        "displayName": "Window Bar",
+        "canonical": "#11151a",
+        "tonalRamp": [
+          "oklch(15% 0.012 254.1)",
+          "oklch(26% 0.012 254.1)",
+          "oklch(38% 0.012 254.1)",
+          "oklch(50% 0.012 254.1)",
+          "oklch(62% 0.012 254.1)",
+          "oklch(74% 0.012 254.1)",
+          "oklch(85% 0.012 254.1)",
+          "oklch(95% 0.012 254.1)"
+        ],
+        "oklch": "oklch(19.4% 0.012 254.1)"
+      },
+      "tui-text": {
+        "role": "neutral",
+        "displayName": "Terminal Text",
+        "canonical": "#e6edf3",
+        "tonalRamp": [
+          "oklch(15% 0.011 243.7)",
+          "oklch(26% 0.011 243.7)",
+          "oklch(38% 0.011 243.7)",
+          "oklch(50% 0.011 243.7)",
+          "oklch(62% 0.011 243.7)",
+          "oklch(74% 0.011 243.7)",
+          "oklch(85% 0.011 243.7)",
+          "oklch(95% 0.011 243.7)"
+        ],
+        "oklch": "oklch(94.3% 0.011 243.7)"
+      },
+      "tui-muted": {
+        "role": "neutral",
+        "displayName": "Terminal Muted",
+        "canonical": "#8ea0b8",
+        "tonalRamp": [
+          "oklch(15% 0.041 255.7)",
+          "oklch(26% 0.041 255.7)",
+          "oklch(38% 0.041 255.7)",
+          "oklch(50% 0.041 255.7)",
+          "oklch(62% 0.041 255.7)",
+          "oklch(74% 0.041 255.7)",
+          "oklch(85% 0.041 255.7)",
+          "oklch(95% 0.041 255.7)"
+        ],
+        "oklch": "oklch(70.0% 0.041 255.7)"
+      },
+      "tui-line": {
+        "role": "neutral",
+        "displayName": "Terminal Line",
+        "canonical": "#232a33",
+        "tonalRamp": [
+          "oklch(15% 0.019 254.8)",
+          "oklch(26% 0.019 254.8)",
+          "oklch(38% 0.019 254.8)",
+          "oklch(50% 0.019 254.8)",
+          "oklch(62% 0.019 254.8)",
+          "oklch(74% 0.019 254.8)",
+          "oklch(85% 0.019 254.8)",
+          "oklch(95% 0.019 254.8)"
+        ],
+        "oklch": "oklch(28.2% 0.019 254.8)"
+      },
+      "signal-green": {
+        "role": "primary",
+        "displayName": "Healthy Green",
+        "canonical": "#7ee787",
+        "tonalRamp": [
+          "oklch(15% 0.164 145.8)",
+          "oklch(26% 0.164 145.8)",
+          "oklch(38% 0.164 145.8)",
+          "oklch(50% 0.164 145.8)",
+          "oklch(62% 0.164 145.8)",
+          "oklch(74% 0.164 145.8)",
+          "oklch(85% 0.164 145.8)",
+          "oklch(95% 0.164 145.8)"
+        ],
+        "oklch": "oklch(84.2% 0.164 145.8)"
+      },
+      "signal-amber": {
+        "role": "primary",
+        "displayName": "Slow Amber",
+        "canonical": "#f2cc60",
+        "tonalRamp": [
+          "oklch(15% 0.133 90.0)",
+          "oklch(26% 0.133 90.0)",
+          "oklch(38% 0.133 90.0)",
+          "oklch(50% 0.133 90.0)",
+          "oklch(62% 0.133 90.0)",
+          "oklch(74% 0.133 90.0)",
+          "oklch(85% 0.133 90.0)",
+          "oklch(95% 0.133 90.0)"
+        ],
+        "oklch": "oklch(85.7% 0.133 90.0)"
+      },
+      "signal-red": {
+        "role": "primary",
+        "displayName": "Loss Red",
+        "canonical": "#ff7b72",
+        "tonalRamp": [
+          "oklch(15% 0.163 25.8)",
+          "oklch(26% 0.163 25.8)",
+          "oklch(38% 0.163 25.8)",
+          "oklch(50% 0.163 25.8)",
+          "oklch(62% 0.163 25.8)",
+          "oklch(74% 0.163 25.8)",
+          "oklch(85% 0.163 25.8)",
+          "oklch(95% 0.163 25.8)"
+        ],
+        "oklch": "oklch(73.4% 0.163 25.8)"
+      },
+      "cursor-blue": {
+        "role": "secondary",
+        "displayName": "Cursor Blue",
+        "canonical": "#58a6ff",
+        "tonalRamp": [
+          "oklch(15% 0.152 253.3)",
+          "oklch(26% 0.152 253.3)",
+          "oklch(38% 0.152 253.3)",
+          "oklch(50% 0.152 253.3)",
+          "oklch(62% 0.152 253.3)",
+          "oklch(74% 0.152 253.3)",
+          "oklch(85% 0.152 253.3)",
+          "oklch(95% 0.152 253.3)"
+        ],
+        "oklch": "oklch(71.5% 0.152 253.3)"
+      },
+      "key-ground": {
+        "role": "neutral",
+        "displayName": "Key Ground",
+        "canonical": "#151a20",
+        "tonalRamp": [
+          "oklch(15% 0.012 252.0)",
+          "oklch(26% 0.012 252.0)",
+          "oklch(38% 0.012 252.0)",
+          "oklch(50% 0.012 252.0)",
+          "oklch(62% 0.012 252.0)",
+          "oklch(74% 0.012 252.0)",
+          "oklch(85% 0.012 252.0)",
+          "oklch(95% 0.012 252.0)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The single hero headline; the 404 headline at clamp(40px, 7vw, 72px)."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section titles."
+      },
+      "lede": {
+        "displayName": "Lede",
+        "purpose": "The one line under the hero headline, in Ash."
+      },
+      "title": {
+        "displayName": "Section lede",
+        "purpose": "Section ledes, max 34em, in Ash."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running copy, pane notes, the not-list."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Buttons and form labels at 500; 600 marks definition terms."
+      },
+      "mono-data": {
+        "displayName": "Mono data",
+        "purpose": "The hero TUI table, tabular numerals."
+      },
+      "mono-small": {
+        "displayName": "Mono small",
+        "purpose": "Code windows, mini tables, command rows."
+      }
+    },
+    "shadows": [
+      {
+        "name": "window-drop",
+        "value": "0 32px 64px -28px rgb(0 0 0 / 0.75)",
+        "purpose": "Terminal windows outside the hero only."
+      },
+      {
+        "name": "tab-selected-ring",
+        "value": "inset 0 0 0 1px #30343c",
+        "purpose": "The selected tab in the tab rail."
+      },
+      {
+        "name": "slider-thumb",
+        "value": "0 2px 10px rgb(0 0 0 / 0.6)",
+        "purpose": "The latency lab range thumb."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-change",
+        "value": "0.2s ease-out",
+        "purpose": "Hover and selection changes on buttons, links, tabs, copy and pause buttons."
+      },
+      {
+        "name": "footage-fade",
+        "value": "opacity 1.4s cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The backdrop video fading in over its poster frame once it plays."
+      },
+      {
+        "name": "simulation-tick",
+        "value": "1s",
+        "purpose": "One simulated probe interval of the hero run, matching the CLI default."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "transition-duration: 0.01ms",
+        "purpose": "Under prefers-reduced-motion transitions collapse, the run starts paused and the footage does not autoplay."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "install-two-up",
+        "value": "min-width: 1400px"
+      },
+      {
+        "name": "unit-freeze",
+        "value": "max-width: 1099px",
+        "note": "--u freezes at 0.658px; splits collapse; section padding 96px"
+      },
+      {
+        "name": "narrow-terminal",
+        "value": "max-width: 899px",
+        "note": "hero table keeps host, state, last, loss, history"
+      },
+      {
+        "name": "phone",
+        "value": "max-width: 699px",
+        "note": "nav links hidden; actions stack; section padding 72px"
+      },
+      {
+        "name": "small-phone",
+        "value": "max-width: 379px",
+        "note": "hero table drops last"
+      },
+      {
+        "name": "smallest",
+        "value": "max-width: 339px",
+        "note": "hero table at 11px"
+      }
+    ],
+    "unit": {
+      "name": "--u",
+      "value": "calc(min(100cqw, 1840px) / 1672)",
+      "purpose": "One pixel of the approved 1672px comp; frozen at 0.658px below 1100px."
+    }
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "The only button style: smoked chip, hairline border, white label, inline SVG icon. Never colored.",
+      "html": "<a class=\"ds-btn\" href=\"#\"><svg viewBox=\"0 0 16 16\" width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M8 0c4.42 0 8 3.58 8 8a8 8 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38v-2.2c0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82a7.4 7.4 0 0 0-4 0C5.66 2.1 5 2.32 5 2.32c-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94v1.36c0 .21-.15.46-.55.38A8 8 0 0 1 0 8c0-4.42 3.58-8 8-8Z\"/></svg><span>View on GitHub</span></a>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 0.6em; height: 56px; padding: 0 28px 0 22px; border: 1px solid var(--line-2, #30343c); border-radius: var(--r-control, 10px); background: var(--chip, rgb(14 16 18 / 0.86)); color: var(--fg, #f7f8f8); font: 500 18px/1 var(--sans, 'Zalando Sans', system-ui, sans-serif); text-decoration: none; white-space: nowrap; transition: border-color 0.2s ease-out, background-color 0.2s ease-out; } .ds-btn svg { width: 1.32em; height: 1.32em; } .ds-btn:hover { border-color: #4a505a; background: rgb(26 29 33 / 0.92); } .ds-btn:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; border-radius: 6px; }"
+    },
+    {
+      "name": "Install Command Chip",
+      "kind": "custom",
+      "refersTo": "command-chip",
+      "description": "The primary action: the install command itself, with a prompt and a copy button that confirms in green.",
+      "html": "<div class=\"ds-cmd\"><span class=\"ds-cmd-prompt\">$</span><code>uv tool install pinghue</code><button class=\"ds-copy\" type=\"button\" aria-label=\"Copy install command\"><svg viewBox=\"0 0 16 16\" width=\"16\" height=\"16\" aria-hidden=\"true\" fill=\"currentColor\"><path d=\"M0 6.75C0 5.78.78 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .14.11.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z\"/><path d=\"M5 1.75C5 .78 5.78 0 6.75 0h7.5C15.22 0 16 .78 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .14.11.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z\"/></svg></button></div>",
+      "css": ".ds-cmd { display: inline-flex; align-items: center; height: 62px; padding: 0 10px 0 18px; border: 1px solid var(--line-2, #30343c); border-radius: var(--r-control, 10px); background: var(--chip, rgb(14 16 18 / 0.86)); font: 400 20px/1 var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); white-space: nowrap; } .ds-cmd-prompt { margin-right: 0.55em; color: var(--muted, #8a8f98); } .ds-cmd code { color: var(--fg, #f7f8f8); font: inherit; } .ds-copy { display: grid; place-items: center; width: 44px; height: 44px; margin-left: 24px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted, #8a8f98); cursor: pointer; transition: color 0.2s ease-out, background-color 0.2s ease-out; } .ds-copy:hover { background: rgb(255 255 255 / 0.06); color: var(--fg, #f7f8f8); } .ds-copy.copied { color: var(--green, #7ee787); } .ds-copy:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; }"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link",
+      "description": "Wordmark left, Ash links brightening on hover, a hairline divider, then the GitHub button.",
+      "html": "<header class=\"ds-nav\"><span class=\"ds-brand\">ping<b>hue</b></span><nav class=\"ds-links\"><a href=\"#\">Modes</a><a href=\"#\">Scale</a><a href=\"#\">Evidence</a><a href=\"#\">Install</a></nav><a class=\"ds-nav-gh\" href=\"#\">GitHub</a></header>",
+      "css": ".ds-nav { display: flex; align-items: center; height: 76px; padding: 0 32px; border-bottom: 1px solid rgb(35 37 42 / 0.7); background: rgb(8 9 10 / 0.94); font-family: var(--sans, 'Zalando Sans', system-ui, sans-serif); } .ds-brand { margin-right: auto; color: var(--fg, #f7f8f8); font-weight: 700; font-size: 24px; letter-spacing: -0.03em; } .ds-brand b { background: linear-gradient(90deg, #7ee787, #f2cc60, #ff7b72, #58a6ff); -webkit-background-clip: text; background-clip: text; color: transparent; } .ds-links { display: flex; gap: 31px; padding-right: 29px; margin-right: 29px; border-right: 1px solid var(--line-2, #30343c); font-size: 17px; } .ds-links a { color: var(--fg-2, #b4bac4); text-decoration: none; transition: color 0.2s ease-out; } .ds-links a:hover { color: var(--fg, #f7f8f8); } .ds-links a:focus-visible, .ds-nav-gh:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; border-radius: 6px; } .ds-nav-gh { display: inline-flex; align-items: center; height: 48px; padding: 0 26px; border: 1px solid var(--line-2, #30343c); border-radius: var(--r-control, 10px); background: var(--chip, rgb(14 16 18 / 0.86)); color: var(--fg, #f7f8f8); font-weight: 500; font-size: 18px; text-decoration: none; }"
+    },
+    {
+      "name": "Tabs",
+      "kind": "chip",
+      "refersTo": "tab",
+      "description": "A tab rail on the smoked chip ground; mono labels, the selected one gets a darker ground and an inset hairline ring.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">ICMP</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">TCP</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">--no-tui</button></div>",
+      "css": ".ds-tabs { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line-2, #30343c); border-radius: var(--r-surface, 12px); background: var(--chip, rgb(14 16 18 / 0.86)); } .ds-tab { min-height: 40px; padding: 0 18px; border: 0; border-radius: 8px; background: transparent; color: var(--muted, #8a8f98); font: 400 15px/1 var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); cursor: pointer; transition: color 0.2s ease-out, background-color 0.2s ease-out; } .ds-tab:hover { color: var(--fg, #f7f8f8); } .ds-tab[aria-selected='true'] { background: #1b1f25; box-shadow: inset 0 0 0 1px var(--line-2, #30343c); color: var(--fg, #f7f8f8); } .ds-tab:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; }"
+    },
+    {
+      "name": "Key Cap",
+      "kind": "button",
+      "refersTo": "key-cap",
+      "description": "A TUI footer key that is also a working control; the active key takes cursor blue.",
+      "html": "<div class=\"ds-keys\"><button class=\"ds-key\" type=\"button\"><kbd>a</kbd>Address</button><button class=\"ds-key is-active\" type=\"button\"><kbd>b</kbd>Probe now</button></div>",
+      "css": ".ds-keys { display: flex; gap: 10px 43px; padding: 17px 23px; background: var(--tui-bg, #0d1014); color: var(--fg-2, #b4bac4); font: 400 17px/30px var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); } .ds-key { display: inline-flex; align-items: center; gap: 17px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; } .ds-key kbd { display: inline-grid; place-items: center; min-width: 34px; height: 30px; padding: 0 8px; border: 1px solid var(--line-2, #30343c); border-radius: 6px; background: var(--key-ground, #151a20); color: var(--tui-text, #e6edf3); font: inherit; } .ds-key:hover kbd { border-color: #4a525d; background: #1c222a; } .ds-key.is-active kbd { border-color: var(--blue, #58a6ff); background: rgb(88 166 255 / 0.22); } .ds-key:focus-visible { outline: 2px solid var(--blue, #58a6ff); outline-offset: 3px; border-radius: 6px; }"
+    },
+    {
+      "name": "Terminal Window",
+      "kind": "card",
+      "refersTo": "window",
+      "description": "Secondary terminal window: window bar with traffic-light dots and a mono title over a TUI table or a pre.",
+      "html": "<figure class=\"ds-window\"><div class=\"ds-window-bar\"><span class=\"ds-dots\"><i></i><i></i><i></i></span><span class=\"ds-window-title\">pinghue 1.1.1.1 8.8.8.8</span></div><pre class=\"ds-window-body\"><span class=\"ds-prompt\">$</span> pinghue --no-tui 1.1.1.1\n1.1.1.1 ok latency=4.08ms</pre></figure>",
+      "css": ".ds-window { margin: 0; overflow: hidden; border: 1px solid var(--tui-line, #232a33); border-radius: var(--r-surface, 12px); background: var(--tui-bg, #0d1014); box-shadow: 0 32px 64px -28px rgb(0 0 0 / 0.75); } .ds-window-bar { display: flex; align-items: center; height: 40px; padding: 0 16px; border-bottom: 1px solid var(--tui-line, #232a33); background: var(--tui-bar, #11151a); color: var(--muted, #8a8f98); font: 400 13px/1 var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); } .ds-dots { display: flex; gap: 8px; } .ds-dots i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; } .ds-dots i:nth-child(2) { background: #febc2e; } .ds-dots i:nth-child(3) { background: #28c840; } .ds-window-title { flex: 1; margin-right: 49px; text-align: center; } .ds-window-body { margin: 0; padding: 14px 18px 18px; color: var(--tui-text, #e6edf3); font: 400 14px/1.7 var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); } .ds-prompt { color: var(--muted, #8a8f98); }"
+    },
+    {
+      "name": "Hero Terminal Row",
+      "kind": "custom",
+      "refersTo": "hero-terminal",
+      "description": "The signature: rows of the real TUI table with state tones and eighth-cell history bars; the cursor row tints blue at 22%.",
+      "html": "<table class=\"ds-tui\"><thead><tr><th>host</th><th>state</th><th>last</th><th>loss</th><th>history</th></tr></thead><tbody><tr><th>edge-router-1</th><td class=\"ds-ok\">healthy</td><td>14.79</td><td>0.00%</td><td><span class=\"ds-bars\"><i class=\"ok h4\"></i><i class=\"ok h4\"></i><i class=\"ok h5\"></i></span></td></tr><tr class=\"ds-cursor\"><th>db-primary</th><td class=\"ds-slow\">intermittent</td><td class=\"ds-slow\">449.31</td><td>0.00%</td><td><span class=\"ds-bars\"><i class=\"ok h5\"></i><i class=\"slow h6\"></i><i class=\"fail\"></i></span></td></tr><tr><th>backup-nas</th><td class=\"ds-down\">down</td><td>-</td><td class=\"ds-down\">15.25%</td><td><span class=\"ds-bars\"><i class=\"fail\"></i><i class=\"fail\"></i><i class=\"fail\"></i></span></td></tr></tbody></table>",
+      "css": ".ds-tui { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--tui-bg, #0d1014); color: var(--tui-text, #e6edf3); font: 400 20px/26px var(--mono, 'Ubuntu Sans Mono', ui-monospace, monospace); font-variant-numeric: tabular-nums; } .ds-tui th, .ds-tui td { height: 40px; padding: 0 16px 0 0; font-weight: 400; text-align: left; white-space: nowrap; } .ds-tui thead th { border-bottom: 1px solid var(--tui-line, #232a33); color: var(--tui-muted, #8ea0b8); } .ds-tui tbody th { color: var(--green, #7ee787); } .ds-ok { color: var(--green, #7ee787); } .ds-slow { color: var(--amber, #f2cc60); } .ds-down { color: var(--red, #ff7b72); } .ds-cursor > * { background: rgb(88 166 255 / 0.22); } .ds-tui tbody tr { cursor: pointer; } .ds-bars { display: flex; align-items: flex-end; gap: 6px; height: 32px; } .ds-bars i { width: 8px; border-radius: 1px; } .ds-bars .ok { background: var(--green, #7ee787); } .ds-bars .slow { background: var(--amber, #f2cc60); } .ds-bars .fail { width: 8px; height: 8px; margin-bottom: 4px; border-radius: 50%; background: var(--red, #ff7b72); } .ds-bars .h4 { height: 50%; } .ds-bars .h5 { height: 62.5%; } .ds-bars .h6 { height: 75%; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Table Is the Hero",
+    "overview": "pinghue.com is the dark developer-tool page done at full craft, with linear.app as the quality bar. A near-black ground, one clean grotesk, hairline structure, and nothing in color except the product. The hero is not a picture of the tool: it is the real pinghue TUI layout (the columns, states, eight-step glyph scale and key bindings from `src/pinghue`) running a deterministic simulated night from `docs/site.js`. Its keys work, it has a pause button, and dim Higgsfield footage of a data-center aisle at night plays behind it, shaded only where the copy and the table sit.\n\nEverything outside the terminal windows stays neutral on purpose, so the table is the one thing on the page that carries hue. Because pinghue's name is its thesis (ping plus hue, color is state), color on this site means state and nothing else. Density is calm and generous outside the windows and dense inside them, the way a terminal is.\n\nDesktop geometry is measured off the approved 1672 px comp and scaled through one unit, `--u`, so the page lands where the comp drew it. Rejected and not to return: neon-on-slate signal styling with scroll-story chapters, an all-monospace light world, SaaS gradient blobs, fake dashboards.",
+    "keyCharacteristics": [
+      "Near-black ground, three neutral text tones, hairline borders; the page itself is achromatic.",
+      "The real TUI as the hero, live and keyboard-operable, over dim rack footage.",
+      "Product colors only inside terminal windows, each with a state meaning.",
+      "One grotesk (Zalando Sans) for everything human; one mono (Ubuntu Sans Mono) only for commands and data.",
+      "Comp-true desktop sizes through `--u`, with px floors on type and controls."
+    ],
+    "rules": [
+      {
+        "name": "The Color Is State Rule",
+        "body": "The three signal tokens (green, amber, red) appear only with state meaning: a probe result, a host state, a slow or lossy cell, a copy succeeding or failing. Three carve-outs are native to this world and stay: the hue wordmark gradient (green, amber, red, blue, a brand commitment), the macOS traffic-light dots in window bars (their own hexes, never the signal tokens), and cursor blue as focus ring and selection.",
+        "section": "colors"
+      },
+      {
+        "name": "The Product Owns Its Palette Rule",
+        "body": "Terminal text and state colors are the product's, not the site's. If `src/pinghue/ui.py` changes, the stylesheet follows; the test enforces it.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono Is Data Rule",
+        "body": "Ubuntu Sans Mono sets only commands, code, keys and terminal content. Headlines, ledes, labels and links are Zalando Sans.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Numbers Rule",
+        "body": "Every live number (latencies, the clock, the lab readout) uses tabular numerals so columns never jitter while the run ticks.",
+        "section": "typography"
+      },
+      {
+        "name": "The Footage Stays Dim Rule",
+        "body": "The aisle footage is atmosphere. It is shaded under the headline and the table, fades to the ground at the hero's foot, loads only while the hero is on screen, and never plays under reduced motion or reduced data unless the visitor asks.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** size desktop rules off the 1672px comp through `--u`, with a px floor on every type size, control height and padding.",
+      "**Do** keep the page achromatic and let the terminal be the only thing in color.",
+      "**Do** take terminal text and state colors from `src/pinghue/ui.py`; `tests/site_pages.test.mjs` reads the palette, columns, keys and limits from `src/pinghue` and fails when the page drifts.",
+      "**Do** run `node scripts/site-rows.mjs` after changing the simulated run, so the no-JS rows match what `site.js` paints.",
+      "**Do** run `node scripts/site-version.mjs` to set the version the site shows (hero title, 404 title, JSON report, social card).",
+      "**Do** use inline SVG for icons, from the page's sprite.",
+      "**Do** honor reduced motion: transitions collapse, the run starts paused, the footage does not autoplay."
+    ],
+    "donts": [
+      "**Don't** add inline `style` attributes, inline event handlers or inline scripts; both pages ship a strict CSP with no `unsafe-inline`.",
+      "**Don't** use green, amber or red without a state meaning, outside the wordmark carve-out.",
+      "**Don't** set prose, headlines or labels in the mono.",
+      "**Don't** use em or en dashes anywhere in copy; the test rejects them.",
+      "**Don't** add eyebrow labels above section headlines, gradient blobs, neon glows, or scroll-story chapters.",
+      "**Don't** fake the product: no invented columns, states or keys the TUI does not have."
+    ]
+  }
+}
