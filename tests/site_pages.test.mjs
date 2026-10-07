@@ -288,7 +288,7 @@ test('the hero is the real TUI, labeled as a simulated run', () => {
   // The table repaints every second; it must not flood a screen reader, and
   // it says plainly that the run is simulated.
   assert.doesNotMatch(term[0].match(/<table[\s\S]*?<\/table>/)[0], /aria-live/);
-  assert.match(term[0], /<figcaption id="term-cap">A simulated run in the real pinghue TUI layout[^<]*<kbd>a<\/kbd>\. The hosts are made up\.<span class="js-only"> The keys work here too\.<\/span><\/figcaption>/);
+  assert.match(term[0], /<figcaption id="term-cap">A simulated run in the real pinghue TUI layout: same columns, states, latency scale and keys<span class="wide-only">, with addresses shown as if you had pressed <kbd>a<\/kbd><\/span><span class="narrow-only">; a narrow screen shows five of the eleven columns<\/span>\. The hosts are made up\.<span class="js-only"> The keys work here too\.<\/span><\/figcaption>/);
   assert.match(read('docs/site.js'), /btn\.disabled = false;/);
   // Everything that moves can be paused (WCAG 2.2.2); the control is a JS enhancement.
   assert.match(term[0], /<button class="term-pause" type="button" aria-label="Pause the live demo" data-pause hidden>/);

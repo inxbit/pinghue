@@ -1312,6 +1312,14 @@ html:not(.js) .pane + .pane {
   forced-color-adjust: none;
 }
 
+p code {
+  white-space: nowrap;
+}
+
+.narrow-only {
+  display: none;
+}
+
 html:not(.js) .lab,
 html:not(.js) .js-only {
   display: none;
@@ -1428,6 +1436,14 @@ html:not(.js) .js-only {
 
 /* a narrow terminal: host, state, last, loss and history */
 @media (max-width: 899px) {
+  .wide-only {
+    display: none;
+  }
+
+  .narrow-only {
+    display: inline;
+  }
+
   .term .tui {
     width: calc(100% - 24px);
   }
@@ -1540,7 +1556,9 @@ html:not(.js) .js-only {
   }
 
   .term .tui {
-    font-size: 12.5px;
+    width: calc(100% - 20px);
+    margin: 0 10px;
+    font-size: 12px;
   }
 
   .term .tui th,
@@ -1548,10 +1566,15 @@ html:not(.js) .js-only {
     padding-right: 6px;
   }
 
-  .term .tui th:nth-child(1) { width: 29%; }
-  .term .tui th:nth-child(3) { width: 29%; }
-  .term .tui th:nth-child(4) { width: 15%; }
-  .term .tui th:nth-child(9) { width: 15%; }
+  .term .tui th:last-child,
+  .term .tui td:last-child {
+    padding-right: 0;
+  }
+
+  .term .tui th:nth-child(1) { width: 28.5%; }
+  .term .tui th:nth-child(3) { width: 26.5%; }
+  .term .tui th:nth-child(4) { width: 14%; }
+  .term .tui th:nth-child(9) { width: 14%; }
 
   .term .bars {
     gap: 1.5px;
@@ -1578,14 +1601,14 @@ html:not(.js) .js-only {
     display: none;
   }
 
-  .term .tui th:nth-child(1) { width: 34%; }
-  .term .tui th:nth-child(3) { width: 33%; }
-  .term .tui th:nth-child(9) { width: 18%; }
+  .term .tui th:nth-child(1) { width: 33.5%; }
+  .term .tui th:nth-child(3) { width: 31%; }
+  .term .tui th:nth-child(9) { width: 16.5%; }
 }
 
 @media (max-width: 339px) {
   .term .tui {
-    font-size: 11.5px;
+    font-size: 11px;
   }
 }
 
