@@ -397,6 +397,87 @@
     paint();
   };
 
+  /* ------------------------------------------------ the room below the hero */
+
+  // The same night, up to the frame the hero opens on, in the history
+  // column's marks: the six rows as the room's far row, and one host's
+  // history at the foot of each section.
+  const historyOf = (i) => {
+    const bars = doc.createElement("span");
+    bars.className = "bars";
+    const track = doc.createElement("span");
+    track.className = "trace-track";
+    run.samples[i].slice(0, START + 1).forEach((ms) => {
+      const bar = doc.createElement("i");
+      bar.className = ms === null ? "fail" : `${toneFor(ms)} h${levelOf(ms)}`;
+      track.appendChild(bar);
+    });
+    bars.appendChild(track);
+    return bars;
+  };
+
+  const stack = doc.querySelector("[data-trace-stack]");
+  if (stack) HOSTS.forEach((_, i) => stack.appendChild(historyOf(i)));
+
+  // A band stands on the next room's top rule (the last, the footer's).
+  const rooms = Array.from(doc.querySelectorAll(".section, .footer"));
+  const bandOn = new Map();
+  rooms.forEach((room, k) => {
+    const trace = room.querySelector("[data-trace]");
+    const i = trace ? HOSTS.findIndex(([host]) => host === trace.getAttribute("data-trace")) : -1;
+    if (i < 0) return;
+    const host = doc.createElement("span");
+    host.className = "trace-host";
+    host.textContent = HOSTS[i][0];
+    trace.append(host, historyOf(i));
+    if (rooms[k + 1]) bandOn.set(rooms[k + 1], trace);
+  });
+
+  // A rule lights once when it is on screen (at #modes, the horizon); then
+  // the band on it, once half in view, steps from older probes to the hero's
+  // frame. Under reduced motion nothing is watched: bands show that frame.
+  if (!reduced && "IntersectionObserver" in window) {
+    const litAt = new Map();
+    const inView = new Set();
+    const catchUp = (band, cued) => {
+      band.classList.replace("is-pending", "is-live");
+      // the light still runs: let it lead
+      if (cued) band.classList.add("is-cued");
+      bands.unobserve(band);
+    };
+    const bands = new IntersectionObserver((entries) => {
+      entries.forEach(({ target, intersectionRatio, time }) => {
+        if (intersectionRatio < 0.45) inView.delete(target);
+        else if (litAt.has(target)) catchUp(target, time - litAt.get(target) < 800);
+        else inView.add(target);
+      });
+    }, { threshold: 0.5 });
+    // Each rule's 1px mark is let go and removed once lit.
+    const rules = new IntersectionObserver((entries) => {
+      entries.forEach(({ target, isIntersecting, time }) => {
+        if (!isIntersecting) return;
+        rules.unobserve(target);
+        const room = target.parentElement;
+        target.remove();
+        room.classList.add("is-lit");
+        const band = bandOn.get(room);
+        if (!band) return;
+        litAt.set(band, time);
+        if (inView.has(band)) catchUp(band, true);
+      });
+    }, { rootMargin: "0px 0px -64px 0px" });
+    bandOn.forEach((band) => {
+      band.classList.add("is-pending");
+      bands.observe(band);
+    });
+    rooms.forEach((room) => {
+      const mark = doc.createElement("span");
+      mark.className = "room-mark";
+      room.append(mark);
+      rules.observe(mark);
+    });
+  }
+
   /* ------------------------------------------------ backdrop footage */
 
   // A data-center aisle at night (Higgsfield clip, see CONTRIBUTING.md). It

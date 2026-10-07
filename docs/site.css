@@ -1222,6 +1222,377 @@ html:not(.js) .pane + .pane {
   color: var(--fg);
 }
 
+/* ------------------------------------------------ the room below the hero */
+
+/* The machine room the footage was shot in, where the simulated night goes
+   on: the hero's six history rows (site.js) are the far row, a raised floor
+   runs from their foot toward you, and each section ends on one host's
+   history, standing on the rule below it. Only history marks carry color. */
+
+.section,
+.footer {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  background: url("assets/room-grain.svg") 0 0 / 180px 180px;
+}
+
+/* the bottom padding .section has at each width */
+.section {
+  --room-pad: calc(150 * var(--u));
+}
+
+/* The seam: --rows is the far row's height, --floor the floor's depth down
+   to the heading. Until the row stands (end of this block) the horizon is
+   the rule; once it does, the grain rises out of the hero's black behind it
+   and a hairline (--far) marks the floor's far edge. */
+.modes {
+  --rows: calc(79 * var(--u));
+  --floor: calc(71 * var(--u));
+  --horizon: 0px;
+  background:
+    linear-gradient(var(--bg), rgb(8 9 10 / 0)) 0 0 / 100% var(--horizon) no-repeat,
+    url("assets/room-grain.svg") 0 0 / 180px 180px,
+    linear-gradient(90deg, transparent, var(--far, transparent) 25% 75%, transparent) 50% var(--horizon) / calc(var(--floor) * 1640 / 71) 1px no-repeat,
+    url("assets/room-floor.svg") 50% var(--horizon) / auto var(--floor) no-repeat;
+}
+
+/* the floor again under the last rule, at the close: the seam's floor drawn
+   deeper, its light gone above the heading; --dim tones it down on phones */
+.install {
+  --floor: calc(140 * var(--u));
+  background:
+    url("assets/room-grain.svg") 0 0 / 180px 180px,
+    linear-gradient(var(--dim, transparent) 0 0),
+    url("assets/room-floor.svg") 50% 0 / calc(1920 * var(--u)) var(--floor) no-repeat;
+}
+
+/* Window light: a halo and a wider, lower pool, each a blurred sheet in a box
+   with room for its blur, masked to nothing at the section's bottom edge so
+   no pool is cut off by the next rule. */
+.pane,
+.evidence .split {
+  position: relative;
+  isolation: isolate;
+}
+
+.pane::before,
+.pane::after,
+.evidence .split::before,
+.evidence .split::after {
+  --room-fade: linear-gradient(#000 calc(100% - var(--room-pad)), rgb(0 0 0 / 0.74) calc(100% - var(--room-pad) * 2 / 3), rgb(0 0 0 / 0.26) calc(100% - var(--room-pad) / 3), transparent);
+  content: "";
+  position: absolute;
+  bottom: calc(-1 * var(--room-pad));
+  z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image: var(--room-fade);
+  mask-image: var(--room-fade);
+}
+
+/* the halo: blur(40px), drawn 100px inside its box */
+.pane::before,
+.evidence .split::before {
+  top: -76px;
+  right: calc(2% - 100px);
+  left: calc(2% - 100px);
+  background: linear-gradient(rgb(230 237 243 / 0.1) 0 0) 100px 100px / calc(100% - 200px) var(--sheet) no-repeat;
+  filter: blur(40px);
+}
+
+/* the pool: blur(100px), drawn 250px inside its box */
+.pane::after,
+.evidence .split::after {
+  right: calc(10% - 250px);
+  left: calc(10% - 250px);
+  background: linear-gradient(rgb(230 237 243 / 0.09) 0 0) 250px 250px / calc(100% - 500px) var(--sheet) no-repeat;
+  filter: blur(100px);
+}
+
+/* the mode windows are 172 to 217px tall: the halo covers 24 to 210px of
+   the pane, the pool 110 to 310px */
+.pane::before {
+  --sheet: 186px;
+}
+
+.pane::after {
+  --sheet: 200px;
+  top: -140px;
+}
+
+/* the report window's own grid cell: the halo from 24px below its top to
+   12px past its bottom, the pool from its middle to 90px past its bottom */
+.evidence .split::before {
+  --sheet: calc(100% - 88px - var(--room-pad));
+  grid-area: 1 / 2;
+}
+
+.evidence .split::after {
+  --sheet: calc(100% - 160px - var(--room-pad));
+  grid-area: 1 / 2;
+  top: calc(50% - 250px);
+}
+
+/* One sweep of light along each rule (at #modes, the horizon) the first time
+   it is on screen: a core on the line, a faint bloom on the floor. */
+.section::before,
+.footer::before {
+  content: "";
+  position: absolute;
+  top: var(--horizon, 0px);
+  left: 0;
+  z-index: -1;
+  width: 42%;
+  height: var(--floor, 48px);
+  background:
+    linear-gradient(90deg, rgb(230 237 243 / 0), rgb(230 237 243 / 0.5) 50%, rgb(230 237 243 / 0)) 0 0 / 100% 1px no-repeat,
+    radial-gradient(50% 100% at 50% 0, rgb(230 237 243 / 0.06), rgb(230 237 243 / 0));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-100%);
+}
+
+/* what site.js watches: a 1px mark on the rule */
+.room-mark {
+  position: absolute;
+  top: var(--horizon, 0px);
+  left: 0;
+  width: 1px;
+  height: 1px;
+}
+
+/* History marks drawn like the column's (bars in eighths of a cell, lost
+   probes as dots) in state colors at low strength, newest on the right. */
+.trace,
+.trace-stack {
+  --ok: 30%;
+  --slow: 36%;
+  --lost: 56%;
+  position: absolute;
+  pointer-events: none;
+}
+
+/* A band fills its section's bottom padding, so no mark sits behind text;
+   whole-pixel bars make each catch-up step exactly one probe. */
+.trace {
+  --cell: var(--room-pad);
+  --bar: round(calc(20 * var(--u)), 1px);
+  --gap: round(calc(14 * var(--u)), 1px);
+  --run: 40;
+  right: 0;
+  bottom: 0;
+  left: max(20px, calc((100% - 1240 * var(--u)) / 2));
+  display: grid;
+  grid-template-columns: 13ch minmax(0, 1fr);
+  column-gap: max(12px, calc(24 * var(--u)));
+  align-items: end;
+  height: var(--cell);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  text-align: left;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.trace-host {
+  padding-bottom: calc(var(--cell) / 8);
+}
+
+/* the far row: the table's bar and gap, ending under its newest probe, one
+   pitch apart down as well as across */
+.trace-stack {
+  --cell: calc(11 * var(--u));
+  --bar: calc(8 * var(--u));
+  --gap: calc(5.6 * var(--u));
+  top: 0;
+  right: calc(50% - 704 * var(--u) - 1px);
+  left: calc(50% - 713 * var(--u) + 1px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: var(--cell);
+  row-gap: calc(2.6 * var(--u));
+}
+
+.trace .bars,
+.trace-stack .bars {
+  --pitch: calc(var(--bar) + var(--gap));
+  justify-self: end;
+  justify-content: flex-end;
+  width: calc(round(down, 100% + var(--gap), var(--pitch)) - var(--gap));
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overflow: clip;
+  transform: none;
+}
+
+.trace-track {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: var(--gap);
+  height: 100%;
+}
+
+.trace-track i,
+.trace-track .fail {
+  flex: none;
+  width: var(--bar);
+}
+
+.trace-track .ok {
+  background: color-mix(in srgb, var(--green) var(--ok), transparent);
+}
+
+.trace-track .slow {
+  background: color-mix(in srgb, var(--amber) var(--slow), transparent);
+}
+
+.trace-track .fail {
+  height: var(--bar);
+  margin-bottom: calc(var(--cell) / 8);
+  background: color-mix(in srgb, var(--red) var(--lost), transparent);
+}
+
+@media (max-width: 1099px) {
+  .section {
+    --room-pad: 96px;
+  }
+
+  .modes {
+    --rows: 52px;
+    --floor: 44px;
+  }
+
+  .install {
+    --floor: 88px;
+  }
+
+  .trace-stack {
+    --cell: 7px;
+    --bar: 6px;
+    --gap: 3px;
+    right: calc((100% - min(100% - 32px, 968px)) / 2 + 16px);
+    left: calc((100% - min(100% - 32px, 968px)) / 2 + 16px);
+    row-gap: 2px;
+  }
+
+  .evidence .split::before,
+  .evidence .split::after {
+    grid-area: 2 / 1;
+  }
+}
+
+@media (max-width: 699px) {
+  .section {
+    --room-pad: 72px;
+  }
+
+  .modes {
+    --rows: 37.5px;
+    --floor: 34.5px;
+  }
+
+  .install {
+    --floor: 64px;
+    --dim: rgb(8 9 10 / 0.4);
+  }
+
+  .trace {
+    --bar: 7px;
+    --gap: 5px;
+    --run: 24;
+  }
+
+  .trace-stack {
+    --cell: 5px;
+    --bar: 4px;
+    --gap: 1.5px;
+    row-gap: 1.5px;
+  }
+}
+
+/* The light runs first: a band waits as older probes until its rule has lit
+   and half of it shows, then steps forward to the hero's frame. */
+@media (prefers-reduced-motion: no-preference) {
+  .section.is-lit::before,
+  .footer.is-lit::before {
+    animation: room-sweep 1.6s cubic-bezier(0.45, 0, 0.25, 1) both;
+  }
+
+  .trace.is-pending .trace-track {
+    transform: translateX(calc(var(--run) * var(--pitch)));
+  }
+
+  .trace.is-live .trace-track {
+    animation: trace-run calc(var(--run) * 65ms) steps(var(--run), end) both;
+  }
+
+  .trace.is-cued .trace-track {
+    animation-delay: 0.8s;
+  }
+}
+
+@keyframes room-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+
+  15%,
+  80% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(138%);
+  }
+}
+
+@keyframes trace-run {
+  from {
+    transform: translateX(calc(var(--run) * var(--pitch)));
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+/* The far row needs round() and color-mix(); with both, unforced colors and
+   the script, it replaces the first rule as the horizon. */
+@supports (width: round(down, 1px, 1px)) and (color: color-mix(in srgb, #000, #fff)) {
+  @media (forced-colors: none) {
+    .js .modes {
+      --horizon: var(--rows);
+      --far: var(--line-2);
+      border-top-color: transparent;
+    }
+  }
+}
+
+@supports not ((width: round(down, 1px, 1px)) and (color: color-mix(in srgb, #000, #fff))) {
+  .trace,
+  .trace-stack {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .section,
+  .footer {
+    background: none;
+  }
+
+  .trace,
+  .trace-stack {
+    display: none;
+  }
+}
+
 /* 404: the page that did not answer */
 
 .lost {

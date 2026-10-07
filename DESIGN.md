@@ -252,6 +252,19 @@ The real TUI layout at 1472u: bar with dots, `PingHUE v{version}` title, a tabul
 ### Latency Scale
 A ten-cell ruler of the eight glyph heights plus the fail and refused marks, each with a mono band label, and a slider lab that maps a latency to its glyph live. Cells reflow 10, 5, then 2 per row.
 
+### The Room Below the Hero
+The sections below the hero read as one dark machine room where the hero's run keeps going.
+- **Far row:** six history rows sit under the hero, one per host, lined up under the table's history column. `site.js` builds them from the same simulated run.
+- **Floor:** they stand on a raised floor drawn in perspective (`assets/room-floor.svg`, hairline tokens only). It fades out before the Modes heading, and the same floor hangs from the Install rule.
+- **Bands:** each section ends on one host's history band from that run, colored by real probe state at low strength and labeled with the host in muted mono:
+  - Modes: edge-router-1
+  - Scale: db-primary
+  - Evidence: backup-nas
+  - Small on purpose: dns-resolver
+  - Install: api-gw
+- **Light and grain:** terminal windows cast a soft light pool (#e6edf3 at 2 to 10 percent). A fine film grain (`assets/room-grain.svg`) gives the black some material.
+- **Motion:** one sweep of light runs along each rule as it enters view (1.6 s), then the band standing on that rule runs up once (2.6 s). Nothing moves under reduced motion, and forced colors drop the room entirely.
+
 ## Do's and Don'ts
 
 ### Do:
