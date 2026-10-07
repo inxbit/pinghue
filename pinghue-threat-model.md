@@ -68,7 +68,7 @@ Open questions:
 | Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; schema tests |
 | Git tag -> release workflow | Source commit and package artifacts | Signed annotated-tag identity/target checks; main ancestry; exact-commit validation; protected environment; OIDC; attestations |
 | Dependency metadata -> package indexes | Locked requirements and advisory queries | Hash-enforced installs; narrow runtime ranges; Dependabot and scheduled audits |
-| Docs source -> GitHub Pages | Static HTML/CSS/JS and assets | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
+| Docs source -> GitHub Pages | Static HTML/CSS/JS and assets, one same-origin video | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; self-only CSP with no inline script or style (`media-src 'self'` admits only the hero clip in `docs/media/`); Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
 
 ## Assets and objectives
 

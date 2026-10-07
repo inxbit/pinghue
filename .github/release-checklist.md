@@ -81,6 +81,10 @@ Sigstore wheel signing is intentionally deferred for this single-maintainer proj
 - Update `CHANGELOG.md`.
 - Update all version surfaces: README, `SECURITY.md`, the example/site JSON,
   hero/favicons, and any current-version release text.
+- Run `node scripts/site-version.mjs` after the `pyproject.toml` bump: it sets
+  the version pinghue.com shows (hero and 404 TUI titles, the JSON report, the
+  social card) and re-renders `docs/assets/pinghue-social-card.png` (needs
+  Chrome; `--no-card` skips the render, `--check` only reports).
 - Run `scripts/gen-readme-assets.sh` so the GIF/PNG version metadata and real
   TUI captures match the new version.
 - Run the version-surface and asset-metadata tests in

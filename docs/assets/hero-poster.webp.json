@@ -1,0 +1,4 @@
+{
+  "prompt": "Origin: first frame of docs/media/hero.mp4, upscaled to 2508x1412 (lanczos) and encoded with cwebp q76. hero.mp4 is derived with ffmpeg (4 s crossfade loop, brightness -0.06, saturation 0.9, 1280x720, crf 29, no audio) from a Higgsfield bytedance/seedance-2.5 text-to-video clip, 5 s, 720p, 16:9, generated 2026-10-06 with the prompt: Cinematic slow dolly forward down a narrow data center cold aisle at 2 a.m.: tall black server racks on both sides with tiny green status LEDs blinking, one amber LED blinking on the right, cool dim overhead light falling off into darkness at the end of the aisle, perforated floor tiles, shallow depth of field, realistic 35mm film look, moody and quiet. No text, no signs, no labels, no people, no screens, no neon glow.",
+  "createdAt": "2026-10-06T20:41:46.020Z"
+}

@@ -1386,6 +1386,8 @@ def test_release_text_surfaces_do_not_reference_stale_current_version() -> None:
         "CONTRIBUTING.md",
         "examples/pinghue-output-example.json",
         "docs/index.html",
+        "docs/404.html",
+        "scripts/site-social-card.html",
         "docs/assets/pinghue-hero.svg",
         "docs/assets/pinghue-favicon.svg",
         "packaging/homebrew/pinghue.rb",

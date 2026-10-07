@@ -3,308 +3,316 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
-  <title>PingHue - concurrent ICMP and TCP ping monitor</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>pinghue - concurrent ICMP and TCP ping monitor</title>
   <meta name="description" content="Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.">
+  <meta name="theme-color" content="#08090a">
   <link rel="canonical" href="https://pinghue.com/">
   <link rel="icon" type="image/svg+xml" href="assets/pinghue-favicon.svg">
 
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pinghue.com/">
-  <meta property="og:title" content="PingHue - concurrent ICMP and TCP ping monitor">
+  <meta property="og:title" content="pinghue - concurrent ICMP and TCP ping monitor">
   <meta property="og:description" content="Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.">
   <meta property="og:image" content="https://pinghue.com/assets/pinghue-social-card.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window.">
+  <meta property="og:image:alt" content="The pinghue terminal table monitoring several hosts during a maintenance window.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="PingHue - concurrent ICMP and TCP ping monitor">
+  <meta name="twitter:title" content="pinghue - concurrent ICMP and TCP ping monitor">
   <meta name="twitter:description" content="Monitor many hosts in one colored terminal table, run ICMP or TCP probes, and export schema-versioned JSON evidence for maintenance windows.">
   <meta name="twitter:image" content="https://pinghue.com/assets/pinghue-social-card.png">
-  <meta name="twitter:image:alt" content="PingHue terminal monitoring multiple hosts during a maintenance window.">
+  <meta name="twitter:image:alt" content="The pinghue terminal table monitoring several hosts during a maintenance window.">
 
-  <link rel="preload" href="fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="fonts/jetbrains-mono-var-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="preload" href="fonts/zalando-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/ubuntu-sans-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="site.css">
 </head>
 <body>
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-copy" viewBox="0 0 16 16"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></symbol>
+</svg>
 
 <a class="skip-link" href="#main">Skip to content</a>
 
-<header class="nav-shell" data-nav>
-  <div class="nav">
-    <a class="wordmark" href="/" aria-label="PingHue home">
-      <span class="wm-ping">ping</span><span class="wm-hue">hue</span>
-    </a>
-    <button class="nav-toggle" type="button" aria-controls="site-menu" aria-expanded="false" data-nav-toggle>
-      <span>Menu</span>
-      <span class="menu-mark" aria-hidden="true"><i></i><i></i></span>
-    </button>
-    <div class="nav-panel" id="site-menu" data-nav-panel>
-      <button class="nav-close" type="button" aria-label="Close navigation" data-nav-close>Close</button>
-      <nav class="nav-links" aria-label="Site">
-        <a href="#why">The window</a>
-        <a href="#modes">Modes</a>
-        <a href="#scale">Scale</a>
-        <a href="#evidence">Evidence</a>
-        <a href="#install">Install</a>
-        <a class="nav-gh" href="https://github.com/inxbit/pinghue">GitHub</a>
-      </nav>
-    </div>
-  </div>
+<header class="nav">
+  <a class="brand" href="/"><img src="assets/pinghue-wordmark.svg" width="165" height="42" alt="pinghue"></a>
+  <nav class="nav-links" aria-label="Site">
+    <a href="#modes">Modes</a>
+    <a href="#scale">Scale</a>
+    <a href="#evidence">Evidence</a>
+    <a href="#install">Install</a>
+  </nav>
+  <a class="btn nav-gh" href="https://github.com/inxbit/pinghue">
+    <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+    <span>GitHub</span>
+  </a>
 </header>
 
 <main id="main">
 
-  <!-- ============================== the window ============================== -->
-  <!-- One scripted maintenance window, 02:00 to 02:47. The terminal stays on
-       stage; scrolling replays the night. Without JavaScript the whole story
-       reads top to bottom next to the final frame of the run. -->
-  <section class="window" id="why" aria-labelledby="hero-title" data-window>
-    <canvas class="pulse-field" aria-hidden="true" data-pulse></canvas>
-    <div class="window-stage">
-      <div class="window-copy">
+  <section class="hero" aria-labelledby="hero-title" data-hero>
+    <div class="backdrop" aria-hidden="true">
+      <img class="still" src="assets/hero-poster.webp" width="2508" height="1412" alt="" decoding="async" fetchpriority="high">
+      <video muted playsinline loop preload="none" data-src="media/hero.mp4"></video>
+    </div>
 
-        <div class="chapter chapter-hero" data-chapter data-tick-start="0" data-tick-end="8">
-          <p class="kicker"><span class="glyph green">▁▃▅</span> # for the 02:00 change window</p>
-          <h1 id="hero-title">
-            <span class="hero-line">Watch the</span>
-            <span class="hero-line">whole window.</span>
-          </h1>
-          <p class="lede">Monitor every host in one live table, then export structured JSON evidence when the maintenance window closes.</p>
-          <div class="install-stack">
-            <div class="install-line">
-              <span class="install-name">uv</span>
-              <code id="hero-install">uv tool install pinghue</code>
-              <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv install command">Copy</button>
+    <div class="hero-copy">
+      <h1 id="hero-title">Every host. One live table.</h1>
+      <p class="lede">Concurrent ICMP and TCP ping monitor for maintenance windows, on one fixed latency scale, with JSON evidence at the end.</p>
+      <div class="actions">
+        <div class="cmd">
+          <span class="cmd-prompt" aria-hidden="true">$</span>
+          <code>uv tool install pinghue</code>
+          <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy install command">
+            <svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+            <svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>
+          </button>
+        </div>
+        <a class="btn" href="https://github.com/inxbit/pinghue">
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+          <span>View on GitHub</span>
+        </a>
+      </div>
+    </div>
+
+    <figure class="term" aria-labelledby="term-cap">
+      <div class="term-window" tabindex="0" data-term>
+      <div class="term-bar">
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="term-title" aria-hidden="true">PingHUE v5.1.0</span>
+        <span class="term-end">
+          <span class="term-clock" aria-hidden="true" data-clock>02:31:04</span>
+          <button class="term-pause" type="button" aria-label="Pause the live demo" data-pause hidden>
+            <svg class="icon i-pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="2.5" width="3" height="11" rx="1"/><rect x="9.5" y="2.5" width="3" height="11" rx="1"/></svg>
+            <svg class="icon i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.9v10.2a.9.9 0 0 0 1.37.77l8.2-5.1a.9.9 0 0 0 0-1.54l-8.2-5.1A.9.9 0 0 0 4.5 2.9Z"/></svg>
+          </button>
+        </span>
+      </div>
+      <div class="term-body" data-scroll="pinghue table">
+        <table class="tui">
+          <thead>
+            <tr><th scope="col">host</th><th scope="col">address</th><th scope="col">state</th><th scope="col">last</th><th scope="col">min</th><th scope="col">avg</th><th scope="col">max</th><th scope="col">jitter</th><th scope="col">loss</th><th scope="col">mode</th><th scope="col">history</th></tr>
+          </thead>
+          <tbody data-rows>
+            <tr><th scope="row">edge-router-1</th><td>192.168.1.1</td><td class="s-healthy">healthy</td><td>14.79</td><td>11.64</td><td>14.30</td><td>18.43</td><td>1.01</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 11 probes: 11 ok"><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i></span></td></tr>
+            <tr><th scope="row">core-sw-1</th><td>10.0.0.10</td><td class="s-healthy">healthy</td><td>10.75</td><td>10.50</td><td>12.01</td><td>14.27</td><td>0.81</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 11 probes: 11 ok"><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i></span></td></tr>
+            <tr><th scope="row">db-primary</th><td>10.0.1.20</td><td class="s-intermittent">intermittent</td><td class="t-amber">449.31</td><td>20.11</td><td>57.96</td><td class="t-amber">449.31</td><td>17.53</td><td class="t-red">2.26%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 11 probes: 11 slow"><i class="slow h6"></i><i class="slow h6"></i><i class="slow h6"></i><i class="slow h6"></i><i class="slow h7"></i><i class="slow h7"></i><i class="slow h7"></i><i class="slow h7"></i><i class="slow h7"></i><i class="slow h7"></i><i class="slow h7"></i></span></td></tr>
+            <tr><th scope="row">api-gw</th><td>10.0.2.30</td><td class="s-healthy">healthy</td><td>36.76</td><td>34.00</td><td>39.38</td><td>46.85</td><td>2.59</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 11 probes: 11 ok"><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i><i class="ok h5"></i></span></td></tr>
+            <tr><th scope="row">backup-nas</th><td>192.168.50.10</td><td class="s-down">down</td><td class="t-red">8.31</td><td>7.05</td><td>9.35</td><td>13.15</td><td>1.35</td><td class="t-red">15.25%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 11 probes: 11 lost"><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i><i class="fail"></i></span></td></tr>
+            <tr><th scope="row">dns-resolver</th><td>8.8.8.8</td><td class="s-healthy">healthy</td><td>14.92</td><td>10.62</td><td>13.26</td><td>17.19</td><td>1.29</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 11 probes: 11 ok"><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i></span></td></tr>
+          </tbody>
+        </table>
+        <p class="term-note" aria-live="polite" data-term-note></p>
+      </div>
+      <div class="term-keys" role="group" aria-label="pinghue keys">
+        <button class="key" type="button" data-key="q" disabled><kbd>q</kbd>Quit</button>
+        <button class="key" type="button" data-key="a" disabled><kbd>a</kbd>Address</button>
+        <button class="key" type="button" data-key="r" disabled><kbd>r</kbd>Reset</button>
+        <button class="key" type="button" data-key="R" disabled><kbd>R</kbd>Reset all</button>
+        <button class="key" type="button" data-key="b" disabled><kbd>b</kbd>Probe now</button>
+        <button class="key" type="button" data-key="B" disabled><kbd>B</kbd>Probe all</button>
+      </div>
+      </div>
+      <figcaption id="term-cap">A simulated run in the real pinghue TUI layout: same columns, states, latency scale and keys<span class="wide-only">, with addresses shown as if you had pressed <kbd>a</kbd></span><span class="narrow-only">; a narrow screen shows only some of the eleven columns</span>. The hosts are made up.<span class="js-only"> The keys work here too.</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="section modes" id="modes" aria-labelledby="modes-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="modes-title">TUI when you watch, lines when you script</h2>
+        <p class="section-lede">One command, three ways to run it. Every mode probes your hosts concurrently, up to 1024 probes at a time with <code>--concurrency</code>, and keeps the same whole-run statistics.</p>
+      </div>
+
+      <div class="panes">
+        <div class="tabs" role="tablist" aria-label="Ways to run pinghue" data-tabs>
+          <button class="tab" type="button" role="tab" id="tab-icmp" aria-controls="pane-icmp" aria-selected="true">ICMP</button>
+          <button class="tab" type="button" role="tab" id="tab-tcp" aria-controls="pane-tcp" aria-selected="false" tabindex="-1">TCP</button>
+          <button class="tab" type="button" role="tab" id="tab-lines" aria-controls="pane-lines" aria-selected="false" tabindex="-1">--no-tui</button>
+        </div>
+
+        <div class="pane" role="tabpanel" tabindex="0" id="pane-icmp" aria-labelledby="tab-icmp">
+          <figure class="window">
+            <div class="window-bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="window-title">pinghue 1.1.1.1 8.8.8.8 9.9.9.9</span></div>
+            <div class="window-body" data-scroll="ICMP example table">
+              <table class="tui tui-mini">
+                <thead><tr><th scope="col">host</th><th scope="col">address</th><th scope="col">state</th><th scope="col">last</th><th scope="col">min</th><th scope="col">avg</th><th scope="col">max</th><th scope="col">jitter</th><th scope="col">loss</th><th scope="col">mode</th><th scope="col">history</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1.1.1.1</th><td>1.1.1.1</td><td class="s-healthy">healthy</td><td>4.08</td><td>3.23</td><td>3.67</td><td>4.36</td><td>0.23</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 8 probes: 8 ok"><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i></span></td></tr>
+                  <tr><th scope="row">8.8.8.8</th><td>8.8.8.8</td><td class="s-healthy">healthy</td><td>3.78</td><td>2.83</td><td>3.51</td><td>4.22</td><td>0.43</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 8 probes: 8 ok"><i class="ok h3"></i><i class="ok h2"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i></span></td></tr>
+                  <tr><th scope="row">9.9.9.9</th><td>9.9.9.9</td><td class="s-healthy">healthy</td><td>10.62</td><td>9.71</td><td>10.24</td><td>11.08</td><td>0.31</td><td>0.00%</td><td>icmp</td><td><span class="bars" role="img" aria-label="last 8 probes: 8 ok"><i class="ok h4"></i><i class="ok h3"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h3"></i><i class="ok h4"></i><i class="ok h4"></i><i class="ok h4"></i></span></td></tr>
+                </tbody>
+              </table>
             </div>
-            <div class="install-line">
-              <span class="install-name">brew</span>
-              <code>brew install inxbit/tap/pinghue</code>
-              <button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew install command">Copy</button>
+          </figure>
+          <p class="pane-note"><strong>The default.</strong> Concurrent echo probes with the full TUI: history bars, states, and keyboard control. Press <kbd>a</kbd> to show or hide the resolved addresses.</p>
+        </div>
+
+        <div class="pane" role="tabpanel" tabindex="0" id="pane-tcp" aria-labelledby="tab-tcp">
+          <figure class="window">
+            <div class="window-bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="window-title">pinghue -p 443 1.1.1.1 10.0.4.12</span></div>
+            <div class="window-body" data-scroll="TCP example table">
+              <table class="tui tui-mini">
+                <thead><tr><th scope="col">host</th><th scope="col">address</th><th scope="col">state</th><th scope="col">last</th><th scope="col">min</th><th scope="col">avg</th><th scope="col">max</th><th scope="col">jitter</th><th scope="col">loss</th><th scope="col">mode</th><th scope="col">history</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">1.1.1.1</th><td>1.1.1.1</td><td class="s-healthy">healthy</td><td>6.42</td><td>5.88</td><td>6.31</td><td>7.02</td><td>0.19</td><td>0.00%</td><td>tcp</td><td><span class="bars" role="img" aria-label="last 8 probes: 8 ok"><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i><i class="ok h3"></i></span></td></tr>
+                  <tr><th scope="row">10.0.4.12</th><td>10.0.4.12</td><td class="s-down">down</td><td class="t-red">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="t-red">100.00%</td><td>tcp</td><td><span class="bars" role="img" aria-label="last 8 probes: 8 refused"><i class="refused"></i><i class="refused"></i><i class="refused"></i><i class="refused"></i><i class="refused"></i><i class="refused"></i><i class="refused"></i><i class="refused"></i></span></td></tr>
+                </tbody>
+              </table>
             </div>
-          </div>
-          <p class="scroll-cue"><span class="cue-glyph" aria-hidden="true">▼</span> the story continues below · <a href="#install">skip to install</a></p>
+          </figure>
+          <p class="pane-note"><strong>No privileges needed.</strong> Connect checks against any port from 1 to 65535. A refused connection prints its own amber <code class="c-amber">!</code> in the history, so you can tell a closed port from a timeout at a glance.</p>
         </div>
 
-        <div class="chapter" data-chapter data-tick-start="9" data-tick-end="12">
-          <p class="stamp">02:12</p>
-          <h2>api-gw drops one probe.</h2>
-          <p>One lost echo out of seven hundred. Loss ticks up, the state flips to <span class="c-amber">intermittent</span>, and the history bar keeps the dot. A blip you would have missed is now on the record.</p>
-          <p class="chapter-log">02:12:41 · api-gw · 1 echo lost · loss 3% · <span class="c-amber">intermittent</span></p>
-          <p class="chapter-fact">Host states reflect the whole run, not the last few probes.</p>
+        <div class="pane" role="tabpanel" tabindex="0" id="pane-lines" aria-labelledby="tab-lines">
+          <figure class="window">
+            <div class="window-bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="window-title">sh</span></div>
+            <pre class="window-body lines" data-scroll="--no-tui example output"><code><span class="prompt">$</span> pinghue -p 443 example.com -c 3 --no-tui
+<span class="out">2026-10-06T02:31:04.118204+00:00 example.com ok latency=14.08ms
+2026-10-06T02:31:05.119927+00:00 example.com ok latency=13.92ms
+2026-10-06T02:31:06.121376+00:00 example.com ok latency=14.31ms</span>
+<span class="prompt">$</span> echo $?
+<span class="out">0</span></code></pre>
+          </figure>
+          <p class="pane-note"><strong>For cron and CI.</strong> One line per probe, exit code <code>3</code> when a <code>--fail-on-any-down</code> or <code>--fail-on-all-down</code> condition triggers, and <code>--output</code> for the report.</p>
         </div>
-
-        <div class="chapter" data-chapter data-tick-start="13" data-tick-end="19">
-          <p class="stamp">02:18</p>
-          <h2>db-primary starts to drag.</h2>
-          <p>Latency climbs from 18ms into the 300s. The glyphs go amber on the fixed scale, jitter spikes, and the average remembers it. No rescaling, no smoothing: slow looks slow.</p>
-          <p class="chapter-log">02:18:23 · db-primary · last 438ms · jitter 37ms · <span class="c-amber">▆▆▇</span></p>
-          <p class="chapter-fact">Latency maps to a fixed glyph scale that never changes between runs.</p>
-        </div>
-
-        <div class="chapter" data-chapter data-tick-start="24" data-tick-end="28">
-          <p class="stamp">02:31</p>
-          <h2>backup-nas stops answering.</h2>
-          <p>Three consecutive failures and the state goes <span class="c-red">down</span>. It stays down until the host answers again, not until the graph scrolls past.</p>
-          <p class="chapter-log">02:31:04 · backup-nas · 3 consecutive fails · <span class="c-red">down</span></p>
-          <p class="chapter-fact">Fail-on-down exit codes let cron and CI act on it.</p>
-        </div>
-
-        <div class="chapter" data-chapter data-tick-start="29" data-tick-end="34">
-          <p class="stamp">02:47</p>
-          <h2>The window closes. The table remembers.</h2>
-          <p>Forty-seven minutes, eight hosts, every probe accounted for. Export the evidence, attach it to the change ticket, and go back to bed.</p>
-          <p class="chapter-log">02:47:56 · window closed · 8 hosts · 2 <span class="c-amber">intermittent</span> · 1 <span class="c-red">down</span> · evidence written</p>
-          <p class="chapter-fact"><a href="#evidence">See the report it writes</a>.</p>
-        </div>
-
-      </div>
-
-      <div class="terminal-shell" data-terminal-shell>
-        <figure class="terminal" data-terminal aria-label="Simulated PingHue maintenance-window run">
-          <figcaption class="term-bar">
-            <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="term-title">pinghue - 8 targets - ICMP - 1.0s</span>
-            <span class="term-clock" data-clock>47:56</span>
-          </figcaption>
-          <div class="term-body">
-            <table class="term-table">
-              <caption class="visually-hidden">Terminal table showing host latency, loss, jitter, state, and colored history bars during a simulated monitoring run.</caption>
-              <thead><tr><th scope="col">HOST</th><th scope="col">LAST</th><th scope="col">AVG</th><th scope="col">LOSS</th><th scope="col">JITTER</th><th scope="col">STATE</th><th scope="col" class="th-hist">HISTORY</th></tr></thead>
-              <tbody data-rows>
-                <tr data-static-row><td class="t-host">edge-router-1</td><td class="t-num">9.1ms</td><td class="t-num">9.4ms</td><td class="t-num">0%</td><td class="t-num">0.2ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▃▃▃▃</span></td></tr>
-                <tr data-static-row><td class="t-host">edge-router-2</td><td class="t-num">12.4ms</td><td class="t-num">11.8ms</td><td class="t-num">0%</td><td class="t-num">0.3ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-                <tr data-static-row><td class="t-host">core-sw-1</td><td class="t-num">2.1ms</td><td class="t-num">2.0ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▂▂▂▂</span></td></tr>
-                <tr data-static-row><td class="t-host">db-primary</td><td class="t-num">18.6ms</td><td class="t-num">61.2ms</td><td class="t-num">0%</td><td class="t-num">2.1ms</td><td class="s-intermittent">intermittent</td><td class="t-hist"><span class="g-ok">▄▄</span><span class="g-slow">▆▆</span></td></tr>
-                <tr data-static-row><td class="t-host">cdn-edge</td><td class="t-num">23.8ms</td><td class="t-num">24.1ms</td><td class="t-num">0%</td><td class="t-num">0.5ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▄▄▄▄</span></td></tr>
-                <tr data-static-row><td class="t-host">api-gw</td><td class="t-num">30.7ms</td><td class="t-num">31.0ms</td><td class="t-num">3%</td><td class="t-num">0.4ms</td><td class="s-intermittent">intermittent</td><td class="t-hist"><span class="g-ok">▅▅</span><span class="g-fail">·</span><span class="g-ok">▅</span></td></tr>
-                <tr data-static-row><td class="t-host">backup-nas</td><td class="t-num">-</td><td class="t-num">6.1ms</td><td class="t-num">41%</td><td class="t-num">0.2ms</td><td class="s-down">down</td><td class="t-hist"><span class="g-ok">▃▃</span><span class="g-fail">··</span></td></tr>
-                <tr data-static-row><td class="t-host">dns-resolver</td><td class="t-num">1.0ms</td><td class="t-num">1.1ms</td><td class="t-num">0%</td><td class="t-num">0.1ms</td><td class="s-healthy">healthy</td><td class="t-hist"><span class="g-ok">▁▁▁▁</span></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="term-footer" aria-hidden="true">
-            <span><b>q</b> quit</span><span><b>a</b> addresses</span><span><b>r</b> reset</span><span><b>R</b> reset all</span><span><b>b</b> probe</span><span><b>B</b> probe all</span>
-          </div>
-        </figure>
       </div>
     </div>
   </section>
 
-  <section class="proof-rail" aria-label="Verified product facts" data-reveal>
-    <p><strong>Up to 1024</strong><span>concurrent probes</span></p>
-    <p><strong>Schema version 1</strong><span>stable JSON evidence</span></p>
-    <p><strong>macOS and Linux</strong><span>supported platforms</span></p>
-    <p><strong>No server or daemon</strong><span>local by design</span></p>
-  </section>
-
-  <div class="hue-ribbon" role="presentation"></div>
-
-  <!-- ============================== modes ============================== -->
-  <section class="section modes-section" id="modes" data-reveal>
-    <h2>TUI when you watch. Lines when you script.</h2>
-    <div class="modes mode-cascade">
-      <article class="mode mode-primary">
-        <h3><span class="mode-tag">ICMP</span> the default</h3>
-        <pre><code><span class="prompt">$</span> pinghue 1.1.1.1 8.8.8.8 example.com</code></pre>
-        <p>Concurrent echo probes with the full TUI: history bars, states, and keyboard control.</p>
-      </article>
-      <article class="mode mode-tcp">
-        <h3><span class="mode-tag">TCP</span> no privileges needed</h3>
-        <pre><code><span class="prompt">$</span> pinghue -p 443 example.com api.internal</code></pre>
-        <p>Connect checks against any port, 1 to 65535. Refused connections get their own amber marker.</p>
-      </article>
-      <article class="mode mode-automation">
-        <h3><span class="mode-tag">--no-tui</span> for cron and CI</h3>
-        <pre><code><span class="prompt">$</span> pinghue -p 443 example.com -c 3 --no-tui
-<span class="out" data-stream>2026-05-14T18:32:11.420000+00:00 example.com ok latency=14.08ms</span></code></pre>
-        <p>One line per probe, fail-on-down exit codes, and <code>--output</code> for the report.</p>
-      </article>
-    </div>
-  </section>
-
-  <!-- ============================== fixed scale ============================== -->
-  <section class="section scale-section" id="scale" data-reveal>
-    <h2>One fixed scale, every run.</h2>
-    <p class="section-lede">
-      Latency maps to a fixed glyph scale. It never rescales, so rows stay comparable
-      across hosts, and across runs. Try it:
-    </p>
-    <div class="scale-lab" data-lab>
-      <div class="lab-readout" aria-hidden="true">
-        <span class="lab-glyph glyph green" data-lab-glyph>▄</span>
-        <span class="lab-ms" data-lab-ms>14ms</span>
-        <span class="lab-band" data-lab-band>within the 30ms band</span>
+  <section class="section scale" id="scale" aria-labelledby="scale-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="scale-title">One fixed scale, every run</h2>
+        <p class="section-lede">Latency maps to the same eight glyphs on every run. Nothing rescales, so rows stay comparable across hosts and across nights. Green until 100&nbsp;ms, amber past it.</p>
       </div>
-      <label class="lab-label" for="lat-slider">Probe latency</label>
-      <input class="lab-slider" id="lat-slider" type="range" min="0" max="1100" step="1" value="14" data-lab-slider>
-      <div class="lab-trail" aria-hidden="true">
-        <span class="lab-trail-label">history preview</span>
-        <span class="lab-trail-glyphs" data-lab-trail></span>
+
+      <ol class="ruler" aria-label="The pinghue latency scale">
+        <li><span class="bars"><i class="ok h1"></i></span><span class="band">up to 1&nbsp;ms</span></li>
+        <li><span class="bars"><i class="ok h2"></i></span><span class="band">up to 3&nbsp;ms</span></li>
+        <li><span class="bars"><i class="ok h3"></i></span><span class="band">up to 10&nbsp;ms</span></li>
+        <li><span class="bars"><i class="ok h4"></i></span><span class="band">up to 30&nbsp;ms</span></li>
+        <li><span class="bars"><i class="ok h5"></i></span><span class="band">up to 100&nbsp;ms</span></li>
+        <li><span class="bars"><i class="slow h6"></i></span><span class="band">up to 300&nbsp;ms</span></li>
+        <li><span class="bars"><i class="slow h7"></i></span><span class="band">up to 1000&nbsp;ms</span></li>
+        <li><span class="bars"><i class="slow h8"></i></span><span class="band">over 1000&nbsp;ms</span></li>
+        <li class="ruler-mark"><span class="bars"><i class="fail"></i></span><span class="band">lost, down</span></li>
+        <li class="ruler-mark"><span class="bars"><i class="refused"></i></span><span class="band">TCP refused</span></li>
+      </ol>
+
+      <div class="lab" data-lab>
+        <label class="lab-label" for="lab-slider">Try a latency</label>
+        <div class="lab-row">
+          <input class="lab-slider" id="lab-slider" type="range" min="0" max="1000" step="1" value="417" aria-valuetext="14 milliseconds: glyph 4 of 8, green" data-lab-slider>
+          <output class="lab-readout" for="lab-slider" data-lab-readout>
+            <span class="bars lab-bar" aria-hidden="true"><i class="ok h4"></i></span>
+            <span class="lab-ms" data-lab-ms>14 ms</span>
+            <span class="lab-band" data-lab-band>glyph 4 of 8, green</span>
+          </output>
+        </div>
       </div>
-      <p class="lab-note visually-hidden" role="status" aria-live="off" data-lab-status>14 milliseconds maps to glyph 4 of 8, green.</p>
-    </div>
-    <div class="signal-runway" aria-label="Fixed latency scale" data-scale>
-      <div class="signal-step"><span class="glyph green">▁</span><span>≤1ms</span></div>
-      <div class="signal-step"><span class="glyph green">▂</span><span>≤3ms</span></div>
-      <div class="signal-step"><span class="glyph green">▃</span><span>≤10ms</span></div>
-      <div class="signal-step"><span class="glyph green">▄</span><span>≤30ms</span></div>
-      <div class="signal-step"><span class="glyph green">▅</span><span>≤100ms</span></div>
-      <div class="signal-step"><span class="glyph amber">▆</span><span>≤300ms</span></div>
-      <div class="signal-step"><span class="glyph amber">▇</span><span>≤1000ms</span></div>
-      <div class="signal-step"><span class="glyph amber">█</span><span>&gt;1000ms</span></div>
-      <div class="signal-step"><span class="glyph red">·</span><span>loss / down</span></div>
-      <div class="signal-step"><span class="glyph amber">!</span><span>TCP refused</span></div>
-    </div>
-    <p class="scale-note">
-      A host that blips once stays <span class="c-amber">intermittent</span> until you reset it.
-      A maintenance-window report should reflect everything that happened, not only the final moments.
-    </p>
-  </section>
 
-  <section class="product-proof section" aria-label="PingHue product capture" data-reveal>
-    <div class="media-shell">
-      <picture>
-        <source type="image/webp" srcset="assets/pinghue-screenshot.webp">
-        <img src="assets/pinghue-screenshot.png" width="1600" height="560" loading="lazy" decoding="async" alt="PingHue monitoring sixteen hosts in a dense terminal table with latency, loss, state, and history columns.">
-      </picture>
+      <p class="note">A host that blips once stays <span class="c-amber">intermittent</span> until you reset it with <kbd>r</kbd>. The report covers the whole window, not only its final minutes.</p>
     </div>
   </section>
 
-  <!-- ============================== evidence ============================== -->
-  <section class="section evidence-section" id="evidence" data-reveal>
-    <h2>Close the window with a report.</h2>
-    <div class="evidence">
-      <pre class="json" data-print><code><span class="jl"><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 --output maintenance.json</span><span class="jl"><span class="jk">{</span></span><span class="jl">  <span class="jq">"schema_version"</span>: <span class="jn">1</span>,</span><span class="jl">  <span class="jq">"pinghue_version"</span>: <span class="json-string">"5.1.0"</span>,</span><span class="jl">  <span class="jq">"run"</span>: { <span class="jq">"host"</span>: <span class="json-string">"local"</span>, <span class="jq">"exit_reason"</span>: <span class="json-string">"deadline"</span>, <span class="jc">…</span> },</span><span class="jl">  <span class="jq">"targets"</span>: [</span><span class="jl">    { <span class="jq">"target"</span>: <span class="json-string">"db-primary"</span>, <span class="jq">"status"</span>: <span class="json-string c-amber">"intermittent"</span>,</span><span class="jl">      <span class="jq">"stats"</span>: { <span class="jq">"sent"</span>: <span class="jn">180</span>, <span class="jq">"received"</span>: <span class="jn">178</span>, <span class="jq">"loss_pct"</span>: <span class="jn">1.11</span>, <span class="jc">…</span> } }</span><span class="jl">  ]</span><span class="jl"><span class="jk">}</span></span></code></pre>
-      <ul class="evidence-points">
-        <li><b>Versioned contract.</b> JSON uses <code>schema_version: 1</code>. Breaking changes require a new schema version.</li>
-        <li><b>Whole-run stats.</b> <code>stats</code> covers every probe in the run; <code>samples</code> is the recent tail.</li>
-        <li><b>Private by default.</b> Output files are written <code>0600</code>, and existing files are never replaced without <code>--overwrite</code>.</li>
+  <section class="section evidence" id="evidence" aria-labelledby="evidence-title">
+    <div class="wrap split">
+      <div class="section-head">
+        <h2 id="evidence-title">Close the window with a report</h2>
+        <p class="section-lede">Add <code>--output</code> and pinghue writes a schema-versioned JSON summary when the run ends. Attach it to the change ticket and go back to bed.</p>
+        <dl class="facts">
+          <div><dt>Versioned contract</dt><dd><code>schema_version: 1</code>. Breaking changes need a new schema version.</dd></div>
+          <div><dt>Whole-run stats</dt><dd><code>stats</code> covers every probe in the run; <code>samples</code> is the recent tail, at most 1000 per host.</dd></div>
+          <div><dt>Private by default</dt><dd>Reports are written <code>0600</code>, and an existing file is never replaced without <code>--overwrite</code>.</dd></div>
+          <div><dt>Exit codes</dt><dd><code>0</code> completed, <code>1</code> runtime error, <code>2</code> usage error, <code>3</code> a fail-on-down condition triggered.</dd></div>
+        </dl>
+      </div>
+      <figure class="window">
+        <div class="window-bar" aria-hidden="true"><span class="dots"><i></i><i></i><i></i></span><span class="window-title">maintenance.json</span></div>
+        <pre class="window-body json" data-scroll="maintenance.json report"><code><span class="prompt">$</span> pinghue -f hosts.txt --duration 180 \
+    --output maintenance.json
+<span class="jp">{</span>
+  <span class="jk">"schema_version"</span>: <span class="jn">1</span>,
+  <span class="jk">"pinghue_version"</span>: <span class="js">"5.1.0"</span>,
+  <span class="jk">"run"</span>: {
+    <span class="jk">"started_at"</span>: <span class="js">"2026-10-06T02:28:08.412Z"</span>,
+    <span class="jk">"ended_at"</span>: <span class="js">"2026-10-06T02:31:08.418Z"</span>,
+    <span class="jk">"host"</span>: <span class="js">"local"</span>,
+    <span class="jk">"exit_reason"</span>: <span class="js">"deadline"</span>,
+    <span class="jk">"samples_window"</span>: <span class="jn">1000</span>,
+    <span class="jk">"probe"</span>: {
+      <span class="jk">"mode"</span>: <span class="js">"icmp"</span>, <span class="jk">"port"</span>: <span class="jn">null</span>, <span class="jk">"interval_s"</span>: <span class="jn">1.0</span>, <span class="jc">…</span>
+    }
+  },
+  <span class="jk">"targets"</span>: [
+    {
+      <span class="jk">"target"</span>: <span class="js">"db-primary"</span>,
+      <span class="jk">"resolved_address"</span>: <span class="js">"10.0.1.20"</span>,
+      <span class="jk">"resolved_family"</span>: <span class="js">"ipv4"</span>,
+      <span class="jk">"status"</span>: <span class="js c-amber">"intermittent"</span>,
+      <span class="jk">"error"</span>: <span class="jn">null</span>,
+      <span class="jk">"stats"</span>: {
+        <span class="jk">"sent"</span>: <span class="jn">180</span>, <span class="jk">"received"</span>: <span class="jn">176</span>, <span class="jk">"loss_pct"</span>: <span class="jn">2.22</span>,
+        <span class="jk">"min_ms"</span>: <span class="jn">20.11</span>, <span class="jk">"avg_ms"</span>: <span class="jn">64.07</span>,
+        <span class="jk">"max_ms"</span>: <span class="jn">451.44</span>, <span class="jk">"jitter_ms"</span>: <span class="jn">23.59</span>
+      },
+      <span class="jk">"samples"</span>: [ <span class="jc">…</span> ]
+    },
+    <span class="jc">…</span>
+  ]
+<span class="jp">}</span></code></pre>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section not" id="not" aria-labelledby="not-title">
+    <div class="wrap split">
+      <div class="section-head">
+        <h2 id="not-title">Small on purpose</h2>
+        <p class="section-lede">A focused local tool for maintenance windows, migrations, and quick reachability checks. Nothing more.</p>
+      </div>
+      <ul class="not-list">
+        <li>Not a Prometheus, Smokeping, Zabbix, or NMS replacement.</li>
+        <li>Not a long-running metrics database or alerting system.</li>
+        <li>Not a privileged daemon.</li>
+        <li>Not a packet capture or traceroute tool.</li>
+        <li>Not a service that accepts remote network requests.</li>
       </ul>
     </div>
   </section>
 
-  <!-- ============================== not ============================== -->
-  <section class="section scope-section" id="not" data-reveal>
-    <p class="kicker"># what pinghue is not</p>
-    <h2>Small on purpose.</h2>
-    <ul class="not-list">
-      <li>Not a Prometheus, Smokeping, Zabbix, or NMS replacement.</li>
-      <li>Not a long-running metrics database or alerting system.</li>
-      <li>Not a privileged daemon.</li>
-      <li>Not a packet capture or traceroute tool.</li>
-      <li>Not a service that accepts remote network requests.</li>
-    </ul>
-    <p class="not-note">A focused local tool for maintenance windows, migrations, and quick reachability checks. Nothing more, on purpose.</p>
-  </section>
-
-  <!-- ============================== install ============================== -->
-  <section class="section install-section" id="install" data-reveal>
-    <h2>Sixty seconds to a live table.</h2>
-    <div class="install-panel">
-      <div class="install-row">
-        <span class="install-name">uv</span>
-        <code>uv tool install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv command">Copy</button>
+  <section class="section install" id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <h2 id="install-title">Sixty seconds to a live table</h2>
+      <div class="install-list">
+        <div class="cmd cmd-row"><code>uv tool install pinghue</code><button class="copy-btn" type="button" data-copy="uv tool install pinghue" aria-label="Copy uv command"><svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-check"/></svg></button></div>
+        <div class="cmd cmd-row"><code>pipx install pinghue</code><button class="copy-btn" type="button" data-copy="pipx install pinghue" aria-label="Copy pipx command"><svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-check"/></svg></button></div>
+        <div class="cmd cmd-row"><code>brew install inxbit/tap/pinghue</code><button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew command"><svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-check"/></svg></button></div>
+        <div class="cmd cmd-row"><code>python -m pip install pinghue</code><button class="copy-btn" type="button" data-copy="python -m pip install pinghue" aria-label="Copy pip command"><svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-check"/></svg></button></div>
       </div>
-      <div class="install-row">
-        <span class="install-name">pipx</span>
-        <code>pipx install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="pipx install pinghue" aria-label="Copy pipx command">Copy</button>
-      </div>
-      <div class="install-row">
-        <span class="install-name">brew</span>
-        <code>brew install inxbit/tap/pinghue</code>
-        <button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew command">Copy</button>
-      </div>
-      <div class="install-row">
-        <span class="install-name">pip</span>
-        <code>python -m pip install pinghue</code>
-        <button class="copy-btn" type="button" data-copy="python -m pip install pinghue" aria-label="Copy pip command">Copy</button>
-      </div>
+      <p class="install-note">macOS and Linux, Python 3.10 to 3.14. Run <code>pinghue --check</code> first: on Linux, ICMP may need a <code>ping_group_range</code> setting, or use TCP mode with <code>-p</code>.</p>
     </div>
-    <p class="install-note">
-      macOS and Linux, Python 3.10 to 3.14. Then run the environment doctor: <code>pinghue --check</code>.
-      On Linux, ICMP may need a one-line <code>ping_group_range</code> fix, or just use TCP mode.
-    </p>
   </section>
-
-  <p class="copy-status" role="status" aria-live="polite" aria-atomic="true" data-copy-status></p>
 
 </main>
 
 <footer class="footer">
-  <div class="foot-brand"><span class="wm-ping">ping</span><span class="wm-hue">hue</span></div>
-  <nav aria-label="Footer">
-    <a href="https://github.com/inxbit/pinghue">GitHub</a>
-    <a href="https://pypi.org/project/pinghue/">PyPI</a>
-    <a href="https://github.com/inxbit/pinghue/blob/main/SECURITY.md">Security model</a>
-    <a href="https://github.com/inxbit/pinghue/blob/main/LICENSE">MIT license</a>
-  </nav>
-  <p class="foot-line">Built for the 02:00 change window.</p>
+  <div class="wrap footer-row">
+    <a class="brand" href="/"><img src="assets/pinghue-wordmark.svg" width="165" height="42" alt="pinghue" loading="lazy"></a>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/inxbit/pinghue">GitHub</a>
+      <a href="https://pypi.org/project/pinghue/">PyPI</a>
+      <a href="https://github.com/inxbit/pinghue/blob/main/SECURITY.md">Security model</a>
+      <a href="https://github.com/inxbit/pinghue/blob/main/LICENSE">MIT license</a>
+    </nav>
+  </div>
 </footer>
 
-<script src="script.js"></script>
+<p class="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-copy-status></p>
+
+<script src="site.js"></script>
 </body>
 </html>
