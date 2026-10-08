@@ -6,8 +6,8 @@
 #   - pinghue-screenshot.png  the final frame of a denser run (the still)
 #   - pinghue-screenshot.webp lossless WebP of the still for the website (needs cwebp)
 #
-# The hero image (docs/assets/pinghue-hero.svg) is hand-authored and is not
-# regenerated here.
+# The README banner is the site's social card (docs/assets/pinghue-social-card.png),
+# rendered by scripts/gen-site-social-card.sh, not here.
 #
 # Requirements: vhs and ffmpeg (brew install vhs ffmpeg) plus either an editable
 # install at .venv/bin/pinghue or a matching pinghue on PATH. Needs network
