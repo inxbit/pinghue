@@ -1363,7 +1363,7 @@ def test_release_version_surfaces_match_package_version() -> None:
     pyproject = read("pyproject.toml")
     readme = read("README.md")
     example = json.loads(read("examples/pinghue-output-example.json"))
-    hero = read("docs/assets/pinghue-hero.svg")
+    card = read("scripts/site-social-card.html")
     formula = read("packaging/homebrew/pinghue.rb")
 
     # The demo (GIF) and screenshot (PNG) are real TUI captures, so the version
@@ -1371,7 +1371,7 @@ def test_release_version_surfaces_match_package_version() -> None:
     assert f'version = "{version}"' in pyproject
     assert f"Current version: `{version}`." in readme
     assert example["pinghue_version"] == version
-    assert f"v{version}" in hero
+    assert f"PingHUE v{version}" in card
     assert f"pinghue-{version}.tar.gz" in formula
     assert "pinghue-2.1.0.tar.gz" not in formula
 
@@ -1388,7 +1388,6 @@ def test_release_text_surfaces_do_not_reference_stale_current_version() -> None:
         "docs/index.html",
         "docs/404.html",
         "scripts/site-social-card.html",
-        "docs/assets/pinghue-hero.svg",
         "docs/assets/pinghue-favicon.svg",
         "packaging/homebrew/pinghue.rb",
     ]

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-hero.svg" alt="pinghue - colored concurrent ICMP/TCP ping monitor for maintenance windows" width="920">
+  <img src="https://raw.githubusercontent.com/inxbit/pinghue/main/docs/assets/pinghue-social-card.png" alt="pinghue - every host, one live table: the pinghue terminal table monitoring six hosts during a simulated maintenance window" width="920">
 </p>
 
 <p align="center">

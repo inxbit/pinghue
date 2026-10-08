@@ -6,8 +6,9 @@ wordmark was drawn from is the docs/fonts/archivo-var-latin.woff2 removed in the
 redesign (git log -- that path). OUT is docs/assets/pinghue-wordmark.svg.
 
 "ping" in the page white, "hue" in the committed green-amber-red-blue gradient
-(stops from docs/assets/pinghue-hero.svg and main's .wm-hue), so the logo needs
-no web font and survives the strict CSP as a plain <img>.
+(stops from the former README banner docs/assets/pinghue-hero.svg, see git history,
+and main's .wm-hue), so the logo needs no web font and survives the strict CSP as a
+plain <img>.
 """
 
 import sys

@@ -26,7 +26,8 @@ scripts/gen-readme-assets.sh
 The generator verifies the local `pinghue --version` value against
 `pyproject.toml` and embeds that version in the generated GIF/PNG metadata.
 
-The hero image (`docs/assets/pinghue-hero.svg`) is hand-authored.
+The README banner is the site's social card (`docs/assets/pinghue-social-card.png`,
+see Website below); `node scripts/site-version.mjs` keeps its version current.
 
 ## Website
 

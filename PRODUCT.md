@@ -82,7 +82,7 @@ Real output:
 - Anything the shipped code prints can be reproduced on demand: the `--check` report, `--no-tui` lines, the JSON run summary.
 - Release record: `CHANGELOG.md` (every release since 0.1.0 on 2026-05-14), signed release tags, GitHub artifact attestations for the wheel and sdist, a required CI check that two clean builds are byte-identical, and hash-pinned CI and release dependencies.
 - Reviews: `AUDIT-2.0.1.md`, `REVIEW.md` and `security-best-practices-report.md` (dated test, coverage and scan results; measure again before any number appears publicly). None is an independent third-party audit.
-- Brand assets: `docs/assets/pinghue-wordmark.svg` (rebuilt by `scripts/site-wordmark.py`), `docs/assets/pinghue-favicon.svg`, `docs/assets/pinghue-hero.svg` (README banner), `docs/assets/pinghue-social-card.png` (rendered by `scripts/gen-site-social-card.sh`).
+- Brand assets: `docs/assets/pinghue-wordmark.svg` (rebuilt by `scripts/site-wordmark.py`), `docs/assets/pinghue-favicon.svg`, `docs/assets/pinghue-social-card.png` (rendered by `scripts/gen-site-social-card.sh`; also the README banner).
 
 Simulated or generated (label it wherever it appears):
 
