@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
@@ -21,6 +22,7 @@ from pinghue.runner import (
     _pending_target_runs,
     apply_retained_sample_budget,
     first_probe_delay,
+    flush_or_discard_output,
     install_stop_signal_callback,
     probe_target_loop,
     record_probe_loop_failure,
@@ -424,6 +426,10 @@ class PinghueApp:
             await asyncio.gather(*finish_tasks, return_exceptions=True)
         finally:
             cleanup_signal_handlers()
+        # After a hangup the terminal-restore sequences cannot be written and
+        # stay buffered; drop them so the exit flush keeps the exit status.
+        flush_or_discard_output(sys.stderr)
+        flush_or_discard_output(sys.stdout)
         # A signal before mount ends the app before it builds its target list.
         targets = app.targets or _pending_target_runs(self.args.targets)
         ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)

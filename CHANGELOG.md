@@ -17,7 +17,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 - A `--no-tui --duration` run in TCP mode could keep probing past its deadline, never write `--output` and never exit, when the deadline cut off a probe's connection teardown.
 - TUI startup no longer redraws the whole table once per resolved target, which froze the TUI for seconds at 500 targets and for many minutes at 5,000 before any host was probed.
-- `SIGTERM` and `SIGHUP` now end a TUI run cleanly, restoring the terminal and writing `--output` with `exit_reason` `interrupted`, and `SIGHUP` now ends a no-TUI run the same way; a `SIGHUP` already ignored at startup (`nohup`) stays ignored.
+- `SIGTERM` and `SIGHUP` now end a TUI run cleanly, restoring the terminal and writing `--output` with `exit_reason` `interrupted`, and `SIGHUP` now ends a no-TUI run the same way; a `SIGHUP` already ignored at startup (`nohup`) stays ignored. A closed terminal window or dropped SSH session ends the run this way too, with its normal exit status.
 - A probe loop that fails on an unexpected error now marks its target `error` instead of leaving it frozen on its last state, and no longer ends a no-TUI run without a report.
 
 ## 5.1.0 - 2026-08-18

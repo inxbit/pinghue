@@ -608,6 +608,28 @@ async def test_sample_printer_stops_the_run_once_the_reader_goes_away() -> None:
     assert closed == [True]
 
 
+def test_flush_or_discard_output_drops_what_a_hung_up_terminal_cannot_take(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The TUI's terminal-restore output stays buffered after a hangup; the
+    # flush at exit then failed and turned the exit status into 120.
+    class HungUpStream(io.StringIO):
+        def flush(self) -> None:
+            raise OSError(errno.EIO, "Input/output error")
+
+    discarded: list[object] = []
+    monkeypatch.setattr(runner, "_discard_output", discarded.append)
+    hung_up = HungUpStream()
+    healthy = RecordingStream()
+
+    runner.flush_or_discard_output(hung_up)
+    runner.flush_or_discard_output(healthy)
+    runner.flush_or_discard_output(None)
+
+    assert discarded == [hung_up]
+    assert healthy.flushes == 1
+
+
 async def test_run_no_tui_stops_cleanly_when_stdout_is_a_broken_pipe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

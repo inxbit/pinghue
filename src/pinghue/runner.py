@@ -597,6 +597,20 @@ def _discard_output(stream: TextIO) -> None:
         os.close(devnull)
 
 
+def flush_or_discard_output(stream: TextIO | None) -> None:
+    """Flush ``stream``, or discard what it still holds when writing fails.
+
+    Restoring the terminal after a hangup leaves bytes that can never be
+    written; the flush at exit would then fail and turn the exit status into 120.
+    """
+    if stream is None:
+        return
+    try:
+        stream.flush()
+    except (OSError, ValueError):
+        _discard_output(stream)
+
+
 class _SampleLinePrinter:
     """Print no-TUI probe lines and push them to the reader within one loop turn.
 

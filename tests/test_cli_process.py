@@ -185,3 +185,49 @@ def test_tui_restores_the_terminal_and_writes_output_on_signal(
     assert returncode == 0
     assert b"\x1b[?1049l" in screen, "the TUI did not leave the alternate screen"
     assert _exit_reason(report) == "interrupted"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="closing a pty's controller hangs up its session reliably only on Linux",
+)
+def test_tui_exits_cleanly_when_its_terminal_hangs_up(tmp_path: Path) -> None:
+    # A closed terminal window or dropped SSH session hangs up the TUI's
+    # controlling tty. The terminal-restore output can then never be written,
+    # and the flush at exit used to fail and turn the exit status into 120.
+    pty = pytest.importorskip("pty")
+    termios = pytest.importorskip("termios")
+    fcntl = pytest.importorskip("fcntl")
+    if signal.getsignal(signal.SIGHUP) is signal.SIG_IGN:
+        pytest.skip("SIGHUP is ignored by the test runner and its children")
+
+    report = tmp_path / "report.json"
+    controller, terminal = pty.openpty()
+    fcntl.ioctl(terminal, termios.TIOCSWINSZ, bytes([30, 0, 120, 0, 0, 0, 0, 0]))
+
+    def take_controlling_terminal() -> None:
+        os.setsid()
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    proc = subprocess.Popen(
+        _cli_command("-i", "0.2", "--output", str(report)),
+        stdin=terminal,
+        stdout=terminal,
+        stderr=terminal,
+        env=_cli_env(TERM="xterm-256color"),
+        preexec_fn=take_controlling_terminal,
+    )
+    os.close(terminal)
+    try:
+        screen = _read_until(controller, b"127.0.0.1", timeout=STARTUP_TIMEOUT)
+        assert b"127.0.0.1" in screen, "the TUI never rendered its target row"
+        os.close(controller)
+        controller = -1
+        returncode = proc.wait(timeout=EXIT_TIMEOUT)
+    finally:
+        _stop(proc)
+        if controller >= 0:
+            os.close(controller)
+
+    assert returncode == 0
+    assert _exit_reason(report) == "interrupted"
