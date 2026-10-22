@@ -10,17 +10,12 @@ class Pinghue < Formula
 
   desc "Colored, concurrent ICMP/TCP ping monitor for the terminal"
   homepage "https://github.com/inxbit/pinghue"
-  url "https://files.pythonhosted.org/packages/4a/68/ce501359462234bac4c2733d5bf66e26b9b2bd6999052a647c953fd828fe/pinghue-5.1.0.tar.gz"
-  sha256 "e5deb323cddd2d3c246ba830669e0261f9ae0b102041ca828097d87967b3766c"
+  url "https://files.pythonhosted.org/packages/source/p/pinghue/pinghue-6.0.0.tar.gz"
+  sha256 "4b945060002289f59be10c31b20830ece43a1e36de9b25566390e0f13b8df00c"
   license "MIT"
   head "https://github.com/inxbit/pinghue.git", branch: "main"
 
   depends_on "python@3.13"
-
-  resource "icmplib" do
-    url "https://files.pythonhosted.org/packages/6d/78/ca07444be85ec718d4a7617f43fdb5b4eaae40bc15a04a5c888b64f3e35f/icmplib-3.0.4.tar.gz"
-    sha256 "57868f2cdb011418c0e1d5586b16d1fabd206569fe9652654c27b6b2d6a316de"
-  end
 
   resource "linkify-it-py" do
     url "https://files.pythonhosted.org/packages/2e/c9/06ea13676ef354f0af6169587ae292d3e2406e212876a413bf9eece4eb23/linkify_it_py-2.1.0.tar.gz"

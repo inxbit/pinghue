@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Writes the no-JavaScript rows of the hero table in docs/index.html: the
-// simulated run in docs/site.js at START, in exactly the markup site.js paints,
-// so the page does not jump when the script takes over. Run it after changing
-// the run; tests/site_pages.test.mjs fails while the two disagree.
+// Writes the no-JavaScript rows of the hero table in docs/index.html, and the
+// fleet summary in its title bar: the simulated run in docs/site.js at START,
+// in exactly the markup site.js paints, so the page does not jump when the
+// script takes over. Run it after changing the run; tests/site_pages.test.mjs
+// fails while the two disagree.
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,12 +39,21 @@ export function renderRows() {
   }).join("\n");
 }
 
+export function renderSummary() {
+  const run = sim.buildRun();
+  return sim.summaryParts(sim.HOSTS.map((_, i) => run.rowAt(i, sim.START).state))
+    .map(([text, tone]) => (tone ? `<span class="t-${tone}">${escape(text)}</span>` : escape(text)))
+    .join("");
+}
+
 export const ROWS_PATTERN = /(<tbody data-rows>\n)[\s\S]*?(\n\s*<\/tbody>)/;
+export const SUMMARY_PATTERN = /(<span class="term-summary" aria-hidden="true" data-summary>).*?(<\/span><\/span>\n)/;
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const file = path.join(here, "..", "docs", "index.html");
   const html = readFileSync(file, "utf8");
   if (!ROWS_PATTERN.test(html)) throw new Error("docs/index.html has no <tbody data-rows> block");
-  writeFileSync(file, html.replace(ROWS_PATTERN, `$1${renderRows()}$2`));
+  if (!SUMMARY_PATTERN.test(html)) throw new Error("docs/index.html has no data-summary span");
+  writeFileSync(file, html.replace(ROWS_PATTERN, `$1${renderRows()}$2`).replace(SUMMARY_PATTERN, `$1${renderSummary()}$2`));
   console.log("wrote", sim.HOSTS.length, "rows at tick", sim.START, sim.clockAt(sim.START));
 }

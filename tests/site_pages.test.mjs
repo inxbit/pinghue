@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
-import { renderRows } from '../scripts/site-rows.mjs';
+import { renderRows, renderSummary } from '../scripts/site-rows.mjs';
 
 // Deploy-gating contract for pinghue.com (docs/, GitHub Pages, no build step).
 // It pins security and integrity, and it pins product truth: the hero is the
@@ -97,7 +97,7 @@ const loadSiteModule = () => {
     setTimeout,
     clearTimeout,
   });
-  for (const name of ['buildRun', 'levelOf', 'glyphFor', 'toneFor', 'historyLabel', 'fmt', 'fmtLoss', 'clockAt', 'START', 'HISTORY', 'RUN_SECONDS', 'HOSTS']) {
+  for (const name of ['buildRun', 'levelOf', 'glyphFor', 'toneFor', 'historyLabel', 'summaryParts', 'fmt', 'fmtLoss', 'clockAt', 'START', 'HISTORY', 'RUN_SECONDS', 'HOSTS', 'SUMMARY']) {
     assert.ok(name in module.exports, 'site.js must export ' + name);
   }
   return module.exports;
@@ -519,9 +519,38 @@ test('the no-JS hero rows are the simulated frame at START', () => {
   const body = html.match(/<tbody data-rows>\n([\s\S]*?)\n\s*<\/tbody>/);
   assert.ok(body, 'static table body missing');
   assert.equal(body[1], renderRows(), 'run node scripts/site-rows.mjs after changing the run');
+  const summary = html.match(/<span class="term-summary" aria-hidden="true" data-summary>(.*?)<\/span><\/span>\n/);
+  assert.ok(summary, 'static fleet summary missing');
+  assert.equal(summary[1], renderSummary(), 'run node scripts/site-rows.mjs after changing the run');
   const site = loadSiteModule();
   assert.equal(site.clockAt(site.START), '02:31:04');
   assert.match(html, /<span class="term-clock" aria-hidden="true" data-clock>02:31:04<\/span>/);
+});
+
+test('the hero title bar carries the ui.py fleet summary', () => {
+  const site = loadSiteModule();
+  const ui = read('src/pinghue/ui.py');
+  assert.match(ui, /^PENDING_LABEL = "pending"$/m);
+  const block = ui.match(/^SUMMARY_CATEGORIES: [^=]+= \(\n([\s\S]*?)\n\)/m);
+  assert.ok(block, 'SUMMARY_CATEGORIES missing from ui.py');
+  const tone = { RED: 'red', AMBER: 'amber', GREEN: 'green', MUTED: '' };
+  const categories = [...block[1].matchAll(/^\s+\((?:"(\w+)"|PENDING_LABEL), (\w+)\),$/gm)]
+    .map(([, name, color]) => [name ?? 'pending', tone[color]]);
+  // The states this run can show, in the TUI's order and colors.
+  const used = JSON.parse(JSON.stringify(site.SUMMARY));
+  assert.deepEqual(used.map(([name]) => name), ['down', 'intermittent', 'pending', 'healthy']);
+  assert.deepEqual(used, categories.filter(([name]) => used.some(([u]) => u === name)));
+  // fleet_summary_parts: age first, then counts with muted labels, two spaces apart.
+  assert.match(ui, /parts\.append\(\("oldest ", MUTED\)\)/);
+  assert.match(ui, /parts\.append\(\("  ", MUTED\)\)/);
+  const parts = (states) => JSON.parse(JSON.stringify(site.summaryParts(states)));
+  assert.deepEqual(parts(['healthy', 'down', 'healthy']),
+    [['oldest 1.0s', ''], ['  ', ''], ['1', 'red'], [' down', ''], ['  ', ''], ['2', 'green'], [' healthy', '']]);
+  // A reset host has no result yet: pending, and no age when nothing has one.
+  assert.deepEqual(parts(['pending', 'healthy']),
+    [['oldest 1.0s', ''], ['  ', ''], ['1', ''], [' pending', ''], ['  ', ''], ['1', 'green'], [' healthy', '']]);
+  assert.deepEqual(parts(['pending', 'pending']), [['2', ''], [' pending', '']]);
+  assert.match(read('docs/site.js'), /cells\[2\]\.textContent = "pending";/);
 });
 
 test('the simulated night follows classify_samples and the ui.py cell tones', () => {

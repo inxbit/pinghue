@@ -247,7 +247,7 @@ Mono caps on the Key Ground with a Strong Hairline border. In the hero footer th
 Window Ground, a Window Bar with three traffic-light dots and a centered mono title, 1px Terminal Line borders, 12px corners, the window drop. Content is either a mini TUI table or a `pre` of commands and JSON.
 
 ### The Hero Terminal (signature)
-The real TUI layout at 1472u: bar with dots, `PingHUE v{version}` title, a tabular clock and a pause button; the ten-column table plus history bars; the key footer masked to fade out; a muted caption. The run is deterministic (`docs/site.js`), loops after its simulated hour, starts paused under reduced motion, and accepts q, a, r, R, b, B and the arrow keys when focused. The no-JS rows in `docs/index.html` are generated from the same run.
+The real TUI layout at 1472u: bar with dots, `PingHUE v{version}` title followed by the TUI's fleet summary (result age, then host counts per state; from 800px), a tabular clock and a pause button; the ten-column table plus history bars; the key footer masked to fade out; a muted caption. The run is deterministic (`docs/site.js`), loops after its simulated hour, starts paused under reduced motion, and accepts q, a, r, R, b, B and the arrow keys when focused. The no-JS rows and fleet summary in `docs/index.html` are generated from the same run.
 
 ### Latency Scale
 A ten-cell ruler of the eight glyph heights plus the fail and refused marks, each with a mono band label, and a slider lab that maps a latency to its glyph live. Cells reflow 10, 5, then 2 per row.
