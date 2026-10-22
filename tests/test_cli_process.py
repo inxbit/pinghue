@@ -256,3 +256,24 @@ def test_output_dash_stays_json_when_stderr_is_closed_and_a_warning_is_due() -> 
     document = json.loads(result.stdout)
     assert document["run"]["exit_reason"] == "completed"
     assert result.returncode == 0
+
+
+def test_a_refused_output_path_is_not_reported_on_stdout_when_stderr_is_closed(
+    tmp_path: Path,
+) -> None:
+    # The error is dropped with stderr closed, not printed into the line output.
+    output_path = tmp_path / "report.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+
+    result = subprocess.run(
+        _cli_command("--no-tui", "--output", str(output_path), "--count", "1"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        env=_cli_env(),
+        preexec_fn=lambda: os.close(2),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == b""

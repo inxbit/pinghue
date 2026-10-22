@@ -363,8 +363,15 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
     return args
 
 
+def _print_stderr(message: str) -> None:
+    # A stderr closed at startup is None, and print(file=None) would write to
+    # stdout, into the line output or a `--output -` JSON document: drop it.
+    if sys.stderr is not None:
+        print(message, file=sys.stderr)
+
+
 def _report_error(exc: OSError) -> int:
-    print(f"pinghue: error: {sanitize_display(str(exc))}", file=sys.stderr)
+    _print_stderr(f"pinghue: error: {sanitize_display(str(exc))}")
     return 1
 
 
@@ -389,10 +396,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_tui and not sys.stdout.isatty():
         # The TUI draws on stderr and leaves stdout empty; scripts and cron
         # jobs almost always want the per-probe line output instead.
-        print(
+        _print_stderr(
             "pinghue: warning: stdout is not a terminal; pass --no-tui for line output "
-            "(a future major release will make this the default)",
-            file=sys.stderr,
+            "(a future major release will make this the default)"
         )
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP

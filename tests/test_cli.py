@@ -213,6 +213,30 @@ def test_main_refuses_fifo_owned_by_another_user_before_probing(
     assert calls == []
 
 
+def test_main_drops_its_messages_when_stderr_is_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With descriptor 2 closed, sys.stderr is None and print(file=None) writes
+    # to stdout, which carries the line output or a `--output -` document.
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    existing = tmp_path / "out.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "stderr", None)
+
+    assert main(["1.1.1.1"]) == 0
+    assert main(["--no-tui", "--output", str(existing), "127.0.0.1"]) == 1
+
+    assert capsys.readouterr().out == ""
+
+
 def test_main_accepts_new_output_path_and_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
