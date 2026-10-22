@@ -523,13 +523,27 @@ async def test_macos_icmp_error_for_other_probe_is_ignored(
     assert result.status == SampleStatus.TIMEOUT
 
 
-def test_sequence_numbers_skip_in_flight_probes_and_wrap() -> None:
+def test_sequence_numbers_are_random_and_skip_in_flight_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sock = FakeIcmpSocket(socket.AF_INET, socket.SOCK_DGRAM, 1)
     try:
         icmp_socket = icmp._IcmpSocket(sock, ipv6=False, capacity=4)
-        icmp_socket.sequence = 0xFFFD
-        icmp_socket.pending = dict.fromkeys((0xFFFE, 0xFFFF, 0), object())  # type: ignore[arg-type]
+        # A target sees its own probes' sequence numbers; counting up would let
+        # it predict those of the probes in flight to other targets.
+        drawn = {icmp_socket.next_sequence() for _ in range(64)}
+        assert len(drawn) > 32
+        assert drawn != set(range(min(drawn), min(drawn) + len(drawn)))
 
+        # Draws that land on in-flight probes are skipped.
+        draws = iter([b"\x00\x05", b"\x00\x07", b"\x00\x09"])
+        monkeypatch.setattr(icmp.os, "urandom", lambda _size: next(draws))
+        icmp_socket.pending = dict.fromkeys((5, 7), object())  # type: ignore[arg-type]
+        assert icmp_socket.next_sequence() == 9
+
+        # When every draw is taken, a scan from a random start finds a free one.
+        monkeypatch.setattr(icmp.os, "urandom", lambda _size: b"\xff\xfe")
+        icmp_socket.pending = dict.fromkeys((0xFFFE, 0xFFFF, 0), object())  # type: ignore[arg-type]
         assert icmp_socket.next_sequence() == 1
 
         icmp_socket.pending = dict.fromkeys(range(0x10000), object())  # type: ignore[arg-type]

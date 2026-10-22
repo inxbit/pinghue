@@ -165,9 +165,16 @@ leave a host pending rather than producing a DNS verdict. ICMP replies count onl
 when their sequence number, source address, and random per-probe payload token
 match the probe (and, on macOS, where every ICMP socket on the host sees every
 reply, the echo identifier too), so another process's ICMP traffic cannot mark
-a down target up. ICMP latency is monotonic, so a wall-clock step cannot yield
-negative latencies. External DNS and routing state remain outside the tool's
-control.
+a down target up. ICMP errors (destination unreachable, time exceeded) are
+matched the same way, but a router that follows RFC 792 quotes only the 8-byte
+echo header, so an error whose quote stops before the token is matched on the
+identifier, sequence number, and destination alone. Sequence numbers are drawn
+at random from the free ones, so a monitored host learns nothing from its own
+probes about those in flight to other targets; a host that can send ICMP to the
+monitoring machine can still make a probe report `unreachable` by spraying
+forged errors across the sequence space for a known identifier. ICMP latency is
+monotonic, so a wall-clock step cannot yield negative latencies. External DNS
+and routing state remain outside the tool's control.
 
 ### 6. Unsafe ICMP privilege remediation
 
@@ -216,7 +223,7 @@ external dependencies, so fresh audits remain a release gate.
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
 | TM-003 | Host-file symlink/special-file race | Descriptor-based open/type validation and bounded reads | Same-user content modification remains possible | Low |
 | TM-004 | Output replacement or partial report | No-clobber default, randomized temp, inode/type/link checks | Explicit overwrite and no-hardlink copy fallback are not crash-atomic | Medium |
-| TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats | Remote routing/DNS state is inherently external | Low |
+| TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats, token-matched ICMP replies, random ICMP sequence numbers | Remote routing/DNS state is inherently external; forged ICMP errors with short quotes can mark a probe `unreachable` | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
 | TM-008 | Vulnerable/malicious dependency | Hash locks, narrow ranges, Dependabot, three-lock audit | New advisories and index compromise remain external | Medium |

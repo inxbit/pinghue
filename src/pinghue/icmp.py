@@ -87,6 +87,9 @@ _RECEIVE_BUFFER_BYTES_PER_PROBE = 2048
 _MIN_PROBES_PER_SOCKET = 32
 _MAX_PROBES_PER_SOCKET = 512
 _MAX_SOCKETS_PER_FAMILY = 16
+# A socket holds at most _MAX_PROBES_PER_SOCKET of the 65,536 sequence numbers,
+# so a random draw almost always finds a free one; a scan backs it up.
+_RANDOM_SEQUENCE_ATTEMPTS = 16
 
 _SEND_RETRY_DELAY_SECONDS = 0.001
 _SEND_RETRY_MAX_DELAY_SECONDS = 0.05
@@ -332,7 +335,6 @@ class _IcmpSocket:
         "ipv6",
         "pending",
         "recverr",
-        "sequence",
         "sock",
         "timestamps",
     )
@@ -345,17 +347,27 @@ class _IcmpSocket:
         # Linux replaces the identifier with the socket's port; elsewhere it is
         # the only thing that tells this socket's replies from other sockets'.
         self.ident = int.from_bytes(os.urandom(2), "big")
-        self.sequence = int.from_bytes(os.urandom(2), "big")
         self.pending: dict[int, _PendingEcho] = {}
         self.recverr = False
         self.timestamps = False
 
     def next_sequence(self) -> int:
-        """Return the next sequence number that no in-flight probe uses."""
-        for _ in range(0x10000):
-            self.sequence = (self.sequence + 1) & 0xFFFF
-            if self.sequence not in self.pending:
-                return self.sequence
+        """Return a random sequence number that no in-flight probe uses.
+
+        Random rather than counting up: every target sees the sequence numbers
+        of its own probes, and must not learn from them those of the probes in
+        flight to other targets on this socket, which an ICMP error with a
+        short quote is matched on (see IcmpEngine._match).
+        """
+        for _ in range(_RANDOM_SEQUENCE_ATTEMPTS):
+            sequence = int.from_bytes(os.urandom(2), "big")
+            if sequence not in self.pending:
+                return sequence
+        start = int.from_bytes(os.urandom(2), "big")
+        for offset in range(0x10000):
+            sequence = (start + offset) & 0xFFFF
+            if sequence not in self.pending:
+                return sequence
         raise OSError(errno.ENOBUFS, "no free ICMP sequence number")
 
 
