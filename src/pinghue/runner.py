@@ -272,18 +272,6 @@ def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
     return runs
 
 
-async def resolve_runs(args: RunConfig) -> list[TargetRun]:
-    """Resolve every target before returning, in requested order.
-
-    Neither run mode uses this: both resolve each target with
-    ``resolve_run_target`` and start probing it as soon as it resolves. It
-    remains for callers that want every lookup settled up front.
-    """
-    runs = await asyncio.gather(*(resolve_run_target(target, args) for target in args.targets))
-    apply_retained_sample_budget(runs)
-    return runs
-
-
 async def _probe_address(address: str, *, args: RunConfig, mode: ProbeMode) -> ProbeSample:
     if mode == ProbeMode.TCP:
         return await tcp_probe(address, args.port or 0, timeout_s=args.timeout)
@@ -585,7 +573,12 @@ async def probe_target_loop(
         if on_sample is not None:
             on_sample(target, sample)
 
-        probes_completed += 1
+        # An iteration in which no lookup could run (every resolver thread
+        # busy) leaves the target pending with no verdict and does not count
+        # toward --count, so the host is still looked up and probed. A DNS
+        # verdict (dns_failure) and a probe result both count.
+        if sample is not None or target.status != TargetStatus.RESOLVING:
+            probes_completed += 1
         if probe_limit is not None and probes_completed >= probe_limit:
             return
 
@@ -784,7 +777,10 @@ def _reader_is_gone(error: BaseException) -> bool:
 
 
 def _warn(message: str) -> None:
-    # print() to a stderr of None (closed at startup) is a no-op.
+    # A stderr closed at startup is None, and print(file=None) would write to
+    # stdout, into the line output or a `--output -` JSON document: drop it.
+    if sys.stderr is None:
+        return
     with contextlib.suppress(OSError, ValueError):
         print(f"pinghue: warning: {message}", file=sys.stderr, flush=True)
 

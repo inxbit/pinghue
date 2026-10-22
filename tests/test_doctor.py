@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from pinghue import doctor
+from pinghue import doctor, probes
 from pinghue.limits import FdLimit
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
@@ -198,6 +198,31 @@ def test_doctor_dns_probe_handles_empty_response(monkeypatch: pytest.MonkeyPatch
     assert address is None
     assert elapsed_ms is None
     assert error == "getaddrinfo: no addresses returned"
+
+
+def test_doctor_dns_probe_reports_a_filtered_name_like_a_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sinkhole = [
+        (doctor.socket.AF_INET, 0, 0, "", ("0.0.0.0", 0)),
+        (doctor.socket.AF_INET6, 0, 0, "", ("::", 0, 0, 0)),
+    ]
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", lambda *_: sinkhole)
+
+    address, elapsed_ms, error = doctor._dns_probe("blocked.example")
+
+    # A run reports this name as dns_failure, so --check must not call it OK.
+    assert address is None
+    assert elapsed_ms is None
+    assert error == probes.UNSPECIFIED_ONLY_ERROR
+
+    mixed = [sinkhole[0], (doctor.socket.AF_INET, 0, 0, "", ("192.0.2.40", 0))]
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", lambda *_: mixed)
+
+    address, _, error = doctor._dns_probe("partly-blocked.example")
+
+    assert address == "192.0.2.40 (ipv4)"
+    assert error is None
 
 
 def test_run_check_prints_configured_dns_name(monkeypatch: pytest.MonkeyPatch) -> None:

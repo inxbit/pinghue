@@ -16,7 +16,7 @@ from pinghue.models import (
     TargetStatus,
 )
 from pinghue.probes import ResolvedTarget
-from pinghue.runner import probe_target_loop, resolve_runs, run_no_tui, stagger_delay
+from pinghue.runner import probe_target_loop, run_no_tui, stagger_delay
 
 
 def no_tui_args(**overrides: object) -> SimpleNamespace:
@@ -681,7 +681,11 @@ async def test_run_no_tui_runs_icmp_probes_without_a_dedicated_executor(
     assert probe_kwargs == [{"args", "mode", "semaphore"}]
 
 
-async def test_resolve_runs_resolves_targets_concurrently_and_preserves_order(
+async def _no_probe_loop(*_: object, **__: object) -> None:
+    return None
+
+
+async def test_run_no_tui_resolves_targets_concurrently_and_preserves_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active = 0
@@ -707,20 +711,22 @@ async def test_resolve_runs_resolves_targets_concurrently_and_preserves_order(
         )
 
     monkeypatch.setattr(runner, "resolve_target", fake_resolve_target)
-    args = SimpleNamespace(
+    monkeypatch.setattr(runner, "probe_target_loop", _no_probe_loop)
+    args = no_tui_args(
         address_family=AddressFamily.IPV4.value,
-        numeric=False,
+        count=1,
         targets=["aa", "bbbb", "c"],
     )
 
-    runs = await resolve_runs(args)
+    runs, exit_reason, _, _ = await run_no_tui(args, ProbeMode.ICMP)
 
+    assert exit_reason == "completed"
     assert max_active > 1
     assert [run.target for run in runs] == ["aa", "bbbb", "c"]
     assert [run.resolved_address for run in runs] == ["192.0.2.2", "192.0.2.4", "192.0.2.1"]
 
 
-async def test_resolve_runs_caps_aggregate_retained_samples_across_targets(
+async def test_run_no_tui_caps_aggregate_retained_samples_across_targets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target_count = 200
@@ -731,13 +737,21 @@ async def test_resolve_runs_caps_aggregate_retained_samples_across_targets(
     )
 
     async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        # A fresh run, as resolve_run_target returns, has the full per-target
+        # window; the run must cut it to the run-wide budget.
         return TargetRun(target, resolved_address=target)
 
     monkeypatch.setattr(runner, "resolve_run_target", fake_resolve_run_target)
-    runs = await resolve_runs(
-        SimpleNamespace(targets=[f"192.0.2.{index}" for index in range(target_count)])
+    monkeypatch.setattr(runner, "probe_target_loop", _no_probe_loop)
+    targets = [f"192.0.2.{index}" for index in range(target_count)]
+
+    runs, exit_reason, _, _ = await run_no_tui(
+        no_tui_args(count=1, targets=targets), ProbeMode.ICMP
     )
 
+    assert exit_reason == "completed"
+    assert [run.target for run in runs] == targets
+    assert effective_window == models.retained_samples_per_target(target_count)
     assert {run.samples.maxlen for run in runs} == {effective_window}
 
     retained_sample = ProbeSample(
