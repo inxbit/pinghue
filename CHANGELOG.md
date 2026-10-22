@@ -6,6 +6,19 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Changed
+
+- ICMP probes now run on the event loop over a few shared non-blocking datagram sockets per address family instead of one daemon thread and one socket per probe. 5,000 healthy targets keep the configured cadence, ICMP probes no longer use threads or per-probe file descriptors, and reported latency no longer includes thread-scheduling delay (on loopback with 1,000 targets the p99 dropped from about 20 ms to 0.02 ms). `icmplib` is no longer a dependency.
+- On Linux, TCP latency is now the kernel's handshake RTT (`TCP_INFO`) when that is smaller than the connect time measured on the event loop and no SYN was retransmitted, so time the loop spends elsewhere (for example redrawing a large table) is no longer reported as network latency. After a SYN retransmission the full connect time is still reported, so SYN loss stays visible. macOS keeps the event-loop measurement.
+
+### Fixed
+
+- On Linux, ICMP destination-unreachable and time-exceeded errors are now reported as `unreachable` as soon as they arrive (the datagram ICMP socket now reads its error queue) instead of `timeout` after the full timeout.
+- ICMP latency is measured with a monotonic clock; Linux kernel receive timestamps are used only when they agree with it. A wall-clock step (NTP step, resume, VM migration) can no longer produce negative latencies, latencies longer than the timeout, or false timeouts for replies that arrived in time.
+- ICMP replies are matched on sequence number, source address, and a random per-probe payload token (plus the echo identifier on macOS). On macOS, where every ICMP socket on the host sees every reply, another pinghue instance or ICMP tool can no longer make a down host look up, and a reply for another host no longer extends a probe's wait.
+- An ICMP send blocked by local policy (a firewall rule returning `EPERM`, or `EACCES`) is now reported as `permission denied: ICMP send blocked by local policy (...)`, and the target is classified `permission_denied`, instead of the misleading "Broadcast is not allowed" text and a `down` state. `ENETUNREACH`/`EHOSTUNREACH` from the send are reported as `unreachable`.
+- A TCP close that stalls after a successful connect no longer holds the probe: teardown is bounded and the measured success is kept.
+
 ## 5.1.0 - 2026-08-18
 
 ### Added

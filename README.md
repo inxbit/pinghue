@@ -161,6 +161,10 @@ TCP mode is enabled by passing a port:
 pinghue -p 443 example.com api.internal
 ```
 
+ICMP probes run on the event loop over a few shared unprivileged datagram sockets per address family, so a probe costs no thread or file descriptor of its own. Replies are matched on sequence number, source address, and a random per-probe token (plus the echo identifier on macOS), so another ICMP tool's traffic cannot be credited to a target. A destination-unreachable or time-exceeded error that quotes a probe is reported as `unreachable` as soon as it arrives, on Linux and macOS. ICMP latency is measured with a monotonic clock; on Linux the kernel's receive timestamp is used when it agrees with that clock, so time the event loop spends elsewhere is not counted and a wall-clock step cannot produce a negative or inflated latency.
+
+TCP latency is the connect time. On Linux it is the kernel's handshake RTT (`TCP_INFO`) when that is smaller and no SYN was retransmitted, so a busy event loop is not reported as network latency; after a SYN retransmission the full connect time is kept so the delay stays visible.
+
 Use no-TUI mode for scripts, cron, CI, and package smoke tests:
 
 ```sh
@@ -202,7 +206,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file in place. The rewrite is type-safe but not crash-atomic. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP daemon workers are bounded by this limit. |
+| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
 | `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
 | `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
