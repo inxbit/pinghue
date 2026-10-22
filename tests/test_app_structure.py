@@ -113,13 +113,18 @@ async def test_tui_preserves_aggregate_budget_during_partial_resolution(
 
     async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
         if target == "host-0":
-            return TargetRun(target, resolved_address="192.0.2.1")
+            return TargetRun(target, resolved_address="127.0.253.1")
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
+
+    async def fake_probe_target_loop(*_: Any, stop_event: asyncio.Event, **__: Any) -> None:
+        # host-0's loop starts as soon as it resolves; it must not send a probe.
+        await stop_event.wait()
 
     monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
     monkeypatch.setattr(app, "set_interval", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "resolve_run_target", fake_resolve_run_target)
+    monkeypatch.setattr(app_module, "probe_target_loop", fake_probe_target_loop)
 
     await app.on_mount()
     for _ in range(100):
@@ -128,7 +133,7 @@ async def test_tui_preserves_aggregate_budget_during_partial_resolution(
         await asyncio.sleep(0)
 
     expected_window = MAX_TOTAL_RETAINED_SAMPLES // target_count
-    assert app.targets[0].resolved_address == "192.0.2.1"
+    assert app.targets[0].resolved_address == "127.0.253.1"
     assert {target.samples.maxlen for target in app.targets} == {expected_window}
     await app.on_unmount()
 
