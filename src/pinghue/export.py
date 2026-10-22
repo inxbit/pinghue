@@ -23,6 +23,10 @@ SCHEMA_VERSION = 1
 
 _LINUX = sys.platform.startswith("linux")
 
+# NamedTemporaryFile names the staged report <prefix><8 random characters>.tmp.
+_TEMP_NAME_EXTRA_BYTES = 8 + len(".tmp")
+_DEFAULT_NAME_MAX = 255
+
 
 def format_timestamp(value: datetime) -> str:
     """Return UTC RFC 3339 timestamp with millisecond precision."""
@@ -355,6 +359,21 @@ def _require_writable_node(output_path: Path) -> None:
         raise PermissionError(f"output path is not writable: {output_path}")
 
 
+def _temp_prefix(output_path: Path) -> str:
+    # Keep the staged name within the directory's file-name limit even when the
+    # report name itself is close to it; the report keeps its full name.
+    try:
+        name_max = os.pathconf(output_path.parent, "PC_NAME_MAX")
+    except (OSError, ValueError):
+        name_max = _DEFAULT_NAME_MAX
+    if name_max <= 0:
+        name_max = _DEFAULT_NAME_MAX
+    prefix = output_path.name + "."
+    while len(prefix) > 1 and len(os.fsencode(prefix)) + _TEMP_NAME_EXTRA_BYTES > name_max:
+        prefix = prefix[:-2] + "."
+    return prefix
+
+
 def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
     """Raise OSError early when write_output_json would refuse path.
 
@@ -423,7 +442,7 @@ def write_output_json(
             mode="w",
             encoding="utf-8",
             dir=output_path.parent,
-            prefix=output_path.name + ".",
+            prefix=_temp_prefix(output_path),
             suffix=".tmp",
             delete=False,
         ) as tmp_file:

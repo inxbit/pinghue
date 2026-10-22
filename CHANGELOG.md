@@ -20,6 +20,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 ### Fixed
 
 - Host files now end lines only at `\n`, with an optional `\r` before it. Vertical tabs, form feeds, file/group/record separators, NEL, and Unicode line and paragraph separators stay inside their line. They no longer split one line into several targets or skew line numbers and the 5,000-line limit, and a line containing a control character is rejected as an invalid target. A lone `\r` (classic Mac OS line ending) no longer ends a line.
+- A report name within a few bytes of the file-name limit no longer fails at exit because its temporary staging name was too long.
 
 ## 5.1.0 - 2026-08-18
 

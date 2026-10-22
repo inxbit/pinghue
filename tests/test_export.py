@@ -568,6 +568,37 @@ def test_check_output_path_follows_symlinked_directory(tmp_path: Path) -> None:
     check_output_path(tmp_path / "logs" / "nested" / "out.json")
 
 
+def test_write_output_json_accepts_name_at_the_file_name_limit(tmp_path: Path) -> None:
+    # The staged temporary name adds a random suffix; it must not push a
+    # valid report name over the directory's file-name limit.
+    name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    output_path = tmp_path / ("r" * (name_max - len(".json")) + ".json")
+
+    check_output_path(output_path)
+    _write(output_path)
+
+    assert json.loads(output_path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert _leftover_temp_files(tmp_path) == []
+
+
+def test_temp_prefix_falls_back_when_name_limit_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    long_path = Path("é" * 200)
+
+    def unsupported(_path: object, _name: str) -> int:
+        raise OSError(errno.EINVAL, "pathconf unsupported")
+
+    monkeypatch.setattr(os, "pathconf", unsupported)
+    prefix = export_module._temp_prefix(long_path)
+    assert prefix.endswith(".")
+    assert len(os.fsencode(prefix)) + export_module._TEMP_NAME_EXTRA_BYTES <= 255
+
+    monkeypatch.setattr(os, "pathconf", lambda _path, _name: -1)
+    assert export_module._temp_prefix(long_path) == prefix
+    assert export_module._temp_prefix(Path("out.json")) == "out.json."
+
+
 def test_existing_output_rejects_unsupported_socket_node(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
