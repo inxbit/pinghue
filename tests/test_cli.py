@@ -148,6 +148,82 @@ def test_main_reports_output_write_errors_without_traceback(
     assert "Traceback" not in captured.err
 
 
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_main_refuses_unusable_output_path_before_probing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    overwrite: bool,
+) -> None:
+    # A refused --output path must fail before the run, not after probing for
+    # the whole --duration and then losing the report.
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+    alias_path = tmp_path / "alias.json"
+    os.link(output_path, alias_path)
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    argv = ["--no-tui", "--output", str(output_path), "127.0.0.1"]
+
+    assert main([*argv, "--overwrite"] if overwrite else argv) == 1
+
+    err = capsys.readouterr().err
+    assert err.startswith("pinghue: error: ")
+    assert ("multiple hard links" if overwrite else "use --overwrite to replace") in err
+    assert calls == []
+    assert output_path.read_text(encoding="utf-8") == "previous\n"
+
+
+def test_main_refuses_fifo_owned_by_another_user_before_probing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output_path = tmp_path / "report.json"
+    os.mkfifo(output_path, 0o666)
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    other_uid = os.geteuid() + 1
+    monkeypatch.setattr(os, "geteuid", lambda: other_uid)
+
+    assert main(["--no-tui", "--output", str(output_path), "127.0.0.1"]) == 1
+
+    assert "FIFO owned by another user" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_main_accepts_new_output_path_and_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    assert main(["--no-tui", "--output", str(tmp_path / "new" / "out.json"), "127.0.0.1"]) == 0
+    assert len(calls) == 1
+
+
 def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

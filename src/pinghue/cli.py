@@ -14,6 +14,7 @@ from pinghue import __version__
 from pinghue.config import RunConfig
 from pinghue.display import sanitize_display
 from pinghue.doctor import run_check
+from pinghue.export import check_output_path
 from pinghue.hostfile import TARGET_COUNT_MAXIMUM, TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 
@@ -323,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
     try:
+        if args.output is not None:
+            # Refuse an unusable report path before probing, not after the run.
+            check_output_path(args.output, overwrite=args.overwrite)
         return asyncio.run(run(args, mode=mode))
     except OSError as exc:
         print(f"pinghue: error: {sanitize_display(str(exc))}", file=sys.stderr)
