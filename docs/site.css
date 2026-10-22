@@ -395,7 +395,7 @@ kbd {
 
 .term-bar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr);
   align-items: center;
   height: max(40px, calc(47 * var(--u)));
   padding: 0 max(12px, calc(20 * var(--u))) 0 max(14px, calc(21 * var(--u)));
@@ -426,6 +426,33 @@ kbd {
 
 .dots i:nth-child(3) {
   background: #28c840;
+}
+
+/* The fleet summary follows the title like the TUI header's. Healthy, the
+   bulk of most fleets, comes last, so a bar too narrow for all of it drops it
+   first; below 800px the bar keeps only the title. */
+.term-head {
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.term-summary {
+  margin-left: 2ch;
+  color: var(--tui-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 800px) {
+  .term-bar {
+    column-gap: 2ch;
+  }
+}
+
+@media (max-width: 799px) {
+  .term-summary {
+    display: none;
+  }
 }
 
 .term-end {
@@ -495,7 +522,7 @@ kbd {
   background: rgb(88 166 255 / 0.22);
 }
 
-.s-resolving {
+.s-pending {
   color: var(--tui-muted);
 }
 
@@ -567,6 +594,7 @@ kbd {
 .s-healthy { color: var(--green); }
 .s-intermittent { color: var(--amber); }
 .s-down { color: var(--red); }
+.t-green { color: var(--green); }
 .t-amber { color: var(--amber); }
 .t-red { color: var(--red); }
 

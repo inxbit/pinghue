@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; verification evidence refreshed for 5.1.0 on 2026-08-18
+Review date: 2026-07-11; verification evidence refreshed for 6.0.0 on 2026-10-22
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -152,22 +152,28 @@ requires the next major release; it must not ship as a patch or minor version.
 
 ## Verification evidence
 
-Refreshed for the 5.1.0 release candidate on 2026-08-18 (the 5.0.0 evidence
+Refreshed for the 6.0.0 release candidate on 2026-10-22 (the 5.1.0 evidence
 this section previously recorded is superseded):
 
-- Full tests outside the sandbox: 333 passed; localhost TCP and Unix-socket
-  cases executed; total branch-aware coverage was 88.79% against the 85% floor
-  (raised from 80% in 5.1.0). The same suite passed under CPython 3.14.7.
+- Full tests: 697 passed and 8 skipped (Linux-only kernel features, a
+  Linux-only pty hangup, and a root-only ownership change) under CPython
+  3.12.15, with total branch-aware coverage of 93.93% against the 85% floor;
+  localhost TCP and Unix-socket cases executed. The same suite
+  passed under CPython 3.14.9.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
-- Mypy strict mode: no issues across 14 runtime modules plus the sdist
+- Mypy strict mode: no issues across 16 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 25 Node tests passed. The 5.1.0 site change is limited
-  to the version string in the JSON example.
-- Semgrep explicit Python, security-audit, and secrets rules: 285 rules run,
-  0 findings across the 70 tracked files.
-- Bandit recursive runtime/script scan: 0 findings.
-- Gitleaks working-tree and 134-commit history scans: 0 leaks.
+- Static site contract: 26 Node tests passed. The 6.0.0 site change adds the
+  TUI's fleet summary to the hero title bar, shows a reset host as `pending`
+  like the TUI, and updates the version strings.
+- Semgrep 1.182.0 Python, security-audit, and secrets rule packs: 0 findings
+  across 85 scanned files.
+- Bandit 1.9.4 recursive runtime/script scan: one low-severity B311 note for
+  the `random.uniform` jitter on DNS retry delays, which is not a security
+  value; ICMP identifiers, sequence numbers, and reply tokens use
+  `os.urandom`. No medium or high findings.
+- Gitleaks 8.30.1 working-tree and 131-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -175,24 +181,28 @@ this section previously recorded is superseded):
   `--require-hashes` entry.
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
-- The final normalized sdist and wheel passed `twine check`; all 244 tests
-  shipped in the unpacked sdist passed; fresh wheel and sdist installs both
-  reported `pinghue 5.1.0` through the console-script entry point and
-  completed the localhost TCP smoke test.
+- The final normalized sdist and wheel passed `twine check`; all 604 tests
+  shipped in the unpacked sdist passed (8 skipped as above); fresh wheel and
+  sdist installs both reported `pinghue 6.0.0` through the console-script
+  entry point and completed the localhost TCP smoke test.
 - ShellCheck and Bash syntax checks passed for shell scripts; Homebrew formula
   Ruby syntax passed.
 - The administration-readable hosted-hardening check passed against the
-  tracked baseline, with the Python 3.14 required checks pending the
-  maintainer-run apply (#113).
+  tracked baseline, including the Python 3.14 required checks.
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 5.1.0 is a
-compatible release (unified probe scheduler, console-script entry point,
-Python 3.14, CI gates); no new finding was raised. The local candidate passed
-the security, QA, deterministic-artifact, installed-artifact, and
-staged-formula gates. Publishing remains gated on release-PR review and
-exact-head CI.
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 6.0.0 is a
+major release: `--output` refuses FIFOs and `--overwrite` targets that another
+local user controls, host files split lines only at `\n`, `\r\n`, or a lone
+`\r`, and `./-` names a file. Those changes invoke the documented security
+exception to the deprecation window. The release also closes DNS-sinkhole
+answers being probed as healthy, predictable ICMP sequence numbers, unescaped
+OS-supplied text in `--check`, stderr-bound output reaching stdout, and an
+inline expression in a workflow `run:` step; no new finding was raised. The
+local candidate passed the security, QA, deterministic-artifact,
+installed-artifact, and staged-formula gates. Publishing remains gated on
+release-PR review and exact-head CI.
 
 Revisit this report if PingHue gains a listener, privileged wrapper, remote
 inventory source, credential handling, plugin execution, subprocess probes, a

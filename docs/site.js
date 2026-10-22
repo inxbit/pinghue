@@ -2,8 +2,9 @@
    The hero is the real TUI: same columns, states, glyph scale and keys as
    `pinghue` in a terminal, fed by one deterministic simulated run so every
    visitor sees the same night. The rules below mirror the Python sources:
-   BAR_BUCKETS (src/pinghue/history.py), SLOW_LATENCY_MS (app.py), and
-   classify_samples with the CLI defaults (models.py, cli.py). */
+   BAR_BUCKETS (src/pinghue/history.py), SLOW_LATENCY_MS (app.py),
+   classify_samples with the CLI defaults (models.py, cli.py), and the
+   header's fleet summary (SUMMARY_CATEGORIES, ui.py). */
 
 (() => {
   "use strict";
@@ -163,6 +164,23 @@
     return `last ${n} probes: ${parts.join(", ")}`;
   };
 
+  // ui.py fleet_summary_parts: the age of the oldest newest result, then
+  // host counts per state, problems first, states with no hosts left out.
+  // Every host here is probed each 1.0 s, so the oldest result is one
+  // interval old; a host with no result yet (pending) has no age.
+  const SUMMARY = [["down", "red"], ["intermittent", "amber"], ["pending", ""], ["healthy", "green"]];
+  const summaryParts = (states) => {
+    const parts = [];
+    if (states.some((state) => state !== "pending")) parts.push(["oldest 1.0s", ""]);
+    for (const [state, tone] of SUMMARY) {
+      const count = states.filter((s) => s === state).length;
+      if (!count) continue;
+      if (parts.length) parts.push(["  ", ""]);
+      parts.push([String(count), tone], [` ${state}`, ""]);
+    }
+    return parts;
+  };
+
   const fmt = (n) => (n === null ? "-" : n.toFixed(2));
   const fmtLoss = (n) => n.toFixed(2) + "%";
   const clockAt = (t) => {
@@ -175,7 +193,7 @@
   if (typeof module === "object" && module.exports) {
     module.exports = {
       BUCKETS, SLOW_MS, JITTER_THRESHOLD, FAIL_THRESHOLD, HOSTS, START, HISTORY, RUN_SECONDS,
-      buildRun, levelOf, glyphFor, toneFor, historyLabel, fmt, fmtLoss, clockAt,
+      SUMMARY, buildRun, levelOf, glyphFor, toneFor, historyLabel, summaryParts, fmt, fmtLoss, clockAt,
     };
     return;
   }
@@ -317,6 +335,7 @@
   const term = doc.querySelector("[data-term]");
   const tbody = doc.querySelector("[data-rows]");
   const clock = doc.querySelector("[data-clock]");
+  const summary = doc.querySelector("[data-summary]");
   const note = doc.querySelector("[data-term-note]");
   const pauseBtn = doc.querySelector("[data-pause]");
   const n = HOSTS.length;
@@ -348,17 +367,35 @@
     bars.setAttribute("aria-label", history.length ? historyLabel(history) : "no probes yet");
   };
 
+  // The counts change a few times an hour; rebuild the summary only then.
+  let summaryShown = summary ? summary.textContent : "";
+  const paintSummary = (states) => {
+    const parts = summaryParts(states);
+    const text = parts.map(([part]) => part).join("");
+    if (!summary || text === summaryShown) return;
+    summaryShown = text;
+    summary.replaceChildren(...parts.map(([part, tone]) => {
+      if (!tone) return doc.createTextNode(part);
+      const count = doc.createElement("span");
+      count.className = `t-${tone}`;
+      count.textContent = part;
+      return count;
+    }));
+  };
+
   const paint = () => {
     if (!tbody) return;
+    const states = [];
     Array.from(tbody.rows).forEach((tr, i) => {
       const cells = tr.cells;
       const tk = tickOf(i);
       cells[1].textContent = showAddress ? HOSTS[i][1] : "";
       tr.classList.toggle("is-cursor", term && term.classList.contains("is-engaged") && i === cursor);
       if (since[i] > tk) {
-        // app.py: a reset target shows "resolving" until its next probe lands
-        cells[2].textContent = "resolving";
-        cells[2].className = "s-resolving";
+        // ui.py: a reset target shows "pending" until its next probe lands
+        states.push("pending");
+        cells[2].textContent = "pending";
+        cells[2].className = "s-pending";
         for (let k = 3; k <= 7; k++) {
           cells[k].textContent = "-";
           cells[k].className = "";
@@ -369,6 +406,7 @@
         return;
       }
       const row = run.rowAt(i, tk, since[i]);
+      states.push(row.state);
       cells[2].textContent = row.state;
       cells[2].className = `s-${row.state}`;
       const nums = [["last", row.last], ["min", row.min], ["avg", row.avg], ["max", row.max], ["jitter", row.jitter]];
@@ -380,6 +418,7 @@
       cells[8].className = row.tones.loss ? `t-${row.tones.loss}` : "";
       paintBars(cells[10], row.history);
     });
+    paintSummary(states);
     if (clock) clock.textContent = clockAt(elapsed + START);
   };
 
