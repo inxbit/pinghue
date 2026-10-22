@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import errno
 import os
 import signal
 import sys
@@ -611,6 +613,20 @@ def flush_or_discard_output(stream: TextIO | None) -> None:
         _discard_output(stream)
 
 
+def _reader_is_gone(error: BaseException) -> bool:
+    """Return whether a write failed because nothing reads the stream any more."""
+    if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+        return True
+    # A hung-up terminal fails writes with EIO.
+    return isinstance(error, OSError) and error.errno == errno.EIO
+
+
+def _warn(message: str) -> None:
+    # print() to a stderr of None (closed at startup) is a no-op.
+    with contextlib.suppress(OSError, ValueError):
+        print(f"pinghue: warning: {message}", file=sys.stderr, flush=True)
+
+
 class _SampleLinePrinter:
     """Print no-TUI probe lines and push them to the reader within one loop turn.
 
@@ -621,8 +637,10 @@ class _SampleLinePrinter:
 
     When the reader goes away (``| head``, a hung-up terminal) printing stops
     and ``on_closed`` asks the run to stop as if interrupted, so the run still
-    ends cleanly and ``--output`` is still written. A ``stream`` of None (its
-    descriptor was closed at startup) drops the lines and lets the run go on.
+    ends cleanly and ``--output`` is still written. Any other write failure
+    (a full disk, for example) stops the run the same way after a warning on
+    stderr. A ``stream`` of None (its descriptor was closed at startup) drops
+    the lines and lets the run go on.
     """
 
     def __init__(self, stream: TextIO | None, *, on_closed: Callable[[], object]) -> None:
@@ -636,8 +654,8 @@ class _SampleLinePrinter:
             return
         try:
             print_sample(target, sample, stream=self._stream)
-        except (OSError, ValueError):
-            self._close(self._stream)
+        except (OSError, ValueError) as exc:
+            self._close(self._stream, exc)
             return
         if not self._flush_scheduled:
             self._flush_scheduled = True
@@ -650,11 +668,13 @@ class _SampleLinePrinter:
             return
         try:
             stream.flush()
-        except (OSError, ValueError):
-            self._close(stream)
+        except (OSError, ValueError) as exc:
+            self._close(stream, exc)
 
-    def _close(self, stream: TextIO) -> None:
+    def _close(self, stream: TextIO, error: BaseException) -> None:
         self._closed = True
+        if not _reader_is_gone(error):
+            _warn(f"could not write probe lines, stopping the run: {error}")
         _discard_output(stream)
         self._on_closed()
 

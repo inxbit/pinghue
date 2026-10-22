@@ -181,7 +181,8 @@ Example no-TUI output:
 
 Each line is written as soon as its probe result lands, also when stdout is a
 pipe or a file. If the reader goes away (for example `| head`), the run stops as
-if interrupted and still writes `--output`.
+if interrupted and still writes `--output`. Any other failure to write a line,
+such as a full disk, stops the run the same way after a warning on stderr.
 
 Both modes start probing each target as soon as its own name resolves (IP
 literals at once) and spread the targets' first probes evenly across one

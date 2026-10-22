@@ -585,6 +585,15 @@ class BrokenPipeStream(io.StringIO):
         raise BrokenPipeError(errno.EPIPE, "Broken pipe")
 
 
+class FailingStream(io.StringIO):
+    def __init__(self, error: OSError) -> None:
+        super().__init__()
+        self.error = error
+
+    def write(self, _text: str) -> int:
+        raise self.error
+
+
 async def test_sample_lines_are_flushed_once_per_event_loop_turn() -> None:
     stream = RecordingStream()
     printer = runner._SampleLinePrinter(stream, on_closed=lambda: None)
@@ -599,9 +608,19 @@ async def test_sample_lines_are_flushed_once_per_event_loop_turn() -> None:
     assert len(stream.getvalue().splitlines()) == 3
 
 
-async def test_sample_printer_stops_the_run_once_the_reader_goes_away() -> None:
+@pytest.mark.parametrize(
+    "error",
+    [
+        BrokenPipeError(errno.EPIPE, "Broken pipe"),
+        OSError(errno.EIO, "Input/output error"),
+    ],
+    ids=["closed-pipe", "hung-up-terminal"],
+)
+async def test_sample_printer_stops_the_run_once_the_reader_goes_away(
+    capsys: pytest.CaptureFixture[str], error: OSError
+) -> None:
     closed: list[bool] = []
-    printer = runner._SampleLinePrinter(BrokenPipeStream(), on_closed=lambda: closed.append(True))
+    printer = runner._SampleLinePrinter(FailingStream(error), on_closed=lambda: closed.append(True))
     target = TargetRun("192.0.2.1", resolved_address="192.0.2.1")
 
     printer(target, ok_sample())
@@ -609,6 +628,30 @@ async def test_sample_printer_stops_the_run_once_the_reader_goes_away() -> None:
     printer.flush()
 
     assert closed == [True]
+    # Nobody is reading any more, so there is nothing to report.
+    assert capsys.readouterr().err == ""
+
+
+async def test_sample_printer_says_why_when_a_write_fails_for_another_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A full disk is not a reader that went away: the run must not end
+    # silently as if it had been interrupted.
+    closed: list[bool] = []
+    printer = runner._SampleLinePrinter(
+        FailingStream(OSError(errno.ENOSPC, "No space left on device")),
+        on_closed=lambda: closed.append(True),
+    )
+    target = TargetRun("192.0.2.1", resolved_address="192.0.2.1")
+
+    printer(target, ok_sample())
+    printer(target, ok_sample())
+
+    assert closed == [True]
+    assert capsys.readouterr().err == (
+        "pinghue: warning: could not write probe lines, stopping the run: "
+        "[Errno 28] No space left on device\n"
+    )
 
 
 async def test_run_writes_the_report_when_stdout_is_closed(

@@ -11,7 +11,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - Each target now starts probing as soon as its own name resolves, in both modes, instead of waiting for every lookup in the run; IP literals start at once instead of queueing behind DNS names for a resolver slot.
 - No-TUI mode now spreads the targets' first probes across one interval like the TUI, instead of probing every target in the same instant on every cycle; with `--count`, a run with several targets can take up to one interval longer. When `--duration` is shorter than two intervals, first probes are spread across half the run so every target is still probed.
 - A resolved target whose first probe has not landed yet now shows and exports as `resolving` instead of `down`; such never-probed targets still count as down for `--fail-on-any-down` and `--fail-on-all-down`.
-- No-TUI per-probe lines now reach a pipe or file as soon as each result lands instead of sitting in an output buffer; when the reader goes away (for example `| head`), the run stops as `interrupted` and still writes `--output` instead of failing with a broken-pipe error.
+- No-TUI per-probe lines now reach a pipe or file as soon as each result lands instead of sitting in an output buffer; when the reader goes away (for example `| head`), the run stops as `interrupted` and still writes `--output` instead of failing with a broken-pipe error. Any other failure to write a line, such as a full disk, stops the run the same way after a warning on stderr.
 
 ### Fixed
 
