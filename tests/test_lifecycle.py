@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
+import io
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -496,3 +498,62 @@ async def test_run_no_tui_keeps_running_when_one_target_loop_fails(
     assert exit_reason == "completed"
     assert [target.status for target in targets] == [TargetStatus.ERROR, TargetStatus.HEALTHY]
     assert targets[0].error == "Unexpected probe loop error: loop bug"
+
+
+# Per-probe lines reach a pipe promptly; a closed reader stops the run.
+
+
+class RecordingStream(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushes = 0
+
+    def flush(self) -> None:
+        self.flushes += 1
+        super().flush()
+
+
+class BrokenPipeStream(io.StringIO):
+    def write(self, _text: str) -> int:
+        raise BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+
+async def test_sample_lines_are_flushed_once_per_event_loop_turn() -> None:
+    stream = RecordingStream()
+    printer = runner._SampleLinePrinter(stream, on_closed=lambda: None)
+    target = TargetRun("192.0.2.1", resolved_address="192.0.2.1")
+
+    for _ in range(3):
+        printer(target, ok_sample())
+    assert stream.flushes == 0
+    await asyncio.sleep(0)
+
+    assert stream.flushes == 1
+    assert len(stream.getvalue().splitlines()) == 3
+
+
+async def test_sample_printer_stops_the_run_once_the_reader_goes_away() -> None:
+    closed: list[bool] = []
+    printer = runner._SampleLinePrinter(BrokenPipeStream(), on_closed=lambda: closed.append(True))
+    target = TargetRun("192.0.2.1", resolved_address="192.0.2.1")
+
+    printer(target, ok_sample())
+    printer(target, ok_sample())
+    printer.flush()
+
+    assert closed == [True]
+
+
+async def test_run_no_tui_stops_cleanly_when_stdout_is_a_broken_pipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed = capture_stop_event(monkeypatch)
+    monkeypatch.setattr(sys, "stdout", BrokenPipeStream())
+    monkeypatch.setattr(runner, "probe_once", applying_probe)
+
+    run_task = asyncio.create_task(run_no_tui(no_tui_args(), ProbeMode.ICMP))
+
+    assert await settle(run_task, installed), "a closed reader did not stop the run"
+    targets, exit_reason, _, _ = run_task.result()
+    assert exit_reason == "interrupted"
+    assert targets[0].stats.sent == 1

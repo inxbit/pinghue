@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import sys
 import time
@@ -559,6 +560,74 @@ async def _run_probe_loops_until_shutdown(
         await asyncio.gather(all_loops, stop_wait, *tasks, return_exceptions=True)
 
 
+def _discard_output(stream: TextIO) -> None:
+    """Point ``stream``'s descriptor at the null device once its reader is gone.
+
+    Python flushes standard streams at exit; without this, the unwritten tail
+    raises BrokenPipeError again there and the exit status becomes 120.
+    """
+    try:
+        descriptor = stream.fileno()
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except (AttributeError, OSError, ValueError):
+        return
+    try:
+        os.dup2(devnull, descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(devnull)
+
+
+class _SampleLinePrinter:
+    """Print no-TUI probe lines and push them to the reader within one loop turn.
+
+    Python block-buffers stdout when it is a pipe or a file (``| tee``,
+    journald), which would hold lines back by kilobytes. One flush is scheduled
+    per event-loop turn instead of one ``write()`` per line, so a burst of
+    results still reaches the reader together and promptly.
+
+    When the reader goes away (``| head``, a hung-up terminal) printing stops
+    and ``on_closed`` asks the run to stop as if interrupted, so the run still
+    ends cleanly and ``--output`` is still written.
+    """
+
+    def __init__(self, stream: TextIO | None, *, on_closed: Callable[[], object]) -> None:
+        self._stream = stream
+        self._on_closed = on_closed
+        self._flush_scheduled = False
+        self._closed = False
+
+    def __call__(self, target: TargetRun, sample: ProbeSample | None) -> None:
+        if self._closed:
+            return
+        try:
+            print_sample(target, sample, stream=self._stream)
+        except (OSError, ValueError):
+            self._close()
+            return
+        if not self._flush_scheduled:
+            self._flush_scheduled = True
+            asyncio.get_running_loop().call_soon(self.flush)
+
+    def flush(self) -> None:
+        self._flush_scheduled = False
+        if self._closed:
+            return
+        try:
+            self._output().flush()
+        except (OSError, ValueError):
+            self._close()
+
+    def _output(self) -> TextIO:
+        return sys.stdout if self._stream is None else self._stream
+
+    def _close(self) -> None:
+        self._closed = True
+        _discard_output(self._output())
+        self._on_closed()
+
+
 async def run_no_tui(
     args: RunConfig,
     mode: ProbeMode,
@@ -574,9 +643,7 @@ async def run_no_tui(
     # With `--output -` the JSON document owns stdout; per-probe lines move to
     # stderr so the exported document stays machine-parseable.
     sample_stream = sys.stderr if args.output is not None and str(args.output) == "-" else None
-
-    def print_to_stream(target: TargetRun, sample: ProbeSample | None) -> None:
-        print_sample(target, sample, stream=sample_stream)
+    print_line = _SampleLinePrinter(sample_stream, on_closed=stop_event.set)
 
     try:
         stop_reason = await _run_probe_loops_until_shutdown(
@@ -586,7 +653,7 @@ async def run_no_tui(
             semaphore=semaphore,
             stop_event=stop_event,
             deadline_at=deadline_at,
-            on_sample=print_to_stream,
+            on_sample=print_line,
         )
         if stop_reason is not None:
             exit_reason = stop_reason
@@ -594,6 +661,7 @@ async def run_no_tui(
         exit_reason = "interrupted"
     finally:
         cleanup_signal_handlers()
+        print_line.flush()
 
     ended_at = datetime.now(timezone.utc)
     return targets, exit_reason, started_at, ended_at
