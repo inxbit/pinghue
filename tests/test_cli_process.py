@@ -231,3 +231,28 @@ def test_tui_exits_cleanly_when_its_terminal_hangs_up(tmp_path: Path) -> None:
 
     assert returncode == 0
     assert _exit_reason(report) == "interrupted"
+
+
+def _close_stderr_under_a_low_open_file_limit() -> None:
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_NOFILE, (200, 200))
+    os.close(2)
+
+
+def test_output_dash_stays_json_when_stderr_is_closed_and_a_warning_is_due() -> None:
+    # With descriptor 2 closed, sys.stderr is None and print(file=None) writes
+    # to stdout: the open-file warning used to land in front of the document.
+    result = subprocess.run(
+        _cli_command("--no-tui", "--output", "-", "--count", "1", "--concurrency", "1024"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        env=_cli_env(),
+        preexec_fn=_close_stderr_under_a_low_open_file_limit,
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    document = json.loads(result.stdout)
+    assert document["run"]["exit_reason"] == "completed"
+    assert result.returncode == 0
