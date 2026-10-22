@@ -29,7 +29,6 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "icmplib>=3.0.4,<4",
   "textual~=8.2.0",
 ]
 

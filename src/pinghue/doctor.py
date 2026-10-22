@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import socket
@@ -12,6 +13,15 @@ from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
+from pinghue.limits import (
+    FD_REQUEST_MAXIMUM,
+    FD_RESERVE,
+    concurrency_capacity,
+    fd_limit_label,
+    read_fd_limit,
+)
+from pinghue.models import SampleStatus
+from pinghue.probes import UNSPECIFIED_ONLY_ERROR, _usable_addresses, family_from_ip, icmp_probe
 
 OK = "[ok]"
 FAIL = "[fail]"
@@ -74,7 +84,9 @@ def _check_dgram_icmp_socket(
     except PermissionError as exc:
         return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}")
     except OSError as exc:
-        return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}: {exc}")
+        return IcmpSocketCheck(
+            False, f"{descriptor} → {type(exc).__name__}: {sanitize_display(str(exc))}"
+        )
 
     probe_socket.close()
     return IcmpSocketCheck(True, f"{descriptor} succeeded")
@@ -101,7 +113,10 @@ def _read_ping_group_range() -> tuple[int, int, str] | None:
 
 
 DEFAULT_DNS_PROBE_NAME = "example.com"
-DNS_PROBE_TIMEOUT_SECONDS = 5.0
+# Matches runner.DNS_LOOKUP_TIMEOUT_SECONDS: above glibc's default 5 s
+# per-nameserver timeout, so a resolver that fails over from a dead first
+# nameserver is not reported as broken.
+DNS_PROBE_TIMEOUT_SECONDS = 12.0
 
 
 def _dns_probe(
@@ -138,25 +153,34 @@ def _dns_probe(
     if not infos:
         return None, None, "getaddrinfo: no addresses returned"
 
+    # Judge the answer as a run would: a DNS filter's 0.0.0.0 or :: is a
+    # dns_failure there, so it must not read as working DNS here.
+    usable = _usable_addresses(infos, prefer_ipv4=False)
+    if not usable:
+        return None, None, UNSPECIFIED_ONLY_ERROR
+
     elapsed_ms = float(round((time.perf_counter() - start) * 1000))
-    family, *_rest, sockaddr = infos[0]
+    family, *_rest, sockaddr = usable[0]
     address = sockaddr[0]
     protocol = "ipv6" if family == socket.AF_INET6 else "ipv4"
     return f"{address} ({protocol})", elapsed_ms, None
 
 
 def _loopback_icmp_probe(address: str = "127.0.0.1") -> tuple[float | None, str | None]:
+    """Send one echo through pinghue's own ICMP engine, as a probe run would."""
     try:
-        from icmplib import ping  # type: ignore[import-untyped]
-
-        result = ping(address, count=1, timeout=1, privileged=False)
+        sample = asyncio.run(
+            icmp_probe(address, timeout_s=1.0, address_family=family_from_ip(address))
+        )
     except Exception as exc:  # noqa: BLE001 - doctor reports exact environment failures
-        return None, f"{type(exc).__name__}: {exc}"
+        return None, sanitize_display(f"{type(exc).__name__}: {exc}")
 
-    if not result.is_alive:
+    if sample.status == SampleStatus.OK and sample.latency_ms is not None:
+        return float(sample.latency_ms), None
+    if sample.status == SampleStatus.TIMEOUT:
         return None, "timeout"
-
-    return float(result.avg_rtt), None
+    # The engine's error text carries OS and socket messages.
+    return None, sanitize_display(sample.error or sample.status.value)
 
 
 def _write_header(lines: list[str]) -> None:
@@ -165,8 +189,10 @@ def _write_header(lines: list[str]) -> None:
             f"pinghue {__version__} — environment check",
             "",
             "System",
-            f"  OS              {_os_label()}",
-            f"  Python          {platform.python_version()} ({sys.executable})",
+            # OS metadata (for example os-release in a container image) and the
+            # interpreter path are not PingHue-controlled text.
+            f"  OS              {sanitize_display(_os_label())}",
+            f"  Python          {platform.python_version()} ({sanitize_display(sys.executable)})",
             f"  Effective UID   {_uid_label()}",
             "",
         ]
@@ -216,6 +242,56 @@ def _write_linux_fix(lines: list[str], *, egid: int) -> None:
             "          command is a Python launcher script, and Linux ignores file",
             "          capabilities on interpreter scripts.",
             "",
+        ]
+    )
+
+
+def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
+    # Only TCP mode is bounded by the open-file limit: every in-flight TCP probe
+    # holds a socket, while ICMP probes share the ICMP engine's few sockets.
+    # Imported here because the CLI module imports this one at startup.
+    from pinghue.cli import CONCURRENCY_DEFAULT_MINIMUM, CONCURRENCY_MAXIMUM
+
+    lines.extend(["", "Open files"])
+    limit = read_fd_limit()
+    if limit is None:
+        lines.append(
+            f"  {_status(WARN, use_color=use_color)}  "
+            "Open-file limit not available on this platform"
+        )
+        return
+
+    needed = CONCURRENCY_MAXIMUM + FD_RESERVE
+    label = f"Open-file limit {fd_limit_label(limit.soft)} (hard {fd_limit_label(limit.hard)})"
+    if limit.soft is None or limit.soft >= needed:
+        lines.append(
+            f"  {_status(OK, use_color=use_color)}    "
+            f"{label} fits --concurrency up to {CONCURRENCY_MAXIMUM} in TCP mode"
+        )
+        return
+
+    raisable = FD_REQUEST_MAXIMUM if limit.hard is None else min(limit.hard, FD_REQUEST_MAXIMUM)
+    if raisable >= needed:
+        lines.append(
+            f"  {_status(OK, use_color=use_color)}    "
+            f"{label}; raised at startup to fit --concurrency up to {CONCURRENCY_MAXIMUM} "
+            "in TCP mode"
+        )
+        return
+
+    capacity = concurrency_capacity(raisable)
+    below_default = (
+        f", below the default minimum of {CONCURRENCY_DEFAULT_MINIMUM}"
+        if capacity < CONCURRENCY_DEFAULT_MINIMUM
+        else ""
+    )
+    lines.extend(
+        [
+            f"  {_status(WARN, use_color=use_color)}  "
+            f"{label} caps --concurrency at {capacity} in TCP mode{below_default}",
+            f"          Raise the hard limit to at least {needed} to allow "
+            f"--concurrency {CONCURRENCY_MAXIMUM} in TCP mode.",
+            "          ICMP probes share a few sockets and are not limited by it.",
         ]
     )
 
@@ -326,6 +402,8 @@ def run_check(
             f'getaddrinfo("{display_dns_name}") → '
             f"{sanitize_display(address or '')} ({dns_ms:.0f} ms)"
         )
+
+    _write_fd_limit(lines, use_color=use_color)
 
     if icmp_ready and is_root:
         exit_code = 0

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from pinghue.history import history_symbol, render_history
+from pinghue.history import render_history
 from pinghue.models import ProbeSample, SampleStatus
 
 
@@ -13,20 +13,21 @@ def make_sample(status: SampleStatus, latency_ms: float | None = None) -> ProbeS
     )
 
 
-def test_history_symbol_uses_fixed_latency_buckets() -> None:
-    assert history_symbol(make_sample(SampleStatus.OK, 0.5)) == "▁"
-    assert history_symbol(make_sample(SampleStatus.OK, 2.0)) == "▂"
-    assert history_symbol(make_sample(SampleStatus.OK, 9.0)) == "▃"
-    assert history_symbol(make_sample(SampleStatus.OK, 20.0)) == "▄"
-    assert history_symbol(make_sample(SampleStatus.OK, 75.0)) == "▅"
-    assert history_symbol(make_sample(SampleStatus.OK, 200.0)) == "▆"
-    assert history_symbol(make_sample(SampleStatus.OK, 700.0)) == "▇"
-    assert history_symbol(make_sample(SampleStatus.OK, 1200.0)) == "█"
+def test_render_history_uses_fixed_latency_buckets() -> None:
+    latencies = [0.5, 1.0, 2.0, 9.0, 20.0, 75.0, 200.0, 700.0, 1000.0, 1000.01, 1200.0]
+    samples = [make_sample(SampleStatus.OK, latency) for latency in latencies]
+
+    assert render_history(samples, width=len(samples), style="bar") == "▁▁▂▃▄▅▆▇▇██"
 
 
-def test_history_symbol_uses_distinct_failure_glyphs() -> None:
-    assert history_symbol(make_sample(SampleStatus.TIMEOUT)) == "·"
-    assert history_symbol(make_sample(SampleStatus.REFUSED)) == "!"
+def test_render_history_uses_distinct_failure_glyphs() -> None:
+    samples = [
+        make_sample(SampleStatus.TIMEOUT),
+        make_sample(SampleStatus.REFUSED),
+        make_sample(SampleStatus.ERROR),
+    ]
+
+    assert render_history(samples, width=3, style="bar") == "·!·"
 
 
 def test_render_history_uses_visible_width_from_tail() -> None:

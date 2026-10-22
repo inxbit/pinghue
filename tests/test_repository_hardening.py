@@ -296,6 +296,67 @@ def test_workflow_actions_are_pinned_to_full_commit_shas() -> None:
             assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", used), f"{path}: {used}"
 
 
+def workflow_run_scripts(workflow: str) -> list[str]:
+    """Return the shell text of every `run:` step, including block scalars."""
+    scripts: list[str] = []
+    lines = workflow.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*(?:- )?run: ?(.*)$", line)
+        if match is None:
+            continue
+        value = match.group(1)
+        if not value.startswith(("|", ">")):
+            scripts.append(value)
+            continue
+        key_indent = line.index("run:")
+        body: list[str] = []
+        for continuation in lines[index + 1 :]:
+            indent = len(continuation) - len(continuation.lstrip())
+            if continuation.strip() and indent <= key_indent:
+                break
+            body.append(continuation)
+        scripts.append("\n".join(body))
+    return scripts
+
+
+def test_workflow_run_steps_do_not_interpolate_expressions() -> None:
+    # `${{ }}` is substituted into the script text before the shell parses it;
+    # values must reach `run:` steps through environment variables instead.
+    run_step_count = 0
+    for path in sorted(Path(".github/workflows").glob("*.yml")):
+        scripts = workflow_run_scripts(path.read_text(encoding="utf-8"))
+        run_step_count += len(scripts)
+        for script in scripts:
+            assert script.strip(), path
+            assert "${{" not in script, f"{path}: {script}"
+
+    assert run_step_count >= 30
+    assert workflow_run_scripts("      - run: echo ${{ github.ref }}\n") == [
+        "echo ${{ github.ref }}"
+    ]
+    assert workflow_run_scripts(
+        "      - name: Example\n        run: |\n          echo one\n          echo ${{ x }}\n"
+        "      - name: Next\n"
+    ) == ["          echo one\n          echo ${{ x }}"]
+
+
+def test_workflows_keep_read_only_defaults_without_privileged_triggers_or_caches() -> None:
+    for path in sorted(Path(".github/workflows").glob("*.yml")):
+        workflow = path.read_text(encoding="utf-8")
+        # Untrusted pull-request code must never run with a write token or
+        # secrets, and release artifacts must not be built from a shared cache.
+        assert "pull_request_target" not in workflow, path
+        assert "workflow_run" not in workflow, path
+        assert "actions/cache" not in workflow, path
+        assert re.search(r"^\s+cache(?:-dependency-path)?:", workflow, re.MULTILINE) is None, path
+
+        defaults = re.search(r"^permissions:\n((?:  \S.*\n)+)", workflow, re.MULTILINE)
+        assert defaults is not None, path
+        grants = dict(line.strip().split(": ", 1) for line in defaults.group(1).splitlines())
+        assert grants.get("contents") == "read", path
+        assert set(grants.values()) == {"read"}, path
+
+
 def test_publish_workflow_revalidates_the_exact_tagged_commit() -> None:
     workflow = read(".github/workflows/publish.yml")
 
@@ -727,6 +788,7 @@ def _run_repository_hardening_check(
     allow_hidden_admin_settings: bool = False,
     api_failure_statuses: dict[str, int] | None = None,
     api_failure_bodies: dict[str, object] | None = None,
+    temp_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
@@ -869,6 +931,8 @@ else:
         environment["PINGHUE_ALLOW_HIDDEN_BYPASS_ACTORS"] = "1"
     if allow_hidden_admin_settings:
         environment["PINGHUE_ALLOW_HIDDEN_ADMIN_SETTINGS"] = "1"
+    if temp_dir is not None:
+        environment["TMPDIR"] = str(temp_dir)
 
     return subprocess.run(
         ["bash", "scripts/check-github-hardening.sh", "example/project"],
@@ -891,6 +955,34 @@ def _hosted_rulesets() -> tuple[dict[str, object], dict[str, object]]:
     for check in status_rule["parameters"]["required_status_checks"]:
         check["integration_id"] = 15368
     return main_ruleset, tag_ruleset
+
+
+def test_repository_hardening_check_keeps_api_responses_in_a_private_temp_directory(
+    tmp_path: Path,
+) -> None:
+    # A file name derived from a mktemp path (for example "<path>.body") is
+    # predictable to other users of a shared TMPDIR; responses stay inside a
+    # private mktemp -d directory that is removed after each call.
+    script = read("scripts/check-github-hardening.sh")
+    helper = script.split("read_api_response() {", 1)[1].split("\n}\n", 1)[0]
+    assert 'response_dir="$(mktemp -d "${TMPDIR:-/tmp}/pinghue-gh-api.XXXXXX")"' in helper
+    assert 'response_path="${response_dir}/response"' in helper
+    assert 'body_path="${response_dir}/body"' in helper
+    assert 'rm -rf -- "${response_dir}"' in helper
+    assert "${response_path}." not in helper
+
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    main_ruleset, tag_ruleset = _hosted_rulesets()
+    result = _run_repository_hardening_check(
+        tmp_path,
+        main_ruleset=main_ruleset,
+        tag_ruleset=tag_ruleset,
+        temp_dir=temp_dir,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert list(temp_dir.iterdir()) == []
 
 
 def test_repository_hardening_check_rejects_wrong_status_check_source(tmp_path: Path) -> None:

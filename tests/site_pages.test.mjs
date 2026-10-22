@@ -478,10 +478,10 @@ test('site.js scale and thresholds equal the pinghue source', () => {
   assert.equal(Number(js.match(/const JITTER_THRESHOLD = ([\d.]+);/)[1]), cliDefault('--jitter-threshold'));
   assert.equal(Number(js.match(/const FAIL_THRESHOLD = ([\d.]+);/)[1]), cliDefault('--fail-threshold'));
 
-  // Behaviour, not just text: every bucket edge maps the way history_symbol does.
+  // Behaviour, not just text: every bucket edge maps the way render_history_parts does.
   const history = read('src/pinghue/history.py');
-  assert.match(history, /return "█"\n/);
-  assert.match(history, /return "·"\n/);
+  assert.match(history, /_BAR_GLYPHS = "".join\(symbol for _, symbol in BAR_BUCKETS\) \+ "█"\n/);
+  assert.match(history, /glyphs\.append\("·"\)\n/);
   const site = loadSiteModule();
   buckets.forEach(([limit, glyph], i) => {
     assert.equal(site.glyphFor(limit), glyph, 'glyph at ' + limit + 'ms');
@@ -510,7 +510,7 @@ test('the printed scale on the page is the real scale', () => {
   ]);
   assert.match(ruler[1], /<li class="ruler-mark"><span class="bars"><i class="fail"><\/i><\/span><span class="band">lost, down<\/span><\/li>/);
   assert.match(ruler[1], /<li class="ruler-mark"><span class="bars"><i class="refused"><\/i><\/span><span class="band">TCP refused<\/span><\/li>/);
-  assert.match(read('src/pinghue/history.py'), /REFUSED:\n\s*return "!"/);
+  assert.match(read('src/pinghue/history.py'), /REFUSED:\n\s*glyphs\.append\("!"\)/);
   assert.match(html, new RegExp('Green until ' + slow + '&nbsp;ms, amber past it\\.'));
 });
 

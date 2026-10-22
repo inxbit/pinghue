@@ -104,13 +104,17 @@ requires the next major release; it must not ship as a patch or minor version.
 
 | Area | Resolution |
 | --- | --- |
-| TCP evidence accuracy | Records connect latency before close, suppresses teardown resets after success, and preserves the primary-address failure when all failovers fail. |
+| TCP evidence accuracy | Records connect latency before close (on Linux, the kernel handshake RTT unless the SYN was retransmitted), closes the socket without waiting for teardown after success, and preserves the primary-address failure when all failovers fail. |
 | Cancellation | Absolute duration and signal deadlines include startup work, cancel active resolution/probe work, preserve ordered placeholders/sample budgets, and print probes completed just before shutdown. |
-| ICMP concurrency | Uses a bounded reusable daemon worker pool with capacity recovery instead of serial one-thread-per-call behavior. |
+| ICMP concurrency | Runs every ICMP probe on the event loop over a few shared non-blocking datagram sockets per address family (no per-probe threads or file descriptors); replies must match sequence, source address, and a random per-probe token, so other ICMP traffic on the host cannot mark a down target up. |
 | Long-run state | Maintains whole-run counters/statistics, latches loss and peak jitter, and keeps consecutive-failure classification beyond the retained tail. |
 | Resource bounds | Caps unique targets at 5,000, per-target retained samples at 1,000, and run-wide retained samples at 100,000. |
 | DNS behavior | Uses monotonic cooldown timing and refreshes stale results after repeated all-address failures. |
 | Output paths | Refuses symlinks, sockets, unsupported nodes, and multiply linked regular files; verifies direct character-device/FIFO descriptors, restores blocking FIFO writes, sanitizes resolved addresses, and cleans fallbacks on handled interrupts. |
+| Output ownership | Refuses FIFOs and `--overwrite` targets that are not owned by the effective user, as observed and as opened, so a path pre-created by another local user in a shared sticky directory cannot receive the report; in the default `private` output mode also refuses a FIFO whose permission bits give group or other users access (such as the `0644` that `mkfifo` creates under umask `022`), except a pipe named by a macOS `/dev/fd/N` path, such as process substitution passes, while a named FIFO behind such a path is judged by its own bits; character devices remain allowed except the driverless Linux `0:0` whiteout device, the only one an unprivileged user can create. The CLI applies the same rules before probing starts, so a refused path fails at the start of the run, not at exit. |
+| Host-file lines | Splits only on `\n`, `\r\n`, or a lone `\r`, so control and Unicode line separators stay inside the value for target validation instead of creating extra targets or skewing line numbers and the line limit. |
+| Doctor output | Escapes OS release metadata, the interpreter path, and ICMP socket and probe errors before printing them. |
+| Workflow scripts | Workflow `run:` steps receive values through environment variables only; tests reject inline `${{ }}` expressions in scripts, privileged pull-request/workflow-run triggers, dependency caches, and non-read default token permissions. The hosted-hardening check keeps API responses in a private temporary directory. |
 | Launcher metadata | Validates editable-install metadata and local URLs, handles malformed/non-UTF-8 metadata cleanly, and removes failed fallback paths. |
 | Doctor guidance | Reports the actual ICMP datagram-socket check and gives platform-specific, least-privilege remediation. |
 | TUI/site consistency | Keeps whole-run intermittent state, loss/refusal history, legends, thresholds, example percentages, and copy feedback synchronized. |
@@ -133,7 +137,9 @@ requires the next major release; it must not ship as a patch or minor version.
 - DNS and network work use bounded concurrency and timeouts; per-target failures
   are contained instead of terminating the run.
 - Operator-controlled terminal and JSON strings are centrally sanitized.
-- Reports default to owner-only mode and no-clobber creation.
+- Reports default to owner-only mode and no-clobber creation, and are never
+  written into a FIFO or rewritten file owned by another user, nor, in the
+  default private mode, into a FIFO that other users can open.
 - Runtime code has no `subprocess`, `os.system`, `eval`, `exec`, pickle,
   unsafe YAML, XML, SQL, HTTP server, or inbound-listener sink.
 - CI uses read-only default permissions and non-persisted checkout credentials.
