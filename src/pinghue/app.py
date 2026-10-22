@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,11 +27,13 @@ from pinghue.ui import (
     CELL_PADDING,
     COLUMN_KEYS,
     SCROLLBAR_WIDTH,
+    VIEWPORT_MARGIN_ROWS,
+    TargetTable,
+    TargetTableRenderer,
     apply_column_widths,
     compute_table_layout,
     focus_table,
     format_history_legend,
-    sync_target_table,
 )
 
 SLOW_LATENCY_MS = 100.0
@@ -109,14 +112,20 @@ class PinghueTextualApp(App[None]):
         self._deadline_task: asyncio.Task[None] | None = None
         self._completion_task: asyncio.Task[None] | None = None
         self._immediate_events: list[asyncio.Event] = []
-        self._table_initialized = False
-        self._cell_cache: dict[tuple[str, str], object] = {}
+        self._table_renderer = TargetTableRenderer(
+            mode=mode.value,
+            history_style=args.history_style,
+            jitter_threshold_ms=args.jitter_threshold,
+            slow_latency_ms=SLOW_LATENCY_MS,
+        )
+        self._last_full_refresh = float("-inf")
+        self._watching_scroll = False
         self._column_widths: dict[str, int] = {}
         self._finishing = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield DataTable(id="targets")
+        yield TargetTable(id="targets")
         if self.args_config.history_style != "none":
             yield Static(
                 format_history_legend(self.args_config.history_style),
@@ -281,6 +290,16 @@ class PinghueTextualApp(App[None]):
             scrollbar_width=getattr(styles, "scrollbar_size_vertical", SCROLLBAR_WIDTH),
         )
 
+    def _priority_rows(self, table: DataTable[Any]) -> range:
+        """Return the rows on screen plus a small margin, refreshed every pass."""
+        if not isinstance(table, DataTable):
+            return range(len(self.targets))
+        top = int(table.scroll_y)
+        return range(
+            max(0, top - VIEWPORT_MARGIN_ROWS),
+            top + table.size.height + VIEWPORT_MARGIN_ROWS,
+        )
+
     def _refresh_table(self, width: int | None = None) -> None:
         try:
             table = self.query_one("#targets", DataTable)
@@ -290,18 +309,35 @@ class PinghueTextualApp(App[None]):
         if column_widths != self._column_widths:
             apply_column_widths(table, column_widths)
             self._column_widths = column_widths
+        self._table_renderer.set_layout(show_address=self.show_address, widths=column_widths)
+        if not self._watching_scroll and isinstance(table, DataTable):
+            # Rows scrolled into view are refreshed before they are painted.
+            self.watch(table, "scroll_y", self._refresh_visible_rows, init=False)
+            self._watching_scroll = True
 
-        self._table_initialized = sync_target_table(
+        # Back-to-back calls (key actions, resolution) refresh only the
+        # viewport; the timer pass does the rest.
+        now = time.perf_counter()
+        full = now - self._last_full_refresh >= UI_REFRESH_INTERVAL / 2
+        if full:
+            self._last_full_refresh = now
+        self._table_renderer.sync(
             table,
             self.targets,
-            initialized=self._table_initialized,
-            show_address=self.show_address,
-            mode=self.mode.value,
-            history_width=self._column_widths["history"],
-            history_style=self.args_config.history_style,
-            jitter_threshold_ms=self.args_config.jitter_threshold,
-            slow_latency_ms=SLOW_LATENCY_MS,
-            cell_cache=self._cell_cache,
+            priority=self._priority_rows(table),
+            full=full,
+        )
+
+    def _refresh_visible_rows(self) -> None:
+        try:
+            table = self.query_one("#targets", DataTable)
+        except NoMatches:
+            return
+        self._table_renderer.sync(
+            table,
+            self.targets,
+            priority=self._priority_rows(table),
+            full=False,
         )
 
     def on_resize(self, event: Resize) -> None:

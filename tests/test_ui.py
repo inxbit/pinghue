@@ -196,6 +196,19 @@ def test_focus_table_restores_keyboard_navigation_target() -> None:
     assert table.focused is True
 
 
+def test_focus_table_leaves_a_focused_table_alone() -> None:
+    # Widget.focus() repaints the whole table, and arrow keys call this.
+    class FocusedTable:
+        has_focus = True
+
+        def focus(self) -> None:
+            raise AssertionError("an already focused table must not be refocused")
+
+    table = FocusedTable()
+
+    assert focus_table(table) is table
+
+
 def test_restore_cursor_row_preserves_selected_host_after_refresh() -> None:
     class FakeTable:
         def __init__(self) -> None:
