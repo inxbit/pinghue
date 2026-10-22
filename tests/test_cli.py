@@ -132,11 +132,15 @@ def test_parse_args_leaves_output_overwrite_off_by_default() -> None:
 
 
 def test_main_reports_output_write_errors_without_traceback(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     async def fake_run(*_: object, **__: object) -> int:
         raise FileExistsError("output file already exists")
+
+    # The pre-run output check needs a writable working directory.
+    monkeypatch.chdir(tmp_path)
 
     import pinghue.runner as runner
 
@@ -486,12 +490,15 @@ def test_parse_args_sanitizes_host_file_error_control_bytes(
 
 
 def test_main_sanitizes_control_chars_in_error_output(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # L10: the top-level OSError handler must escape control bytes from exception text.
     async def fake_run(*_: object, **__: object) -> int:
         raise FileExistsError("output file already exists: \x1bbad")
+
+    monkeypatch.chdir(tmp_path)
 
     import pinghue.runner as runner
 
