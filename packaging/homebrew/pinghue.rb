@@ -17,6 +17,11 @@ class Pinghue < Formula
 
   depends_on "python@3.13"
 
+  resource "icmplib" do
+    url "https://files.pythonhosted.org/packages/6d/78/ca07444be85ec718d4a7617f43fdb5b4eaae40bc15a04a5c888b64f3e35f/icmplib-3.0.4.tar.gz"
+    sha256 "57868f2cdb011418c0e1d5586b16d1fabd206569fe9652654c27b6b2d6a316de"
+  end
+
   resource "linkify-it-py" do
     url "https://files.pythonhosted.org/packages/2e/c9/06ea13676ef354f0af6169587ae292d3e2406e212876a413bf9eece4eb23/linkify_it_py-2.1.0.tar.gz"
     sha256 "43360231720999c10e9328dc3691160e27a718e280673d444c38d7d3aaa3b98b"
