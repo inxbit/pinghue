@@ -6,6 +6,12 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Breaking
+
+- `--output` now refuses an existing FIFO owned by another user, and `--overwrite` refuses an existing regular file owned by another user, including when PingHue runs as root (for example `sudo pinghue --output ~/report.json --overwrite`). Run as the owner of the path or write a new report instead.
+- Host files whose lines end with a lone `\r` (classic Mac OS line endings) are now read as one line, which is rejected as an invalid target. Convert such files to `\n` or `\r\n` line endings.
+- Both changes invoke the documented security exception to the deprecation window and require the next major release.
+
 ### Security
 
 - `--output` no longer writes into an existing FIFO owned by another user, and `--overwrite` refuses an existing regular file owned by another user. Both checks apply to the node as observed and as opened, exit with status `1`, and write nothing. In a shared sticky directory such as `/tmp`, another local user can no longer pre-create the report path to receive the report. Character devices are still accepted whoever owns them, except the driverless Linux `0:0` whiteout device, the only one an unprivileged user can create, which is now refused.
