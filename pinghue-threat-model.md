@@ -152,7 +152,8 @@ supports that operation. Otherwise it uses an exclusive create and copy;
 handled failures clean up, but an abrupt termination can leave a partial new
 file. Symlinks, sockets, unsupported special nodes, and multiply linked regular
 files are not replaced. Existing character devices and FIFOs are written only
-after the opened descriptor matches the observed node.
+after the opened descriptor matches the observed node, except a macOS
+`/dev/fd/N` path, whose opened descriptor is judged on its own (see below).
 
 In a shared sticky directory another local user can create the report path
 first. A FIFO is written only when the effective user owns it, both as
@@ -168,14 +169,23 @@ reader that opened the FIFO, or was blocked waiting to open it, while group or
 other users had access, and PingHue then delivers the report to that reader.
 A FIFO that was ever open to group or other users must be removed and
 recreated with `mkfifo -m 600` rather than fixed with `chmod`. On macOS a
-`/dev/fd/N` path, as passed by process substitution, stats as the run's own
-descriptor, with mode bits that describe the descriptor rather than a node (a
-pipe reports `0660`); no other user can open that descriptor through the path,
-so its bits are not judged. The check reads permission bits only: on Linux
-they reflect any POSIX ACL mask, but a macOS ACL can grant access that the
-bits do not show. Character devices remain accepted regardless of owner
-because the only one an unprivileged user can create is the Linux `0:0`
-whiteout device, which has no driver and is refused.
+`/dev/fd/N` path names the run's own descriptor N, and opening it duplicates
+that descriptor, which no other process can replace; `lstat` of the path
+reports the device of `/dev` rather than the open file's, so PingHue judges
+the opened descriptor itself instead of matching the two. A pipe, as passed
+by process substitution, has no links (`st_nlink` 0) and fixed mode bits:
+`fstat` reports `0660`, and `lstat` of the path `0660` less the access the
+descriptor lacks, `0220` for a write end. No other user can open a pipe by
+name, so a pipe named that way is accepted whatever its bits. A named FIFO
+behind the descriptor keeps its link count of at least 1 and `fstat` reports
+its own mode, so it is judged like any other FIFO; because `lstat` hides the
+access a write-only descriptor lacks (a `0644` FIFO lists as `0200`), the
+pre-run check also opens the path, which only duplicates the descriptor. The
+check reads permission bits only: on Linux they reflect any POSIX ACL mask,
+but a macOS ACL can grant access that the bits do not show. Character devices
+remain accepted regardless of owner because the only one an unprivileged user
+can create is the Linux `0:0` whiteout device, which has no driver and is
+refused.
 These refusals exit with status 1, write nothing, and leave no temporary file
 behind. The CLI runs the same type, link-count, ownership, and FIFO-permission
 checks, plus write-permission checks on an existing node and on the nearest
@@ -268,7 +278,7 @@ release gate.
 | TM-001 | Terminal/control-character injection | Central sanitization and adversarial rendering tests | A future output caller could omit sanitization | Low |
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
 | TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and line splitting only at `\n`, `\r\n`, or a lone `\r` | Same-user content modification remains possible | Low |
-| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, owner-only FIFO permissions in private mode, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report; `--output-mode umask` or a macOS ACL can still let other users read a FIFO; a `chmod` does not revoke a reader that opened, or was waiting to open, a FIFO while its bits gave group or other users access | Medium |
+| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, owner-only FIFO permissions in private mode, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report; `--output-mode umask` or a macOS ACL can still let other users read a FIFO; on macOS a pipe named by `/dev/fd/N`, or a FIFO behind such a path after its last name is removed, is accepted whatever its bits; a `chmod` does not revoke a reader that opened, or was waiting to open, a FIFO while its bits gave group or other users access | Medium |
 | TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats, token-matched ICMP replies, random ICMP sequence numbers | Remote routing/DNS state is inherently external; forged ICMP errors with short quotes can mark a probe `unreachable` | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
@@ -282,7 +292,8 @@ release gate.
 - Target, file, resolver, probe, and retained-sample bounds stay enforced.
 - Host input and existing output nodes are validated by opened descriptor.
 - Existing FIFOs and `--overwrite` targets must be owned by the effective user,
-  and in private mode an existing FIFO must give group and other users no access.
+  and in private mode an existing FIFO must give group and other users no access
+  (a pipe named by a macOS `/dev/fd/N` path excepted).
 - Existing output files remain no-clobber by default.
 - Release actions remain full-SHA pinned and checkout credentials are not
   persisted.
