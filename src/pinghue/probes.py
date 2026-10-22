@@ -24,9 +24,6 @@ MAX_FAILOVER_ADDRESSES = 8
 MAX_DNS_DAEMON_THREADS = 128
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
 
-# A clean TCP close finishes on the next loop iteration; this only bounds a
-# teardown that stalls after the connect was already measured.
-TCP_CLOSE_TIMEOUT_SECONDS = 1.0
 # Linux struct tcp_info: tcpi_rtt (smoothed RTT, microseconds) at offset 68 and
 # tcpi_total_retrans at offset 100.
 _TCP_INFO = getattr(socket, "TCP_INFO", None) if sys.platform.startswith("linux") else None
@@ -331,7 +328,20 @@ async def resolve_target(
     return ResolvedTarget(target, addresses[0], family, addresses=addresses)
 
 
-def _kernel_connect_rtt_ms(writer: asyncio.StreamWriter) -> float | None:
+def _open_tcp_socket(address: str) -> socket.socket:
+    """Return a non-blocking TCP socket of the IP literal's family."""
+    # Of the IP literals, only IPv6 ones contain a colon.
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        sock.setblocking(False)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
+def _kernel_connect_rtt_ms(sock: socket.socket) -> float | None:
     """Return the kernel's handshake RTT when it covers the whole connect.
 
     tcpi_rtt only reflects the last SYN exchange, so after a SYN retransmission
@@ -340,13 +350,10 @@ def _kernel_connect_rtt_ms(writer: asyncio.StreamWriter) -> float | None:
     if _TCP_INFO is None:
         return None
     try:
-        sock = writer.get_extra_info("socket")
-        if sock is None:
-            return None
         info = sock.getsockopt(socket.IPPROTO_TCP, _TCP_INFO, _TCP_INFO_SIZE)
         (rtt_us,) = struct.unpack_from("=I", info, _TCP_INFO_RTT_OFFSET)
         (total_retrans,) = struct.unpack_from("=I", info, _TCP_INFO_TOTAL_RETRANS_OFFSET)
-    except (AttributeError, OSError, TypeError, struct.error):
+    except (OSError, TypeError, struct.error):
         return None
     if total_retrans or rtt_us <= 0:
         return None
@@ -354,24 +361,26 @@ def _kernel_connect_rtt_ms(writer: asyncio.StreamWriter) -> float | None:
 
 
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:
-    """Probe a TCP port with asyncio.open_connection.
+    """Probe a TCP port by connecting a non-blocking socket on the event loop.
+
+    Only the handshake is measured, so no stream is opened on the connection:
+    the socket is closed as soon as the connect is measured, which takes fewer
+    loop turns than a stream and leaves no teardown to wait for.
 
     The connect time is measured on the event loop, so it also counts any
     time the loop was busy elsewhere. On Linux the kernel's handshake RTT
     replaces it when that is smaller and no SYN was retransmitted.
     """
     timestamp = datetime.now(timezone.utc)
+    loop = asyncio.get_running_loop()
     start = time.perf_counter()
-    writer: asyncio.StreamWriter | None = None
+    sock: socket.socket | None = None
 
     try:
-        _, connected = await asyncio.wait_for(
-            asyncio.open_connection(address, port),
-            timeout=timeout_s,
-        )
-        writer = connected
+        sock = _open_tcp_socket(address)
+        await asyncio.wait_for(loop.sock_connect(sock, (address, port)), timeout=timeout_s)
         latency_ms = (time.perf_counter() - start) * 1000
-        kernel_rtt_ms = _kernel_connect_rtt_ms(connected)
+        kernel_rtt_ms = _kernel_connect_rtt_ms(sock)
         if kernel_rtt_ms is not None:
             latency_ms = min(latency_ms, kernel_rtt_ms)
         latency_ms = round(latency_ms, 2)
@@ -393,14 +402,10 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
             error=str(exc),
         )
     finally:
-        if writer is not None:
-            writer.close()
-            # Once connect() succeeds, teardown is no longer part of the probe
-            # result. Preserve the measured success when shutdown cancels or a
-            # slow wait_closed() outlasts the bound; cancellation before connect
-            # still propagates.
-            with contextlib.suppress(OSError, asyncio.CancelledError, asyncio.TimeoutError):
-                await asyncio.wait_for(writer.wait_closed(), timeout=TCP_CLOSE_TIMEOUT_SECONDS)
+        # Closing never waits: the socket is non-blocking and does not linger.
+        # A cancellation during the connect still propagates.
+        if sock is not None:
+            sock.close()
 
     return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)
 

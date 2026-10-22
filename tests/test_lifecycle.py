@@ -116,9 +116,10 @@ async def test_run_no_tui_deadline_ends_a_loop_whose_probe_swallows_the_cancel(
     capsys: pytest.CaptureFixture[str],
     task_cancelling: bool,
 ) -> None:
-    # tcp_probe keeps a measured success when shutdown cancels its close
-    # teardown. That swallowed cancel must not keep the loop probing past the
-    # deadline (the run never returned and --output was never written).
+    # A probe may swallow the cancel that shutdown sends it and return a
+    # success measured before the stop. That swallowed cancel must not keep
+    # the loop probing past the deadline (the run never returned and --output
+    # was never written).
     installed = capture_stop_event(monkeypatch)
     if not task_cancelling:
         # As on Python 3.10, where Task.cancelling() does not exist: only the
@@ -130,7 +131,7 @@ async def test_run_no_tui_deadline_ends_a_loop_whose_probe_swallows_the_cancel(
         nonlocal probes
         probes += 1
         with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.sleep(0.5)  # slow close teardown
+            await asyncio.sleep(0.5)  # slow work that outlives the deadline
         return ok_sample()
 
     monkeypatch.setattr(runner, "resolve_run_target", lambda target, _args: resolve_at_once(target))
@@ -146,24 +147,18 @@ async def test_run_no_tui_deadline_ends_a_loop_whose_probe_swallows_the_cancel(
     assert capsys.readouterr().out.count(" ok latency=1.00ms") == 1
 
 
-async def test_run_no_tui_deadline_ends_while_a_tcp_close_outlives_it(
+async def test_run_no_tui_deadline_ends_a_real_tcp_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The same hang through the real TCP probe: the deadline lands while the
-    # connection's close teardown is still pending.
+    # The same deadline through the real TCP probe, against a peer that
+    # closes every connection it accepts.
     installed = capture_stop_event(monkeypatch)
-    close_wait = asyncio.StreamWriter.wait_closed
-
-    async def slow_wait_closed(self: asyncio.StreamWriter) -> None:
-        await asyncio.sleep(0.5)
-        await close_wait(self)
 
     async def close_at_once(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         writer.close()
 
     server = await asyncio.start_server(close_at_once, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(asyncio.StreamWriter, "wait_closed", slow_wait_closed)
     try:
         run_task = asyncio.create_task(
             run_no_tui(
