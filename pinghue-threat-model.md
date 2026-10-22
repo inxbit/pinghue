@@ -243,7 +243,7 @@ A tag-triggered workflow can publish trusted artifacts. The build job verifies
 the package version, annotated tag name, cryptographic verification, direct
 commit target, event SHA, and protected-main ancestry before building. A
 separate job reruns Ruff, Mypy, and coverage-gated tests on the exact tagged
-commit, while a Python 3.10/3.13 matrix audits all three hash locks. Publishing
+commit, while a Python 3.11/3.13 matrix audits all three hash locks. Publishing
 uses a protected environment, OIDC, and artifact attestations without
 repository-write permission, and revalidates the live tag identity and target
 immediately before PyPI. Both exact artifacts are installed and exercised

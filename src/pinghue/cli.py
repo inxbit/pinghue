@@ -46,8 +46,7 @@ class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         # A stderr closed at startup is None, and argparse would print the usage
         # synopsis to stdout (print_usage(None) means stdout), into the line
-        # output or a pipeline; on Python 3.10 it then fails writing the error
-        # line and exits 1. Exit with the usage status and print nothing.
+        # output or a pipeline. Exit with the usage status and print nothing.
         if sys.stderr is None:
             self.exit(2)
         super().error(message)

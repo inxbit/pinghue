@@ -22,7 +22,7 @@ No source claims an advantage over another tool: other tools appear only in the 
 
 ## Operating Context
 
-- Where it runs: a terminal on macOS or Linux with Unicode glyphs, Python 3.10 to 3.14.
+- Where it runs: a terminal on macOS or Linux with Unicode glyphs, Python 3.11 to 3.14.
 - Getting it: `uv tool install pinghue` or `pipx install pinghue`, `python -m pip install pinghue` inside a virtual environment (`python -m pinghue` also runs it), or `brew install inxbit/tap/pinghue`.
 - Before relying on ICMP: `pinghue --check`. On Linux, unprivileged ICMP may need `net.ipv4.ping_group_range` opened to the user's group; TCP mode (`-p PORT`) needs no privileges.
 - During the window: targets as arguments or in a host file (`-f`); the TUI to watch, with `r`/`R` to reset and `b`/`B` to probe at once; `--no-tui` for scripts, cron, CI and smoke tests, with `--count` or `--duration`, `--output`, and `--fail-on-any-down` or `--fail-on-all-down` for exit code `3`.
@@ -60,7 +60,7 @@ Product facts below summarize `README.md` and `src/pinghue`, which stay authorit
 - Latency scale: one glyph per probe on fixed bands (up to 1, 3, 10, 30, 100, 300 and 1000 ms, then above) that never rescale; latency above 100 ms reads as slow. `·` marks a failed probe and `!` a TCP refusal.
 - Report: `--output PATH` writes one `schema_version: 1` JSON run summary at exit. `stats` cover every probe and `samples` keep the recent tail (at most 1,000 per target). Files are `0600` by default and never replaced without `--overwrite`. A FIFO owned by another user is never written, nor, unless `--output-mode umask` is given, a FIFO that group or other users can open; `--overwrite` never rewrites a file owned by another user; and a path that would be refused fails before probing starts.
 - Exit codes: `0` completed, `1` runtime error or `--check` not ready, `2` usage error, `3` a `--fail-on-any-down` or `--fail-on-all-down` condition (a host the run never probed counts as down). `SIGTERM` and `SIGHUP` end a run as `interrupted`, with the report still written.
-- Runtime: macOS and Linux on Python 3.10 to 3.14; Windows is outside the contract. Python 3.10 support ends in the next major release after its October 2026 end of life. Configuration is flags only: no config file, and pinghue reads no environment variables of its own (the Textual TUI honors `NO_COLOR`).
+- Runtime: macOS and Linux on Python 3.11 to 3.14; Windows is outside the contract. Python 3.10 support ended in 6.0.0, after its October 2026 end of life. Configuration is flags only: no config file, and pinghue reads no environment variables of its own (the Textual TUI honors `NO_COLOR`).
 - Network: no traffic beyond the operator's probes and OS DNS lookups. The code holds no telemetry, analytics or update check; that is a code fact, not a published promise.
 - Terminology: `target` in the CLI and JSON, `host` in the TUI and prose. Name casing in use: `pinghue` for the command, package and prose, `PingHUE v<version>` in the TUI title, `PingHue` in the threat model and security report; no canonical prose casing is decided.
 - Identity: author and copyright holder `inxbit` (person or organization is not on record); MIT license.
