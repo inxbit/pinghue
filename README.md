@@ -205,7 +205,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `-n, --numeric` | off | Skip DNS and require IP literals. |
 | `-i, --interval SEC` | `1.0` | Seconds between probes. Minimum: `0.1`. |
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
-| `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. Intentionally has no upper bound. |
+| `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. A probe that could not run because no resolver thread was free does not count. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. |

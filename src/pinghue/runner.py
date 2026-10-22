@@ -584,7 +584,12 @@ async def probe_target_loop(
         if on_sample is not None:
             on_sample(target, sample)
 
-        probes_completed += 1
+        # An iteration in which no lookup could run (every resolver thread
+        # busy) leaves the target pending with no verdict and does not count
+        # toward --count, so the host is still looked up and probed. A DNS
+        # verdict (dns_failure) and a probe result both count.
+        if sample is not None or target.status != TargetStatus.RESOLVING:
+            probes_completed += 1
         if probe_limit is not None and probes_completed >= probe_limit:
             return
 

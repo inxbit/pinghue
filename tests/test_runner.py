@@ -1050,6 +1050,107 @@ async def test_probe_loop_retries_resolver_capacity_miss_without_dns_cooldown(
     assert target.resolved_address == "192.0.2.60"
 
 
+async def test_count_does_not_spend_probes_on_resolver_capacity_misses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def busy_then_resolved(name: str, *_: object, **__: object) -> ResolvedTarget:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ResolverBusyError("all resolver threads are busy")
+        return ResolvedTarget(name, "192.0.2.61", AddressFamily.IPV4, addresses=("192.0.2.61",))
+
+    monkeypatch.setattr(runner, "resolve_target", busy_then_resolved)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    target = TargetRun(target="count.example", status=TargetStatus.RESOLVING)
+    seen: list[ProbeSample | None] = []
+
+    await asyncio.wait_for(
+        runner.probe_target_loop(
+            target,
+            args=build_args(count=1, interval=0.05, targets=["count.example"]),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=asyncio.Event(),
+            immediate_event=asyncio.Event(),
+            initial_delay=0.0,
+            on_sample=lambda _target, sample: seen.append(sample),
+        ),
+        timeout=5.0,
+    )
+
+    # Two iterations found no resolver thread and ran no lookup; only the
+    # probe after the third lookup counts toward -c 1.
+    assert attempts == 3
+    assert seen[:2] == [None, None]
+    assert [sample.status for sample in seen[2:] if sample is not None] == [SampleStatus.OK]
+    assert len(seen) == 3
+    assert target.status == TargetStatus.HEALTHY
+    assert len(target.samples) == 1
+
+
+async def test_count_still_counts_dns_failure_verdicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unresolvable(name: str, *_: object, **__: object) -> ResolvedTarget:
+        return ResolvedTarget(name, None, None, "getaddrinfo: Name or service not known")
+
+    monkeypatch.setattr(runner, "resolve_target", unresolvable)
+    target = TargetRun(target="nx.example", status=TargetStatus.RESOLVING)
+    seen: list[ProbeSample | None] = []
+
+    # A verdict, and the cooldown iterations after it, still count, so -c ends
+    # for a name that does not resolve.
+    await asyncio.wait_for(
+        runner.probe_target_loop(
+            target,
+            args=build_args(count=2, interval=0.05, targets=["nx.example"]),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=asyncio.Event(),
+            immediate_event=asyncio.Event(),
+            initial_delay=0.0,
+            on_sample=lambda _target, sample: seen.append(sample),
+        ),
+        timeout=5.0,
+    )
+
+    assert seen == [None, None]
+    assert target.status == TargetStatus.DNS_FAILURE
+
+
+def _loopback_getaddrinfo(*_: object, **__: object) -> list[object]:
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+
+
+async def test_run_no_tui_count_waits_for_a_free_resolver_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Every resolver thread is held (lookups stuck elsewhere) when the run
+    # starts. Those iterations used to use up -c 1, so the run ended
+    # "completed" with the host never looked up, probed or printed.
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(probes, "_dns_thread_slots", slots)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 0.02)
+    monkeypatch.setattr(socket, "getaddrinfo", _loopback_getaddrinfo)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    asyncio.get_running_loop().call_later(0.3, slots.release)
+    args = build_args(targets=["busy.count.test"], count=1, duration=None, interval=0.05)
+
+    runs, exit_reason, _, _ = await asyncio.wait_for(
+        runner.run_no_tui(args, ProbeMode.ICMP), timeout=5.0
+    )
+
+    assert exit_reason == "completed"
+    assert runs[0].status == TargetStatus.HEALTHY
+    assert runs[0].stats.sent == 1
+    assert capsys.readouterr().out.count("busy.count.test ok") == 1
+
+
 async def test_resolver_thread_start_failures_retry_at_a_bounded_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

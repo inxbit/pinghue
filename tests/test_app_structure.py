@@ -1,6 +1,8 @@
 import asyncio
 import os
 import signal
+import socket
+import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -9,6 +11,8 @@ from typing import Any
 import pytest
 
 import pinghue.app as app_module
+import pinghue.probes as probes_module
+import pinghue.runner as runner_module
 from pinghue.app import PinghueApp, PinghueTextualApp
 from pinghue.models import (
     MAX_TOTAL_RETAINED_SAMPLES,
@@ -632,6 +636,52 @@ async def test_tui_marks_a_row_whose_probe_loop_dies(monkeypatch) -> None:
 
     assert app.targets[0].error == "Unexpected probe loop error: loop bug"
     assert app.targets[1].status == TargetStatus.RESOLVING
+    await app.on_unmount()
+
+
+async def test_tui_count_waits_for_a_free_resolver_thread(monkeypatch) -> None:
+    # Every resolver thread is held (lookups stuck elsewhere) when the run
+    # starts. Those iterations used to use up -c 1, so the TUI finished
+    # "completed" with the host never looked up or probed.
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(probes_module, "_dns_thread_slots", slots)
+    monkeypatch.setattr(probes_module, "DNS_THREAD_WAIT_SECONDS", 0.02)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))],
+    )
+
+    async def ok_probe(*_: Any, **__: Any) -> ProbeSample:
+        return ProbeSample(
+            timestamp=datetime.now(timezone.utc),
+            latency_ms=1.0,
+            status=SampleStatus.OK,
+        )
+
+    monkeypatch.setattr(runner_module, "_probe_address", ok_probe)
+    app = PinghueTextualApp(
+        args=build_args(targets=["busy.tui-count.test"], count=1, interval=0.05),
+        mode=ProbeMode.ICMP,
+    )
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=app_module.resolve_run_target,
+        probe_loop=app_module.probe_target_loop,
+    )
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.3, slots.release)
+
+    await app.on_mount()
+    deadline = loop.time() + 5.0
+    while app.exit_reason != "completed" and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+
+    assert app.exit_reason == "completed"
+    assert app.targets[0].status == TargetStatus.HEALTHY
+    assert app.targets[0].stats.sent == 1
     await app.on_unmount()
 
 
