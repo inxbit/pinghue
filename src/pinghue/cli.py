@@ -9,6 +9,7 @@ import math
 import sys
 import unicodedata
 from pathlib import Path
+from typing import NoReturn
 
 from pinghue import __version__
 from pinghue.config import RunConfig
@@ -41,8 +42,19 @@ def _output_path(value: str) -> Path:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        # A stderr closed at startup is None, and argparse would print the usage
+        # synopsis to stdout (print_usage(None) means stdout), into the line
+        # output or a pipeline; on Python 3.10 it then fails writing the error
+        # line and exits 1. Exit with the usage status and print nothing.
+        if sys.stderr is None:
+            self.exit(2)
+        super().error(message)
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="pinghue",
         formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=32),
         description="Colored, concurrent ICMP/TCP ping monitor for the terminal.",

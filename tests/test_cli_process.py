@@ -296,3 +296,27 @@ def test_a_refused_output_path_is_not_reported_on_stdout_when_stderr_is_closed(
 
     assert result.returncode == 1
     assert result.stdout == b""
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [("--no-tui", "--output", "-", "--interval", "0"), ("--output", "-", "--count", "1")],
+    ids=["invalid-value", "output-dash-without-no-tui"],
+)
+def test_a_usage_error_prints_nothing_on_stdout_when_stderr_is_closed(
+    arguments: tuple[str, ...],
+) -> None:
+    # argparse printed its usage synopsis on stdout, so a pipeline into a JSON
+    # reader got usage text; Python 3.10 also exited 1 instead of 2.
+    result = subprocess.run(
+        _cli_command(*arguments),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        env=_cli_env(),
+        preexec_fn=lambda: os.close(2),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == b""

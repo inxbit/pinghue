@@ -282,6 +282,21 @@ def test_main_drops_its_messages_when_stderr_is_closed(
     assert capsys.readouterr().out == ""
 
 
+def test_parse_args_usage_error_prints_nothing_when_stderr_is_closed(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # argparse prints the usage synopsis with print_usage(sys.stderr), and a
+    # stderr of None makes that stdout, which may feed a pipeline.
+    monkeypatch.setattr(sys, "stderr", None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--interval", "0", "127.0.0.1"])
+
+    assert excinfo.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
 def test_main_accepts_new_output_path_and_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
