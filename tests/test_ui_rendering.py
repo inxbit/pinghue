@@ -887,6 +887,62 @@ async def test_header_keeps_the_result_age_on_screen_with_every_state(width: int
 
 
 @pytest.mark.usefixtures("stub_network")
+async def test_scroll_position_is_clamped_when_the_table_gets_narrower_or_fits() -> None:
+    targets = [f"db-primary-{index:02d}.dc1.example.net" for index in range(40)]
+    app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(70, 30)) as pilot:
+        table = await _start(pilot, app)
+        await pilot.press("a")
+        await pilot.pause()
+        table.scroll_to(x=10_000, animate=False, immediate=True)
+        await pilot.pause()
+        wide_scroll = table.scroll_x
+        assert wide_scroll == table.max_scroll_x > 0
+
+        # Hiding the address column again shrinks the extent under the
+        # scroll position.
+        await pilot.press("a")
+        await pilot.pause()
+        assert 0 < table.max_scroll_x < wide_scroll
+        assert table.scroll_x == table.max_scroll_x
+
+        table.scroll_to(x=10_000, animate=False, immediate=True)
+        await pilot.pause()
+        await pilot.resize_terminal(160, 30)
+        await pilot.pause()
+        assert table.max_scroll_x == 0
+        assert table.scroll_x == 0
+
+
+async def test_refresh_rows_repaints_the_whole_table_with_fixed_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = TableApp()
+    async with app.run_test(size=(60, 20)) as pilot:
+        table = app.query_one(TargetTable)
+        table.add_column("host", key="host", width=12)
+        for index in range(30):
+            table.add_row(Text(f"row {index}"), key=f"row-{index}")
+        table.fixed_rows = 1
+        await pilot.pause()
+
+        calls: list[tuple[Region, ...]] = []
+        original_refresh = Widget.refresh
+
+        def recording_refresh(widget: Widget, *regions: Region, **kwargs: Any) -> Any:
+            if widget is table:
+                calls.append(regions)
+            return original_refresh(widget, *regions, **kwargs)
+
+        monkeypatch.setattr(Widget, "refresh", recording_refresh)
+        # Fixed rows break the row-to-line mapping, so the whole table is
+        # repainted instead.
+        table.refresh_rows([3, 4])
+
+        assert calls == [()]
+
+
+@pytest.mark.usefixtures("stub_network")
 async def test_rows_a_full_pass_leaves_are_refreshed_by_catch_up_chunks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
