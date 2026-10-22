@@ -1051,13 +1051,15 @@ async def test_real_loopback_echo_ipv6() -> None:
 
 @pytest.mark.usefixtures("icmp_v4")
 async def test_real_loopback_probes_share_one_socket() -> None:
-    # Few enough for macOS, which rate-limits the echo replies it sends.
+    # Few enough for macOS, which rate-limits the echo replies it sends, and
+    # all to 127.0.0.1, the only loopback address macOS configures by default.
+    # Each probe's sequence number and token keep the replies apart.
     threads = threading.active_count()
 
     samples = await asyncio.gather(
         *(
-            icmp_probe(f"127.0.0.{index}", timeout_s=2.0, address_family=AddressFamily.IPV4)
-            for index in range(1, 33)
+            icmp_probe("127.0.0.1", timeout_s=2.0, address_family=AddressFamily.IPV4)
+            for _ in range(32)
         )
     )
 
