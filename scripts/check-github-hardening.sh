@@ -15,11 +15,15 @@ API_BODY=""
 
 read_api_response() {
   local endpoint="$1"
+  local response_dir
   local response_path
   local body_path
   local command_status
-  response_path="$(mktemp "${TMPDIR:-/tmp}/pinghue-gh-api.XXXXXX")"
-  body_path="${response_path}.body"
+  # Keep both files in a private directory: a name derived from a mktemp path
+  # is predictable to other local users of a shared TMPDIR.
+  response_dir="$(mktemp -d "${TMPDIR:-/tmp}/pinghue-gh-api.XXXXXX")"
+  response_path="${response_dir}/response"
+  body_path="${response_dir}/body"
 
   if gh api --include "${endpoint}" >"${response_path}" 2>/dev/null; then
     command_status=0
@@ -60,7 +64,7 @@ print(status)
 PY
   )"
   API_BODY="$(<"${body_path}")"
-  rm -f "${response_path}" "${body_path}"
+  rm -rf -- "${response_dir}"
 
   if [[ -z "${API_STATUS}" && "${command_status}" -eq 0 ]]; then
     # Retain compatibility with gh-compatible test doubles that omit headers.

@@ -30,4 +30,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PINGHUE_ALLOW_HIDDEN_BYPASS_ACTORS: "1"
           PINGHUE_ALLOW_HIDDEN_ADMIN_SETTINGS: "1"
-        run: scripts/check-github-hardening.sh "${{ github.repository }}"
+        run: scripts/check-github-hardening.sh "${GITHUB_REPOSITORY}"
