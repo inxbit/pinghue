@@ -2,6 +2,7 @@ import asyncio
 import io
 import socket
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -953,3 +954,31 @@ async def test_probe_once_waits_out_the_names_backoff_before_retrying(
     monkeypatch.setattr(runner, "_monotonic_time", lambda: 131.0)
     await runner.probe_once(target, args=args, mode=ProbeMode.ICMP, semaphore=asyncio.Semaphore(1))
     assert lookups == 1
+
+
+async def test_dns_lookup_inside_budget_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
+    def slow_getaddrinfo(*_: object, **__: object) -> list[object]:
+        time.sleep(0.2)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.63", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+    monkeypatch.setattr(runner, "DNS_LOOKUP_TIMEOUT_SECONDS", 1.0)
+
+    resolved = await runner._resolve_target_bounded(
+        "failover.example", AddressFamily.AUTO, numeric=False
+    )
+
+    assert resolved is not None
+    assert resolved.error is None
+    assert resolved.address == "192.0.2.63"
+
+
+def test_dns_lookup_budget_outlasts_glibc_nameserver_failover() -> None:
+    # glibc waits its default 5 s on a silent nameserver before asking the next
+    # one (or resending), so the budget must cover two such waits even after
+    # the longest wait for a free resolver thread.
+    glibc_default_nameserver_timeout = 5.0
+
+    usable_budget = runner.DNS_LOOKUP_TIMEOUT_SECONDS - probes.DNS_THREAD_WAIT_SECONDS
+    assert usable_budget > 2 * glibc_default_nameserver_timeout
+    assert probes.MAX_DNS_DAEMON_THREADS > runner.DNS_RESOLVE_CONCURRENCY

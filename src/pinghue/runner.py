@@ -43,7 +43,10 @@ MIN_OVERRUN_SLEEP = 0.1
 # for lookups abandoned at their budget whose threads are still running.
 DNS_RESOLVE_CONCURRENCY = 32
 DNS_RETRY_INTERVAL_SECONDS = 10.0
-DNS_LOOKUP_TIMEOUT_SECONDS = 5.0
+# Above glibc's default 5 s per-nameserver timeout (resolv.conf "timeout:5"), so
+# a lookup that fails over from a dead first nameserver, or retransmits one
+# lost query, still answers within budget.
+DNS_LOOKUP_TIMEOUT_SECONDS = 12.0
 # Retry delays after 1, 2 and 3+ lookup timeouts, so names in a blackholed zone
 # back off instead of taking a resolver thread every cycle.
 DNS_TIMEOUT_BACKOFF_SECONDS = (10.0, 30.0, 60.0)

@@ -10,6 +10,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 - Stuck DNS lookups no longer make other hostnames fail with `resolver worker limit reached`. A lookup that runs past its budget keeps its resolver thread until the OS resolver returns, other lookups wait for a free thread, and a retry of a name whose lookup is still running shares that lookup instead of starting another thread. A host that cannot get a resolver thread keeps its current state (`resolving` before its first lookup) and retries on its next probe, with no new `dns_failure` verdict and no 10-second DNS cooldown. When a lookup finishes after its budget expired, the name's next retry uses that answer instead of starting a new lookup. Resolver threads are capped at 128 (previously 16) and lookup concurrency is 32 (previously 16).
 - Failed DNS lookups now retry with jitter so names that failed together do not retry in lockstep, and a name whose lookups keep timing out backs off to 30 and then 60 seconds; a one-off failure still retries after about 10 seconds.
+- Raised the DNS lookup budget from 5 to 12 seconds, above glibc's default 5-second per-nameserver timeout, so an unresponsive first nameserver in `/etc/resolv.conf` no longer turns every hostname into `dns_failure`; `pinghue --check` uses the same budget.
 - A hostname that resolves after an earlier DNS failure now shows `resolving` until its first probe result instead of `down`.
 
 ### Security
