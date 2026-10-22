@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import errno
 import ipaddress
-import queue
 import socket
+import struct
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -16,24 +16,24 @@ from datetime import datetime, timezone
 from functools import partial
 from typing import Any, TypeVar
 
+from pinghue.icmp import UNREACHABLE_ERRNOS as UNREACHABLE_ERRNOS
+from pinghue.icmp import engine_for_running_loop
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
 MAX_FAILOVER_ADDRESSES = 8
 MAX_DNS_DAEMON_THREADS = 128
-MAX_ICMP_DAEMON_THREADS = 1_024
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
 _T = TypeVar("_T")
 
-UNREACHABLE_ERRNOS = {
-    value
-    for value in (
-        getattr(errno, "EHOSTUNREACH", None),
-        getattr(errno, "ENETUNREACH", None),
-        getattr(errno, "EHOSTDOWN", None),
-        getattr(errno, "ENETDOWN", None),
-    )
-    if value is not None
-}
+# A clean TCP close finishes on the next loop iteration; this only bounds a
+# teardown that stalls after the connect was already measured.
+TCP_CLOSE_TIMEOUT_SECONDS = 1.0
+# Linux struct tcp_info: tcpi_rtt (smoothed RTT, microseconds) at offset 68 and
+# tcpi_total_retrans at offset 100.
+_TCP_INFO = getattr(socket, "TCP_INFO", None) if sys.platform.startswith("linux") else None
+_TCP_INFO_SIZE = 104
+_TCP_INFO_RTT_OFFSET = 68
+_TCP_INFO_TOTAL_RETRANS_OFFSET = 100
 
 
 @dataclass(frozen=True)
@@ -43,145 +43,6 @@ class ResolvedTarget:
     family: AddressFamily | None
     error: str | None = None
     addresses: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _IcmpBackend:
-    socket_v4: Callable[..., Any]
-    socket_v6: Callable[..., Any]
-    request: Callable[..., Any]
-    unique_identifier: Callable[[], int]
-    timeout_error: type[BaseException]
-    permission_error: type[BaseException]
-    unreachable_errors: tuple[type[BaseException], ...]
-    library_error: type[BaseException]
-
-
-_icmp_backend: _IcmpBackend | None = None
-_icmp_import_error: ImportError | None = None
-
-
-@dataclass(frozen=True)
-class _DaemonWorkItem:
-    loop: asyncio.AbstractEventLoop
-    future: asyncio.Future[Any]
-    function: Callable[[], Any]
-
-
-class _DaemonWorkerPool:
-    """Run blocking calls on a lazily created, bounded set of daemon threads."""
-
-    def __init__(self, *, max_workers: int, name: str) -> None:
-        if max_workers <= 0:
-            raise ValueError("max_workers must be greater than zero")
-        self._max_workers = max_workers
-        self._name = name
-        self._work_queue: queue.SimpleQueue[_DaemonWorkItem] = queue.SimpleQueue()
-        self._lock = threading.Lock()
-        self._worker_count = 0
-        self._outstanding_work_count = 0
-        self._next_worker_id = 0
-
-    async def run(self, function: Callable[[], _T]) -> _T:
-        """Schedule blocking work and await its result on the calling loop."""
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[_T] = loop.create_future()
-
-        worker_id: int | None = None
-        with self._lock:
-            self._outstanding_work_count += 1
-            required_workers = min(self._outstanding_work_count, self._max_workers)
-            if self._worker_count < required_workers:
-                self._worker_count += 1
-                self._next_worker_id += 1
-                worker_id = self._next_worker_id
-
-        if worker_id is not None:
-            try:
-                threading.Thread(
-                    target=self._worker,
-                    name=f"{self._name}-{worker_id}",
-                    daemon=True,
-                ).start()
-            except BaseException:
-                with self._lock:
-                    self._worker_count -= 1
-                    self._outstanding_work_count -= 1
-                raise
-
-        self._work_queue.put(_DaemonWorkItem(loop=loop, future=future, function=function))
-        return await future
-
-    @staticmethod
-    def _deliver_result(future: asyncio.Future[Any], result: Any) -> None:
-        if not future.done():
-            future.set_result(result)
-
-    @staticmethod
-    def _deliver_exception(future: asyncio.Future[Any], exception: BaseException) -> None:
-        if not future.done():
-            future.set_exception(exception)
-
-    def _worker(self) -> None:
-        while True:
-            item = self._work_queue.get()
-
-            try:
-                result = item.function()
-            except BaseException as exc:  # noqa: BLE001 - delivered on the caller's loop
-                callback = partial(self._deliver_exception, item.future, exc)
-            else:
-                callback = partial(self._deliver_result, item.future, result)
-
-            with self._lock:
-                self._outstanding_work_count -= 1
-            with contextlib.suppress(RuntimeError):
-                item.loop.call_soon_threadsafe(callback)
-
-
-_icmp_worker_pool = _DaemonWorkerPool(
-    max_workers=MAX_ICMP_DAEMON_THREADS,
-    name="pinghue-icmp",
-)
-
-
-def _get_icmp_backend() -> _IcmpBackend:
-    global _icmp_backend, _icmp_import_error
-
-    if _icmp_backend is not None:
-        return _icmp_backend
-    if _icmp_import_error is not None:
-        raise _icmp_import_error
-
-    try:
-        from icmplib.exceptions import (  # type: ignore[import-untyped]
-            DestinationUnreachable,
-            ICMPLibError,
-            SocketPermissionError,
-            TimeExceeded,
-            TimeoutExceeded,
-        )
-        from icmplib.models import ICMPRequest  # type: ignore[import-untyped]
-        from icmplib.sockets import (  # type: ignore[import-untyped]
-            ICMPv4Socket,
-            ICMPv6Socket,
-        )
-        from icmplib.utils import unique_identifier  # type: ignore[import-untyped]
-    except ImportError as exc:
-        _icmp_import_error = exc
-        raise
-
-    _icmp_backend = _IcmpBackend(
-        socket_v4=ICMPv4Socket,
-        socket_v6=ICMPv6Socket,
-        request=ICMPRequest,
-        unique_identifier=unique_identifier,
-        timeout_error=TimeoutExceeded,
-        permission_error=SocketPermissionError,
-        unreachable_errors=(DestinationUnreachable, TimeExceeded),
-        library_error=ICMPLibError,
-    )
-    return _icmp_backend
 
 
 def _socket_family(address_family: AddressFamily) -> int:
@@ -466,18 +327,50 @@ async def resolve_target(
     return ResolvedTarget(target, addresses[0], family, addresses=addresses)
 
 
+def _kernel_connect_rtt_ms(writer: asyncio.StreamWriter) -> float | None:
+    """Return the kernel's handshake RTT when it covers the whole connect.
+
+    tcpi_rtt only reflects the last SYN exchange, so after a SYN retransmission
+    it would hide the time spent waiting; None keeps the measured connect time.
+    """
+    if _TCP_INFO is None:
+        return None
+    try:
+        sock = writer.get_extra_info("socket")
+        if sock is None:
+            return None
+        info = sock.getsockopt(socket.IPPROTO_TCP, _TCP_INFO, _TCP_INFO_SIZE)
+        (rtt_us,) = struct.unpack_from("=I", info, _TCP_INFO_RTT_OFFSET)
+        (total_retrans,) = struct.unpack_from("=I", info, _TCP_INFO_TOTAL_RETRANS_OFFSET)
+    except (AttributeError, OSError, TypeError, struct.error):
+        return None
+    if total_retrans or rtt_us <= 0:
+        return None
+    return float(rtt_us) / 1000
+
+
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:
-    """Probe a TCP port with asyncio.open_connection."""
+    """Probe a TCP port with asyncio.open_connection.
+
+    The connect time is measured on the event loop, so it also counts any
+    time the loop was busy elsewhere. On Linux the kernel's handshake RTT
+    replaces it when that is smaller and no SYN was retransmitted.
+    """
     timestamp = datetime.now(timezone.utc)
     start = time.perf_counter()
     writer: asyncio.StreamWriter | None = None
 
     try:
-        _, writer = await asyncio.wait_for(
+        _, connected = await asyncio.wait_for(
             asyncio.open_connection(address, port),
             timeout=timeout_s,
         )
-        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        writer = connected
+        latency_ms = (time.perf_counter() - start) * 1000
+        kernel_rtt_ms = _kernel_connect_rtt_ms(connected)
+        if kernel_rtt_ms is not None:
+            latency_ms = min(latency_ms, kernel_rtt_ms)
+        latency_ms = round(latency_ms, 2)
     except asyncio.TimeoutError:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except ConnectionRefusedError as exc:
@@ -499,105 +392,57 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
         if writer is not None:
             writer.close()
             # Once connect() succeeds, teardown is no longer part of the probe
-            # result. Preserve the measured success when shutdown cancels a
-            # slow wait_closed(); cancellation before connect still propagates.
-            with contextlib.suppress(OSError, asyncio.CancelledError):
-                await writer.wait_closed()
+            # result. Preserve the measured success when shutdown cancels or a
+            # slow wait_closed() outlasts the bound; cancellation before connect
+            # still propagates.
+            with contextlib.suppress(OSError, asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(writer.wait_closed(), timeout=TCP_CLOSE_TIMEOUT_SECONDS)
 
     return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)
-
-
-def _run_icmp_echo(
-    backend: _IcmpBackend,
-    address: str,
-    *,
-    timeout_s: float,
-    ipv6: bool,
-) -> float:
-    """Send one ICMP echo and return the round-trip time in ms (blocking).
-
-    Raises icmplib exceptions: TimeoutExceeded on no reply,
-    DestinationUnreachable/TimeExceeded when the network reports the destination
-    cannot be reached, and SocketPermissionError/ICMPLibError on socket errors.
-    """
-    socket_factory = backend.socket_v6 if ipv6 else backend.socket_v4
-    with socket_factory(None, False) as sock:
-        request = backend.request(
-            destination=address,
-            id=backend.unique_identifier(),
-            sequence=0,
-        )
-        sock.send(request)
-        reply = sock.receive(request, timeout_s)
-        reply.raise_for_status()
-        return round(float(reply.time - request.time) * 1000, 2)
 
 
 async def icmp_probe(
     address: str,
     *,
     timeout_s: float,
-    address_family: AddressFamily,
+    address_family: AddressFamily,  # noqa: ARG001 - the IP literal decides the family
 ) -> ProbeSample:
-    """Probe a target with a single ICMP echo via icmplib's low-level sockets.
+    """Probe an IP address with one ICMP echo through the loop's ICMP engine.
 
-    Reading the reply directly (rather than icmplib.ping, which swallows error
-    replies) lets us tell an unreachable destination apart from a timeout.
+    The engine reports ICMP destination-unreachable and time-exceeded errors
+    that quote the probe as unreachable, apart from a timeout.
     """
     timestamp = datetime.now(timezone.utc)
     try:
-        backend = _get_icmp_backend()
-    except ImportError as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.ERROR,
-            error=str(exc),
-        )
-
-    try:
-        ipv6 = ipaddress.ip_address(address).version == 6
+        ip = ipaddress.ip_address(address.partition("%")[0])
     except ValueError:
-        ipv6 = address_family == AddressFamily.IPV6
+        return ProbeSample(
+            timestamp=timestamp,
+            latency_ms=None,
+            status=SampleStatus.ERROR,
+            error=f"ICMP probes need an IP address, not {address!r}",
+        )
 
-    run_echo = partial(
-        _run_icmp_echo,
-        backend,
-        address,
-        timeout_s=timeout_s,
-        ipv6=ipv6,
-    )
+    ipv6 = ip.version == 6
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        # An IPv4-mapped address names an IPv4 host; ICMPv6 cannot reach it.
+        address = str(ip.ipv4_mapped)
+        ipv6 = False
+
     try:
-        latency_ms = await _icmp_worker_pool.run(run_echo)
-    except backend.timeout_error:
-        return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
-    except backend.unreachable_errors as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.UNREACHABLE,
-            error=str(exc),
-        )
-    except backend.permission_error as exc:
+        engine = engine_for_running_loop()
+    except Exception as exc:  # noqa: BLE001 - report instead of failing the probe loop
         return ProbeSample(
             timestamp=timestamp,
             latency_ms=None,
             status=SampleStatus.ERROR,
-            error=f"permission denied: {exc}",
-        )
-    except backend.library_error as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.ERROR,
-            error=str(exc),
-        )
-    except OSError as exc:
-        return ProbeSample(
-            timestamp=timestamp,
-            latency_ms=None,
-            status=SampleStatus.ERROR,
-            error=str(exc),
+            error=f"ICMP engine unavailable: {exc}",
         )
 
-    return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)
+    result = await engine.echo(address, ipv6=ipv6, timeout_s=timeout_s)
+    return ProbeSample(
+        timestamp=timestamp,
+        latency_ms=result.latency_ms,
+        status=result.status,
+        error=result.error,
+    )

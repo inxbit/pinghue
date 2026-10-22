@@ -1,9 +1,14 @@
 import io
+import socket
 import threading
+from datetime import datetime, timezone
 
 import pytest
 
 from pinghue import doctor
+from pinghue.models import AddressFamily, ProbeSample, SampleStatus
+
+_NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 class FakeSocket:
@@ -262,3 +267,56 @@ def test_dns_probe_budget_matches_runner_lookup_budget() -> None:
 
     assert doctor.DNS_PROBE_TIMEOUT_SECONDS == runner.DNS_LOOKUP_TIMEOUT_SECONDS
     assert doctor.DNS_PROBE_TIMEOUT_SECONDS > 2 * 5.0
+
+
+@pytest.mark.parametrize(
+    ("sample", "expected"),
+    [
+        (ProbeSample(_NOW, 0.12, SampleStatus.OK), (0.12, None)),
+        (ProbeSample(_NOW, None, SampleStatus.TIMEOUT), (None, "timeout")),
+        (
+            ProbeSample(_NOW, None, SampleStatus.ERROR, "permission denied: ICMP blocked"),
+            (None, "permission denied: ICMP blocked"),
+        ),
+        (ProbeSample(_NOW, None, SampleStatus.UNREACHABLE), (None, "unreachable")),
+    ],
+    ids=["ok", "timeout", "error", "unreachable"],
+)
+def test_loopback_icmp_probe_uses_the_probe_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    sample: ProbeSample,
+    expected: tuple[float | None, str | None],
+) -> None:
+    calls: list[tuple[str, float, AddressFamily]] = []
+
+    async def fake_icmp_probe(
+        address: str, *, timeout_s: float, address_family: AddressFamily
+    ) -> ProbeSample:
+        calls.append((address, timeout_s, address_family))
+        return sample
+
+    monkeypatch.setattr(doctor, "icmp_probe", fake_icmp_probe)
+
+    assert doctor._loopback_icmp_probe("::1") == expected
+    assert calls == [("::1", 1.0, AddressFamily.IPV6)]
+
+
+def test_loopback_icmp_probe_reports_unexpected_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken_icmp_probe(*_: object, **__: object) -> ProbeSample:
+        raise RuntimeError("engine exploded")
+
+    monkeypatch.setattr(doctor, "icmp_probe", broken_icmp_probe)
+
+    assert doctor._loopback_icmp_probe() == (None, "RuntimeError: engine exploded")
+
+
+def test_loopback_icmp_probe_real_loopback() -> None:
+    try:
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP).close()
+    except OSError as exc:
+        pytest.skip(f"unprivileged ICMP sockets are not available: {exc}")
+
+    latency_ms, error = doctor._loopback_icmp_probe("127.0.0.1")
+
+    assert error is None
+    assert latency_ms is not None and latency_ms >= 0

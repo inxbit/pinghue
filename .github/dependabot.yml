@@ -20,5 +20,4 @@ updates:
         patterns:
           - "*"
         exclude-patterns:
-          - "icmplib"
           - "textual"

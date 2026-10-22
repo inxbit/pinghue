@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import socket
@@ -12,6 +13,8 @@ from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
+from pinghue.models import SampleStatus
+from pinghue.probes import family_from_ip, icmp_probe
 
 OK = "[ok]"
 FAIL = "[fail]"
@@ -149,17 +152,19 @@ def _dns_probe(
 
 
 def _loopback_icmp_probe(address: str = "127.0.0.1") -> tuple[float | None, str | None]:
+    """Send one echo through pinghue's own ICMP engine, as a probe run would."""
     try:
-        from icmplib import ping  # type: ignore[import-untyped]
-
-        result = ping(address, count=1, timeout=1, privileged=False)
+        sample = asyncio.run(
+            icmp_probe(address, timeout_s=1.0, address_family=family_from_ip(address))
+        )
     except Exception as exc:  # noqa: BLE001 - doctor reports exact environment failures
         return None, f"{type(exc).__name__}: {exc}"
 
-    if not result.is_alive:
+    if sample.status == SampleStatus.OK and sample.latency_ms is not None:
+        return float(sample.latency_ms), None
+    if sample.status == SampleStatus.TIMEOUT:
         return None, "timeout"
-
-    return float(result.avg_rtt), None
+    return None, sample.error or sample.status.value
 
 
 def _write_header(lines: list[str]) -> None:

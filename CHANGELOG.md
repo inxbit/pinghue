@@ -22,6 +22,11 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - Raised the DNS lookup budget from 5 to 12 seconds, above glibc's default 5-second per-nameserver timeout, so an unresponsive first nameserver in `/etc/resolv.conf` no longer turns every hostname into `dns_failure`; `pinghue --check` uses the same budget.
 - A hostname that resolves after an earlier DNS failure now shows `resolving` until its first probe result instead of `down`.
 - A host whose known addresses keep failing now has its name looked up again in the background while those addresses keep being probed, so a slow or unresponsive DNS server no longer pauses its probes or delays showing its recovery. The new answer is used only if the host is still failing, and IP-literal targets skip the lookup.
+- On Linux, ICMP destination-unreachable and time-exceeded errors are now reported as `unreachable` as soon as they arrive (the datagram ICMP socket now reads its error queue) instead of `timeout` after the full timeout.
+- ICMP latency is measured with a monotonic clock; Linux kernel receive timestamps are used only when they agree with it. A wall-clock step (NTP step, resume, VM migration) can no longer produce negative latencies, latencies longer than the timeout, or false timeouts for replies that arrived in time.
+- ICMP replies are matched on sequence number, source address, and a random per-probe payload token (plus the echo identifier on macOS). On macOS, where every ICMP socket on the host sees every reply, another pinghue instance or ICMP tool can no longer make a down host look up, and a reply for another host no longer extends a probe's wait.
+- An ICMP send blocked by local policy (a firewall rule returning `EPERM`, or `EACCES`) is now reported as `permission denied: ICMP send blocked by local policy (...)`, and the target is classified `permission_denied`, instead of the misleading "Broadcast is not allowed" text and a `down` state. `ENETUNREACH`/`EHOSTUNREACH` from the send are reported as `unreachable`.
+- A TCP close that stalls after a successful connect no longer holds the probe: teardown is bounded and the measured success is kept.
 
 ### Changed
 
@@ -29,6 +34,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - No-TUI mode now spreads the targets' first probes across one interval like the TUI, instead of probing every target in the same instant on every cycle; with `--count`, a run with several targets can take up to one interval longer. When `--duration` is shorter than two intervals, first probes are spread across half the run so every target is still probed.
 - A resolved target whose first probe has not landed yet now shows and exports as `resolving` instead of `down`; such never-probed targets still count as down for `--fail-on-any-down` and `--fail-on-all-down`.
 - No-TUI per-probe lines now reach a pipe or file as soon as each result lands instead of sitting in an output buffer; when the reader goes away (for example `| head`), the run stops as `interrupted` and still writes `--output` instead of failing with a broken-pipe error. Any other failure to write a line, such as a full disk, stops the run the same way after a warning on stderr.
+- ICMP probes now run on the event loop over a few shared non-blocking datagram sockets per address family instead of one daemon thread and one socket per probe. 5,000 healthy targets keep the configured cadence, ICMP probes no longer use threads or per-probe file descriptors, and reported latency no longer includes thread-scheduling delay (on loopback with 1,000 targets the p99 dropped from about 20 ms to 0.02 ms). `icmplib` is no longer a dependency.
+- On Linux, TCP latency is now the kernel's handshake RTT (`TCP_INFO`) when that is smaller than the connect time measured on the event loop and no SYN was retransmitted, so time the loop spends elsewhere (for example redrawing a large table) is no longer reported as network latency. After a SYN retransmission the full connect time is still reported, so SYN loss stays visible. macOS keeps the event-loop measurement.
 
 ## 5.1.0 - 2026-08-18
 

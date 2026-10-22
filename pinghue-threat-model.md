@@ -111,9 +111,10 @@ terminal rendering or JSON export. New output paths must preserve that invariant
 
 Large target sets can multiply resolver tasks, probe workers, and retained
 samples. Host files are size/line bounded, the merged CLI inventory is capped
-at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP work
-uses a reusable daemon pool, and retained history is limited to 100,000 samples
-across the run. Whole-run counters/statistics do not retain every sample.
+at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP probes
+share a few event-loop sockets per address family instead of a thread and a
+socket each, and retained history is limited to 100,000 samples across the run.
+Whole-run counters/statistics do not retain every sample.
 
 ### 3. Host-file path confusion
 
@@ -148,8 +149,13 @@ loss/high-jitter excursions for final classification. A DNS answer made only of
 unspecified addresses (`0.0.0.0`, `::`), the usual DNS-filter sinkhole reply, is
 reported as a DNS failure instead of probed, because probing it would reach the
 local host and report a blocked name healthy. Local resolver capacity limits
-leave a host pending rather than producing a DNS verdict. External DNS and
-routing state remain outside the tool's control.
+leave a host pending rather than producing a DNS verdict. ICMP replies count only
+when their sequence number, source address, and random per-probe payload token
+match the probe (and, on macOS, where every ICMP socket on the host sees every
+reply, the echo identifier too), so another process's ICMP traffic cannot mark
+a down target up. ICMP latency is monotonic, so a wall-clock step cannot yield
+negative latencies. External DNS and routing state remain outside the tool's
+control.
 
 ### 6. Unsafe ICMP privilege remediation
 

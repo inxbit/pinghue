@@ -104,9 +104,9 @@ requires the next major release; it must not ship as a patch or minor version.
 
 | Area | Resolution |
 | --- | --- |
-| TCP evidence accuracy | Records connect latency before close, suppresses teardown resets after success, and preserves the primary-address failure when all failovers fail. |
+| TCP evidence accuracy | Records connect latency before close (on Linux, the kernel handshake RTT unless the SYN was retransmitted), bounds and suppresses teardown after success, and preserves the primary-address failure when all failovers fail. |
 | Cancellation | Absolute duration and signal deadlines include startup work, cancel active resolution/probe work, preserve ordered placeholders/sample budgets, and print probes completed just before shutdown. |
-| ICMP concurrency | Uses a bounded reusable daemon worker pool with capacity recovery instead of serial one-thread-per-call behavior. |
+| ICMP concurrency | Runs every ICMP probe on the event loop over a few shared non-blocking datagram sockets per address family (no per-probe threads or file descriptors); replies must match sequence, source address, and a random per-probe token, so other ICMP traffic on the host cannot mark a down target up. |
 | Long-run state | Maintains whole-run counters/statistics, latches loss and peak jitter, and keeps consecutive-failure classification beyond the retained tail. |
 | Resource bounds | Caps unique targets at 5,000, per-target retained samples at 1,000, and run-wide retained samples at 100,000. |
 | DNS behavior | Uses monotonic cooldown timing and refreshes stale results after repeated all-address failures. |
