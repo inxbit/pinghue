@@ -67,7 +67,10 @@ def test_help_describes_every_option_and_shows_defaults() -> None:
     help_text = " ".join(parser.format_help().split())
     for default in (
         "(default: 1.0)",
-        "default: 64)",
+        (
+            "(default: automatic, sized from the target count, timeout and interval: "
+            "64-1024 for TCP, 64-5000 for ICMP)"
+        ),
         "(default: 3)",
         "(default: 50.0)",
         "(default: local)",
@@ -132,11 +135,15 @@ def test_parse_args_leaves_output_overwrite_off_by_default() -> None:
 
 
 def test_main_reports_output_write_errors_without_traceback(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     async def fake_run(*_: object, **__: object) -> int:
         raise FileExistsError("output file already exists")
+
+    # The pre-run output check needs a writable working directory.
+    monkeypatch.chdir(tmp_path)
 
     import pinghue.runner as runner
 
@@ -146,6 +153,166 @@ def test_main_reports_output_write_errors_without_traceback(
     captured = capsys.readouterr()
     assert "output file already exists" in captured.err
     assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_main_refuses_unusable_output_path_before_probing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    overwrite: bool,
+) -> None:
+    # A refused --output path must fail before the run, not after probing for
+    # the whole --duration and then losing the report.
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+    alias_path = tmp_path / "alias.json"
+    os.link(output_path, alias_path)
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    argv = ["--no-tui", "--output", str(output_path), "127.0.0.1"]
+
+    assert main([*argv, "--overwrite"] if overwrite else argv) == 1
+
+    err = capsys.readouterr().err
+    assert err.startswith("pinghue: error: ")
+    assert ("multiple hard links" if overwrite else "use --overwrite to replace") in err
+    assert calls == []
+    assert output_path.read_text(encoding="utf-8") == "previous\n"
+
+
+def test_main_refuses_fifo_owned_by_another_user_before_probing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output_path = tmp_path / "report.json"
+    os.mkfifo(output_path, 0o666)
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    other_uid = os.geteuid() + 1
+    monkeypatch.setattr(os, "geteuid", lambda: other_uid)
+
+    assert main(["--no-tui", "--output", str(output_path), "127.0.0.1"]) == 1
+
+    assert "FIFO owned by another user" in capsys.readouterr().err
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("extra", "refused"),
+    [([], True), (["--output-mode", "private"], True), (["--output-mode", "umask"], False)],
+)
+def test_main_checks_fifo_permissions_against_the_output_mode_before_probing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra: list[str],
+    refused: bool,
+) -> None:
+    # The early check uses the run's --output-mode, so a private run does not
+    # probe for its whole --duration only to refuse a 0644 FIFO at exit.
+    output_path = tmp_path / "report\x1b[2J.fifo"
+    os.mkfifo(output_path)
+    output_path.chmod(0o644)
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    exit_code = main(["--no-tui", "--output", str(output_path), *extra, "127.0.0.1"])
+
+    err = capsys.readouterr().err
+    if refused:
+        assert exit_code == 1
+        assert calls == []
+        assert err.startswith("pinghue: error: refusing to write to a FIFO that other users ")
+        assert (
+            "(mode 0644); remove it and recreate it with mkfifo -m 600, "
+            "or use --output-mode umask: " in err
+        )
+        assert "\x1b" not in err
+        assert "report\\x1b[2J.fifo" in err
+    else:
+        assert exit_code == 0
+        assert len(calls) == 1
+        assert err == ""
+
+
+def test_main_drops_its_messages_when_stderr_is_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With descriptor 2 closed, sys.stderr is None and print(file=None) writes
+    # to stdout, which carries the line output or a `--output -` document.
+    async def fake_run(*_: object, **__: object) -> int:
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    existing = tmp_path / "out.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "stderr", None)
+
+    assert main(["1.1.1.1"]) == 0
+    assert main(["--no-tui", "--output", str(existing), "127.0.0.1"]) == 1
+
+    assert capsys.readouterr().out == ""
+
+
+def test_parse_args_usage_error_prints_nothing_when_stderr_is_closed(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # argparse prints the usage synopsis with print_usage(sys.stderr), and a
+    # stderr of None makes that stdout, which may feed a pipeline.
+    monkeypatch.setattr(sys, "stderr", None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--interval", "0", "127.0.0.1"])
+
+    assert excinfo.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
+def test_main_accepts_new_output_path_and_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    assert main(["--no-tui", "--output", str(tmp_path / "new" / "out.json"), "127.0.0.1"]) == 0
+    assert len(calls) == 1
 
 
 def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
@@ -162,6 +329,59 @@ def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
 
     assert main(["1.1.1.1"]) == 0
     assert "stdout is not a terminal; pass --no-tui" in capsys.readouterr().err
+
+
+def test_main_refuses_output_path_before_warning_about_the_tui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A run that cannot start says only why, not how the TUI would have behaved.
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    assert main(["--output", str(output_path), "1.1.1.1"]) == 1
+
+    err = capsys.readouterr().err
+    assert err.startswith("pinghue: error: output file already exists")
+    assert "stdout is not a terminal" not in err
+    assert calls == []
+
+
+def test_main_refuses_the_tui_when_stderr_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # With descriptor 2 closed at startup the TUI has nowhere to draw and hung;
+    # line output does not need stderr and still runs.
+    calls: list[bool] = []
+
+    async def fake_run(args: object, **__: object) -> int:
+        calls.append(bool(getattr(args, "no_tui", False)))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys, "__stderr__", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    assert main(["127.0.0.1"]) == 1
+    assert calls == []
+    assert main(["--no-tui", "127.0.0.1"]) == 0
+    assert calls == [True]
+    assert capsys.readouterr().out == ""
 
 
 def test_main_does_not_warn_about_stdout_when_no_tui_is_requested(
@@ -213,6 +433,36 @@ def test_parse_args_accepts_output_dash_with_no_tui() -> None:
 
     assert str(args.output) == "-"
     assert args.no_tui is True
+
+
+def test_parse_args_keeps_dot_slash_dash_as_a_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # pathlib collapses "./-" to "-"; the explicit spelling must still name a
+    # file instead of selecting stdout (or failing the TUI's stdout rule).
+    monkeypatch.chdir(tmp_path)
+
+    for argv in (["--no-tui"], []):
+        args = parse_args(["--output", "./-", *argv, "1.1.1.1"])
+        assert args.output == tmp_path / "-"
+        assert str(args.output) != "-"
+
+
+def test_parse_args_reports_unreadable_working_directory_for_dot_slash_dash(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def missing_cwd() -> Path:
+        raise FileNotFoundError("current directory was removed")
+
+    monkeypatch.setattr(Path, "cwd", staticmethod(missing_cwd))
+
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--output", "./-", "--no-tui", "1.1.1.1"])
+
+    assert excinfo.value.code == 2
+    assert "argument --output" in capsys.readouterr().err
 
 
 def test_parse_args_allows_check_with_output_dash() -> None:
@@ -368,6 +618,36 @@ def test_parse_args_rejects_control_characters_in_target() -> None:
         parse_args(["a\nb"])
 
 
+@pytest.mark.parametrize("separator", ["\x0b", "\x0c", "\x1c", "\x85"])
+def test_parse_args_rejects_host_file_line_with_embedded_control_separator(
+    tmp_path: Path,
+    separator: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A control separator inside one host-file line must not split it into two
+    # accepted targets; the whole line reaches target validation and is refused.
+    host_file = tmp_path / "hosts.txt"
+    host_file.write_text(f"127.0.0.1{separator}127.0.0.2\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        parse_args(["--file", str(host_file)])
+
+    err = capsys.readouterr().err
+    assert "target contains control characters" in err
+    assert separator not in err
+
+
+def test_parse_args_keeps_host_file_unicode_line_separator_in_one_target(
+    tmp_path: Path,
+) -> None:
+    host_file = tmp_path / "hosts.txt"
+    host_file.write_text("127.0.0.1\u2028127.0.0.2\n127.0.0.3\n", encoding="utf-8")
+
+    args = parse_args(["--file", str(host_file)])
+
+    assert args.targets == ["127.0.0.1\u2028127.0.0.2", "127.0.0.3"]
+
+
 def test_parse_args_sanitizes_host_file_error_control_bytes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -380,12 +660,15 @@ def test_parse_args_sanitizes_host_file_error_control_bytes(
 
 
 def test_main_sanitizes_control_chars_in_error_output(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # L10: the top-level OSError handler must escape control bytes from exception text.
     async def fake_run(*_: object, **__: object) -> int:
         raise FileExistsError("output file already exists: \x1bbad")
+
+    monkeypatch.chdir(tmp_path)
 
     import pinghue.runner as runner
 

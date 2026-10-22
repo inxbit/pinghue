@@ -33,7 +33,7 @@ Current version: `5.1.0`. The command-line interface and JSON output are stable 
 <table>
   <tr>
     <td width="33%" valign="top"><b>Dense at-a-glance view</b><br><br>Watch many hosts in one readable terminal table — per-host latency, loss, jitter, and a live history bar.</td>
-    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</td>
+    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent TCP probes; in ICMP mode, a probe slot for every target (up to 5,000).</td>
     <td width="33%" valign="top"><b>Evidence-ready JSON</b><br><br><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</td>
   </tr>
   <tr>
@@ -99,7 +99,10 @@ Host files are plain text. Blank lines and `#` comments are ignored. Inline comm
 on host lines are also ignored (`host.example  # comment`).
 Host files must be non-symlink regular files, at most 1 MiB, and at most 5,000
 lines. A run accepts at most 5,000 unique targets in total, and each target string
-is capped at 253 characters.
+is capped at 253 characters. Lines end only at `\n`, `\r\n`, or a lone `\r`. Other
+line-break characters, such as form feeds or Unicode line separators, stay inside
+the line instead of splitting it into several targets: control characters make
+the target invalid, and anything else non-ASCII is shown escaped.
 
 ```text
 # edge and core checks
@@ -147,6 +150,8 @@ Starting with `1.0.0`, release versions follow semantic versioning: patch releas
 
 `2.0.0` changes the default `--output` behavior: existing regular files are preserved unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
 
+The next major release uses the security exception above for `--output` paths through which another local user could read the report: it refuses an existing FIFO owned by another user, an existing FIFO that group or other users can open in the default `private` output mode, and an `--overwrite` target owned by another user (see [JSON Output](#json-output)). It uses the same exception for host files, whose lines end only at `\n`, `\r\n`, or a lone `\r`: a host file that separates targets with vertical tabs, form feeds, file/group/record separators, or NEL is refused as an invalid target, and Unicode line and paragraph separators no longer split a line (see [Quick Start](#quick-start)). The same release treats `--output ./-` as a file named `-` in the current directory; only a bare `-` writes the report to stdout.
+
 ## Modes
 
 `pinghue` defaults to ICMP mode:
@@ -161,6 +166,10 @@ TCP mode is enabled by passing a port:
 pinghue -p 443 example.com api.internal
 ```
 
+ICMP probes run on the event loop over a few shared unprivileged datagram sockets per address family, so a probe costs no thread or file descriptor of its own. Replies are matched on sequence number, source address, and a random per-probe token (plus the echo identifier on macOS), so another ICMP tool's traffic cannot be credited to a target. A destination-unreachable or time-exceeded error that quotes a probe is reported as `unreachable` as soon as it arrives, on Linux and macOS. ICMP latency is measured with a monotonic clock; on Linux the kernel's receive timestamp is used when it agrees with that clock, so time the event loop spends elsewhere is not counted and a wall-clock step cannot produce a negative or inflated latency.
+
+TCP latency is the connect time. On Linux it is the kernel's handshake RTT (`TCP_INFO`) when that is smaller and no SYN was retransmitted, so a busy event loop is not reported as network latency; after a SYN retransmission the full connect time is kept so the delay stays visible.
+
 Use no-TUI mode for scripts, cron, CI, and package smoke tests:
 
 ```sh
@@ -170,6 +179,8 @@ pinghue -p 443 example.com -c 3 --no-tui
 Starting the TUI while stdout is not a terminal (for example under cron or a
 pipe) prints a warning on stderr; a future major release will switch to
 `--no-tui` automatically in that case.
+The TUI draws on stderr, so with stderr closed (for example `2>&-`) it does
+not start and pinghue exits with status `1`.
 
 Example no-TUI output:
 
@@ -178,6 +189,16 @@ Example no-TUI output:
 2026-05-14T18:32:11.421000+00:00 example.com ok latency=14.08ms
 2026-05-14T18:32:12.420000+00:00 api.internal timeout latency=-
 ```
+
+Each line is written as soon as its probe result lands, also when stdout is a
+pipe or a file. If the reader goes away (for example `| head`), the run stops as
+if interrupted and still writes `--output`. Any other failure to write a line,
+such as a full disk, stops the run the same way after a warning on stderr.
+
+Both modes start probing each target as soon as its own name resolves (IP
+literals at once) and spread the targets' first probes evenly across one
+interval, or across half the run when `--duration` is shorter than two
+intervals, so a large host list is not probed in one burst.
 
 ## CLI Reference
 
@@ -195,14 +216,14 @@ pinghue [OPTIONS] [TARGET ...]
 | `-n, --numeric` | off | Skip DNS and require IP literals. |
 | `-i, --interval SEC` | `1.0` | Seconds between probes. Minimum: `0.1`. |
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
-| `-c, --count N` | continuous | Stop after `N` probes per target. Intentionally has no upper bound. |
+| `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. A probe that could not run because no resolver thread was free does not count. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
-| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. |
-| `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file in place. The rewrite is type-safe but not crash-atomic. |
-| `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
+| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document; `./-` names a file. Existing regular files are not replaced unless `--overwrite` is set. A path that would be refused is reported before probing starts. |
+| `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file owned by the current user in place. The rewrite is type-safe but not crash-atomic. |
+| `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). `private` also refuses an existing FIFO that group or other users can open. |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP daemon workers are bounded by this limit. |
+| `--concurrency N` | automatic | Maximum concurrent probes, `1-1024`. A probe holds its slot until the reply or the timeout, so the default is sized from the run: enough slots for every target to time out once per probe cycle (`targets × timeout ÷ max(interval, timeout + 0.1)`, plus 25% headroom), at least `64`. In ICMP mode an in-flight probe holds no thread or socket of its own, so the default may reach `5000`, a slot for every target at the 5,000-target cap, and keeps every host on its interval even when all of them are silent. In TCP mode every in-flight probe holds a socket, so the default stops at `1024` (about 1,100 silent targets when the timeout equals the interval); past that, silent targets stretch every target's cadence and a shorter `--timeout` restores it. In TCP mode pinghue also raises its soft open-file limit to fit the concurrency, never past the hard limit, and otherwise lowers the concurrency with a warning on stderr. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
 | `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
 | `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
@@ -219,10 +240,14 @@ pinghue [OPTIONS] [TARGET ...]
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Run completed (and no `--fail-on-*` condition triggered). In `--no-tui` mode, interrupting a run with Ctrl-C still evaluates the fail conditions, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. In the TUI, use `q`, which records `user_quit`. |
+| `0` | Run completed (and no `--fail-on-*` condition triggered). Interrupting a run with Ctrl-C in `--no-tui` mode, or with `SIGTERM` or `SIGHUP` in either mode, still evaluates the fail conditions and writes `--output`, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. A `SIGHUP` that is already ignored when pinghue starts (for example under `nohup`) stays ignored. In the TUI, use `q`, which records `user_quit`. |
 | `1` | Runtime error (for example the `--output` file could not be written), or `--check` found the environment not ICMP-ready. |
 | `2` | Usage error: unknown flag or invalid value. |
 | `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
+
+A target the run never probed, for example one still `resolving` (shown as
+`pending` in the TUI) when `--duration` ends, has no evidence that it is up,
+so both `--fail-on-*` options count it as down.
 
 ## TUI Controls
 
@@ -234,6 +259,12 @@ pinghue [OPTIONS] [TARGET ...]
 | `R` | Reset all hosts. |
 | `b` | Probe the selected host immediately. |
 | `B` | Probe all hosts immediately. |
+
+The header shows a fleet summary next to the title: how long ago the stalest host's newest result arrived (`oldest 1.2s`), then how many hosts are in each state, problems first and healthy last, so a narrow terminal cuts the least useful part. That age turns amber once it falls well behind `--interval` and `--timeout`, which means probes are not keeping up. Hosts that have sent all their `--count` probes, and hosts whose probe loop failed (counted as `error`), no longer count toward it.
+
+Columns follow the terminal width so the newest history glyphs stay on screen without horizontal scrolling. On narrow terminals the history column shrinks first, then the hidden address placeholder and the mode column collapse before host names are shortened, then the host column shrinks down to 12 characters; below that the min and max columns collapse instead of squeezing host names further. Host names longer than their column keep their start and the part that tells them apart from the other hosts, with a `…` at each cut: `db-primary-001.dc1.exam…`, or `db-primar…001…` on a narrow terminal.
+
+With thousands of hosts, rows on screen refresh every half second, state changes reach every row and the header summary on the next refresh, and other values in rows scrolled out of view catch up within a few seconds, or as soon as they scroll into view. That catch-up runs in short chunks, so redrawing the table never holds up probes for long.
 
 ## History Legend
 
@@ -264,6 +295,10 @@ Use `--history-style dots` or `--history-style none` when a terminal font or wor
 ## Host States
 
 `pinghue` classifies each host from the **whole run**, not just the most recent probes. Once a host has replied successfully, `down` requires `--fail-threshold` consecutive failures. A run with no successful replies is `down` immediately, even if it ends before the threshold. Any packet loss, or any observed jitter above `--jitter-threshold`, latches the host as `intermittent` until you reset it (`r` or `R` in the TUI). The reported `jitter_ms` remains the current decaying RFC 3550 estimate, so it can later fall below the threshold while the whole-run status stays `intermittent`. This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
+
+Hostnames are resolved with the operating system resolver, up to 32 lookups at a time. Each lookup gets 12 seconds, enough for the resolver to fail over from an unresponsive first nameserver (glibc waits 5 seconds per nameserver by default). A name that does not resolve shows `dns_failure` and is retried after about 10 seconds; a name whose lookups keep timing out backs off to about 30 and then 60 seconds, with jitter so failed names do not retry together. A lookup that runs out of time keeps its resolver thread until the OS resolver returns (at most 128 threads); if every thread is busy, a host waiting for one keeps its current state (`resolving` before its first lookup) and retries on its next probe instead of being reported as a DNS failure. When a resolved host keeps failing, its name is looked up again in the background, at most once per retry interval, while its known addresses keep being probed; the new answer is used only if the host is still failing. A name that resolves only to `0.0.0.0` or `::`, which DNS filters return for blocked names, is reported as `dns_failure` rather than probed.
+
+In the TUI, a host whose address is known but that has no probe result yet (just resolved, or just reset) shows `pending` rather than `resolving` or `down`; JSON output keeps the underlying status.
 
 ## Slate + Signal Palette
 
@@ -309,9 +344,13 @@ The broader range `0 2147483647` also works, but enables unprivileged ICMP for e
 
 `setcap cap_net_raw` does not work for pip or Homebrew installs: the `pinghue` command is a Python launcher script, and Linux ignores file capabilities on interpreter scripts. Use the `ping_group_range` fix above, or TCP mode. Do not set capabilities on a shared Python interpreter.
 
+The doctor also reports the open-file limit, which bounds TCP mode only. Every in-flight TCP probe holds a socket, and pinghue keeps 448 descriptors in reserve (half the limit, but at least 32, when the limit is below 896): enough for its own files plus every resolver thread holding its sockets while lookups hang during a DNS outage. `--concurrency 1024` in TCP mode therefore needs a limit of at least 1472. pinghue raises its own soft limit at startup to fit the TCP concurrency, never past the hard limit; when `--check` warns that the hard limit caps concurrency, raise the hard limit (for example `LimitNOFILE=` in a systemd unit or `/etc/security/limits.conf`). ICMP probes share a few sockets, so the limit does not cap ICMP concurrency; in ICMP mode pinghue still raises its soft limit to the reserve when the hard limit allows.
+
 ## JSON Output
 
 `--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. Symlinks, sockets, multiply linked regular files, and other unsupported special nodes are never replaced. Existing character devices and FIFOs are written directly only when they can be opened safely as the same node. This is the breaking `2.0.0` CLI change for scripts that previously reused the same output file. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
+
+In a shared directory such as `/tmp`, another local user can create the report path before PingHue does. A FIFO is written only when it is owned by the effective user, and `--overwrite` refuses a regular file owned by anyone else; character devices are accepted regardless of owner, because the only one an unprivileged user can create is the driverless `0:0` whiteout device on Linux, which is refused. In the default `private` output mode a FIFO is also written only when its permissions give group and other users no access: `mkfifo` under the usual umask `022` creates mode `0644`, which lets every local user open it and read the report, so create it with `mkfifo -m 600`, or pass `--output-mode umask` to accept its permissions as they are. The bits are checked when PingHue opens the FIFO, and a `chmod` does not revoke a reader that opened the FIFO, or was waiting to open it, while group or other users had access, so remove a FIFO that was ever open to them and recreate it with `mkfifo -m 600` instead of changing its mode. On macOS a `/dev/fd/N` path names one of the run's own descriptors, and PingHue judges the file open on it. A pipe, which process substitution passes, is accepted whatever its fixed permission bits show, because it has no name that other users could open it by; a named FIFO behind the descriptor, as in `--output /dev/fd/3 3>report.fifo`, is judged by its own permissions like any other FIFO. These refusals exit with status 1 and write nothing. PingHue checks the output path before probing starts, so a path it would refuse, an existing node or directory it cannot write, or a parent that is not a directory is reported at once instead of after the run, and checks again when it writes the report. The directory itself is not checked: a user who owns it, or can write to it without the sticky bit, can still replace a finished report, so keep evidence in a directory that only you control.
 
 New report creation is no-clobber and first tries to hard-link a complete temporary report into place atomically. On filesystems without hardlink support (for example exFAT and some FUSE mounts), it falls back to an exclusive create and copy: ordinary errors and handled interrupts remove that fallback file, but an abrupt process or system failure can leave a partial new report. Explicitly overwriting an existing regular file uses a descriptor-verified in-place rewrite so a path race cannot replace a symlink, socket, FIFO, or device node; that path is also not crash-atomic. Evidence workflows should accept a report only after PingHue exits successfully and the JSON parses, then rotate it as a separate step.
 

@@ -66,7 +66,8 @@ def stub_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             resolved_address="1.1.1.1",
             resolved_family=AddressFamily.IPV4,
             resolved_addresses=("1.1.1.1",),
-            status=TargetStatus.DOWN,
+            # Resolved but not yet probed, as target_run_from_resolution reports.
+            status=TargetStatus.RESOLVING,
         )
 
     async def fake_probe_once(target: TargetRun, **_kwargs: Any) -> ProbeSample:

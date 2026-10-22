@@ -61,11 +61,11 @@ Open questions:
 | Boundary | Data crossing it | Main controls |
 | --- | --- | --- |
 | Operator shell -> CLI parser | Targets, timing, ports, concurrency, output path, labels | Type/range/finite checks; 253-character target limit; 5,000 unique-target cap |
-| Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; BOM/error handling |
-| Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency cap and cooldown |
+| Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; line splitting only at `\n`, `\r\n`, or a lone `\r`; BOM/error handling |
+| Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency and resolver-thread caps; per-name cooldown and backoff |
 | Resolved address -> network | ICMP datagram or TCP connection | Outbound-only probes; bounded concurrency/timeouts; per-target exception containment |
-| Probe/library errors -> terminal | Target, address, status, error text | Central display sanitization; literal escaping of controls and non-ASCII text |
-| Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; schema tests |
+| Probe/library errors -> terminal | Target, address, status, error text; doctor OS metadata and socket errors | Central display sanitization; literal escaping of controls and non-ASCII text |
+| Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; effective-user ownership for FIFOs and overwritten files; owner-only FIFO permissions in private mode; pre-run path check; schema tests |
 | Git tag -> release workflow | Source commit and package artifacts | Signed annotated-tag identity/target checks; main ancestry; exact-commit validation; protected environment; OIDC; attestations |
 | Dependency metadata -> package indexes | Locked requirements and advisory queries | Hash-enforced installs; narrow runtime ranges; Dependabot and scheduled audits |
 | Docs source -> GitHub Pages | Static HTML/CSS/JS and assets, one same-origin video | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; self-only CSP with no inline script or style (`media-src 'self'` admits only the hero clip in `docs/media/`); Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
@@ -88,6 +88,10 @@ An attacker or mistake may:
 - Influence a hostname, host-file line, DNS answer, or socket/library error.
 - Supply an oversized or malformed local inventory through an operator workflow.
 - Race an output path as the same local user.
+- Pre-create a FIFO or regular file at a predictable report path in a shared,
+  world-writable directory such as `/tmp` as a different local user.
+- Open, as a different local user, an operator's FIFO whose permission bits
+  let group or other users read it.
 - Cause timeouts, refused connections, partial address failures, or resolver
   failures intended to distort status evidence.
 - Compromise a dependency or attempt to exploit weak release/tag permissions.
@@ -111,16 +115,34 @@ terminal rendering or JSON export. New output paths must preserve that invariant
 
 Large target sets can multiply resolver tasks, probe workers, and retained
 samples. Host files are size/line bounded, the merged CLI inventory is capped
-at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP work
-uses a reusable daemon pool, and retained history is limited to 100,000 samples
-across the run. Whole-run counters/statistics do not retain every sample.
+at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP probes
+share a few event-loop sockets per address family instead of a thread and a
+socket each, and retained history is limited to 100,000 samples across the run.
+Whole-run counters/statistics do not retain every sample.
+TCP probe concurrency never exceeds 1,024 or what the open-file limit can hold,
+because every in-flight TCP probe holds a socket: pinghue raises only its own
+soft limit, never past the hard limit, and lowers concurrency with a warning
+when the hard limit is too low. The descriptors kept in reserve beside the probe
+sockets cover every resolver thread holding its sockets (one per nameserver
+tried) while lookups hang during a DNS outage, so a DNS outage cannot exhaust
+the limit and fail healthy probes with `Too many open files`. Under a hard limit
+below 896 the reserve shrinks to half the limit to leave room for probes, and a
+long DNS outage can then still exhaust it. The automatic ICMP concurrency can give each of
+the 5,000 targets a slot, since an in-flight ICMP probe holds only a pending
+entry and a loop timer on the shared sockets; an explicit `--concurrency` stays
+within 1-1,024 in both modes.
 
 ### 3. Host-file path confusion
 
 A symlink, FIFO, device, socket, oversized file, or invalid UTF-8 file could
 block or redirect parsing. The parser opens without following symlinks where
 supported, verifies the opened descriptor is a regular file, performs bounded
-reads, and reports encoding errors without a traceback.
+reads, and reports encoding errors without a traceback. Lines end only at
+`\n`, `\r\n`, or a lone `\r`, so vertical tabs, form feeds, file/group/
+record separators, NEL, and Unicode line/paragraph separators cannot split one
+line into several targets or shift line numbers and the line limit; they stay
+in the value, where target validation rejects control characters and display
+sanitization escapes the rest.
 
 ### 4. Output-path race or partial evidence
 
@@ -130,13 +152,58 @@ supports that operation. Otherwise it uses an exclusive create and copy;
 handled failures clean up, but an abrupt termination can leave a partial new
 file. Symlinks, sockets, unsupported special nodes, and multiply linked regular
 files are not replaced. Existing character devices and FIFOs are written only
-after the opened descriptor matches the observed node.
+after the opened descriptor matches the observed node, except a macOS
+`/dev/fd/N` path, whose opened descriptor is judged on its own (see below).
+
+In a shared sticky directory another local user can create the report path
+first. A FIFO is written only when the effective user owns it, both as
+observed and as opened, so the report is never delivered to a reader on a FIFO
+another user created. In the default `private` output mode a FIFO is also
+written only when its permission bits give group and other users no read or
+write access, again both as observed and as opened: `mkfifo` under the usual
+umask `022` creates `0644`, which would let every local user open the FIFO and
+read the report. `--output-mode umask` leaves a FIFO's permissions to the
+operator. The bits are checked when PingHue opens the FIFO, but the kernel
+judges a reader only when that reader opens it: a `chmod` does not revoke a
+reader that opened the FIFO, or was blocked waiting to open it, while group or
+other users had access, and PingHue then delivers the report to that reader.
+A FIFO that was ever open to group or other users must be removed and
+recreated with `mkfifo -m 600` rather than fixed with `chmod`. On macOS a
+`/dev/fd/N` path names the run's own descriptor N, and opening it duplicates
+that descriptor, which no other process can replace; `lstat` of the path
+reports the device of `/dev` rather than the open file's, so PingHue judges
+the opened descriptor itself instead of matching the two. A pipe, as passed
+by process substitution, has no links (`st_nlink` 0) and fixed mode bits:
+`fstat` reports `0660`, and `lstat` of the path `0660` less the access the
+descriptor lacks, `0220` for a write end. No other user can open a pipe by
+name, so a pipe named that way is accepted whatever its bits. A named FIFO
+behind the descriptor keeps its link count of at least 1 and `fstat` reports
+its own mode, so it is judged like any other FIFO; because `lstat` hides the
+access a write-only descriptor lacks (a `0644` FIFO lists as `0200`), the
+pre-run check also opens the path, which only duplicates the descriptor. The
+check reads permission bits only: on Linux they reflect any POSIX ACL mask,
+but a macOS ACL can grant access that the bits do not show. Character devices
+remain accepted regardless of owner because the only one an unprivileged user
+can create is the Linux `0:0` whiteout device, which has no driver and is
+refused.
+These refusals exit with status 1, write nothing, and leave no temporary file
+behind. The CLI runs the same type, link-count, ownership, and FIFO-permission
+checks, plus write-permission checks on an existing node and on the nearest
+existing parent directory (which must be a directory, not a dangling symlink),
+before probing starts so a refused path does not discard a completed run; the
+write-time checks remain authoritative. The containing directory itself is not
+judged: a user who owns it, or can write to it without the sticky bit, can
+still rename, replace, or remove a finished report, so evidence belongs in a
+directory only the operator controls.
 
 Explicit `--overwrite` of an existing single-link regular file keeps the
-verified inode and rewrites it in place. This closes replacement races against
-special nodes, but an abrupt process or system failure during the final write
-can leave a partial report. Evidence-preserving workflows should accept output
-only after a successful exit and JSON validation, then rotate it separately.
+verified inode and rewrites it in place. The file must be owned by the
+effective user, both as observed and as opened, because its owner could
+otherwise read the rewritten report whatever mode PingHue applies. This closes
+replacement races against special nodes, but an abrupt process or system
+failure during the final write can leave a partial report. Evidence-preserving
+workflows should accept output only after a successful exit and JSON
+validation, then rotate it separately.
 
 ### 5. Misleading network classification
 
@@ -144,8 +211,24 @@ DNS replicas and multi-address hosts can fail inconsistently. PingHue retains
 the primary error when all failover addresses fail, refreshes stale DNS after
 repeated failures, prioritizes working addresses, distinguishes TCP refusal
 from timeout, computes statistics over the whole run, and latches observed
-loss/high-jitter excursions for final classification. External DNS and routing
-state remain outside the tool's control.
+loss/high-jitter excursions for final classification. A DNS answer made only of
+unspecified addresses (`0.0.0.0`, `::`), the usual DNS-filter sinkhole reply, is
+reported as a DNS failure instead of probed, because probing it would reach the
+local host and report a blocked name healthy. Local resolver capacity limits
+leave a host pending rather than producing a DNS verdict. ICMP replies count only
+when their sequence number, source address, and random per-probe payload token
+match the probe (and, on macOS, where every ICMP socket on the host sees every
+reply, the echo identifier too), so another process's ICMP traffic cannot mark
+a down target up. ICMP errors (destination unreachable, time exceeded) are
+matched the same way, but a router that follows RFC 792 quotes only the 8-byte
+echo header, so an error whose quote stops before the token is matched on the
+identifier, sequence number, and destination alone. Sequence numbers are drawn
+at random from the free ones, so a monitored host learns nothing from its own
+probes about those in flight to other targets; a host that can send ICMP to the
+monitoring machine can still make a probe report `unreachable` by spraying
+forged errors across the sequence space for a known identifier. ICMP latency is
+monotonic, so a wall-clock step cannot yield negative latencies. External DNS
+and routing state remain outside the tool's control.
 
 ### 6. Unsafe ICMP privilege remediation
 
@@ -183,8 +266,10 @@ malformed responses, and other HTTP/network failures remain blocking.
 Runtime dependencies have constrained ranges. CI/release dependency installs
 use hash-pinned lock files, dependency audit covers development, build, and
 audit locks, external actions are pinned to full commit SHAs, and build
-provenance is attested. Advisory databases and package-index availability are
-external dependencies, so fresh audits remain a release gate.
+provenance is attested. No workflow restores a dependency cache, so a cache
+written by one run cannot feed a release build. Advisory databases and
+package-index availability are external dependencies, so fresh audits remain a
+release gate.
 
 ## Risk register
 
@@ -192,9 +277,9 @@ external dependencies, so fresh audits remain a release gate.
 | --- | --- | --- | --- | --- |
 | TM-001 | Terminal/control-character injection | Central sanitization and adversarial rendering tests | A future output caller could omit sanitization | Low |
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
-| TM-003 | Host-file symlink/special-file race | Descriptor-based open/type validation and bounded reads | Same-user content modification remains possible | Low |
-| TM-004 | Output replacement or partial report | No-clobber default, randomized temp, inode/type/link checks | Explicit overwrite and no-hardlink copy fallback are not crash-atomic | Medium |
-| TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, ordered errors, whole-run stats | Remote routing/DNS state is inherently external | Low |
+| TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and line splitting only at `\n`, `\r\n`, or a lone `\r` | Same-user content modification remains possible | Low |
+| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, owner-only FIFO permissions in private mode, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report; `--output-mode umask` or a macOS ACL can still let other users read a FIFO; on macOS a pipe named by `/dev/fd/N`, or a FIFO behind such a path after its last name is removed, is accepted whatever its bits; a `chmod` does not revoke a reader that opened, or was waiting to open, a FIFO while its bits gave group or other users access | Medium |
+| TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats, token-matched ICMP replies, random ICMP sequence numbers | Remote routing/DNS state is inherently external; forged ICMP errors with short quotes can mark a probe `unreachable` | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
 | TM-008 | Vulnerable/malicious dependency | Hash locks, narrow ranges, Dependabot, three-lock audit | New advisories and index compromise remain external | Medium |
@@ -206,9 +291,16 @@ external dependencies, so fresh audits remain a release gate.
 - Every operator-controlled rendered/exported string is sanitized.
 - Target, file, resolver, probe, and retained-sample bounds stay enforced.
 - Host input and existing output nodes are validated by opened descriptor.
+- Existing FIFOs and `--overwrite` targets must be owned by the effective user,
+  and in private mode an existing FIFO must give group and other users no access
+  (a pipe named by a macOS `/dev/fd/N` path excepted).
 - Existing output files remain no-clobber by default.
 - Release actions remain full-SHA pinned and checkout credentials are not
   persisted.
+- Workflow `run:` steps receive event and repository values only through
+  environment variables, never inline `${{ }}` expressions; workflows keep
+  read-only default token permissions, use no dependency caches, and do not
+  use `pull_request_target` or `workflow_run` triggers.
 - PyPI OIDC and repository-write capability remain in separate jobs.
 - The exact tagged commit passes the release validation suite before publish.
 - Hosted hardening is manually checked with adequate read permission before

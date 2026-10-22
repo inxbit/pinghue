@@ -1,9 +1,15 @@
 import io
+import socket
 import threading
+from datetime import datetime, timezone
 
 import pytest
 
-from pinghue import doctor
+from pinghue import doctor, probes
+from pinghue.limits import FdLimit
+from pinghue.models import AddressFamily, ProbeSample, SampleStatus
+
+_NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
 class FakeSocket:
@@ -194,6 +200,31 @@ def test_doctor_dns_probe_handles_empty_response(monkeypatch: pytest.MonkeyPatch
     assert error == "getaddrinfo: no addresses returned"
 
 
+def test_doctor_dns_probe_reports_a_filtered_name_like_a_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sinkhole = [
+        (doctor.socket.AF_INET, 0, 0, "", ("0.0.0.0", 0)),
+        (doctor.socket.AF_INET6, 0, 0, "", ("::", 0, 0, 0)),
+    ]
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", lambda *_: sinkhole)
+
+    address, elapsed_ms, error = doctor._dns_probe("blocked.example")
+
+    # A run reports this name as dns_failure, so --check must not call it OK.
+    assert address is None
+    assert elapsed_ms is None
+    assert error == probes.UNSPECIFIED_ONLY_ERROR
+
+    mixed = [sinkhole[0], (doctor.socket.AF_INET, 0, 0, "", ("192.0.2.40", 0))]
+    monkeypatch.setattr(doctor.socket, "getaddrinfo", lambda *_: mixed)
+
+    address, _, error = doctor._dns_probe("partly-blocked.example")
+
+    assert address == "192.0.2.40 (ipv4)"
+    assert error is None
+
+
 def test_run_check_prints_configured_dns_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
     monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
@@ -236,6 +267,52 @@ def test_run_check_sanitizes_dns_diagnostics(monkeypatch: pytest.MonkeyPatch) ->
     assert r"\x1b[31mboom" in text
 
 
+def test_run_check_sanitizes_system_and_icmp_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # os-release comes from the (possibly container) image and socket/probe
+    # errors from the platform; neither may reach the terminal unescaped.
+    real_socket = socket.socket
+
+    def socket_factory(family: int, type_: int, proto: int = 0, *rest: object) -> object:
+        if rest:
+            # asyncio.run builds its event loop's self-pipe through socket(..., fileno).
+            return real_socket(family, type_, proto, *rest)  # type: ignore[arg-type]
+        if family == doctor.socket.AF_INET6:
+            raise OSError(97, "family \x1b[2J unsupported")
+        return FakeSocket()
+
+    monkeypatch.setattr(doctor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(doctor.platform, "release", lambda: "6.5.0")
+    monkeypatch.setattr(doctor.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        doctor.platform,
+        "freedesktop_os_release",
+        lambda: {"PRETTY_NAME": "Distro\x1b]0;title\x07 \u202eLinux"},
+    )
+    monkeypatch.setattr(doctor.sys, "executable", "/opt/\x1b[31mpython")
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(doctor.socket, "socket", socket_factory)
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _: ("127.0.0.1", 1.0, None))
+
+    async def failing_icmp_probe(*_: object, **__: object) -> ProbeSample:
+        raise RuntimeError("reply from \x1b[5mloopback")
+
+    monkeypatch.setattr(doctor, "icmp_probe", failing_icmp_probe)
+    output = io.StringIO()
+
+    doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert "\x1b" not in text
+    assert "\x07" not in text
+    assert "\u202e" not in text
+    assert r"Distro\x1b]0;title\x07 \u202eLinux" in text
+    assert r"/opt/\x1b[31mpython" in text
+    assert r"RuntimeError: reply from \x1b[5mloopback" in text
+    assert r"OSError: [Errno 97] family \x1b[2J unsupported" in text
+
+
 def test_dns_probe_times_out_when_resolver_hangs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -253,3 +330,162 @@ def test_dns_probe_times_out_when_resolver_hangs(
     assert address is None
     assert elapsed_ms is None
     assert error is not None and "timed out" in error
+
+
+def test_dns_probe_budget_matches_runner_lookup_budget() -> None:
+    # Both must outlast glibc's default 5 s wait on a silent first nameserver,
+    # so --check does not report a resolver that is merely failing over.
+    from pinghue import runner
+
+    assert doctor.DNS_PROBE_TIMEOUT_SECONDS == runner.DNS_LOOKUP_TIMEOUT_SECONDS
+    assert doctor.DNS_PROBE_TIMEOUT_SECONDS > 2 * 5.0
+
+
+@pytest.mark.parametrize(
+    ("sample", "expected"),
+    [
+        (ProbeSample(_NOW, 0.12, SampleStatus.OK), (0.12, None)),
+        (ProbeSample(_NOW, None, SampleStatus.TIMEOUT), (None, "timeout")),
+        (
+            ProbeSample(_NOW, None, SampleStatus.ERROR, "permission denied: ICMP blocked"),
+            (None, "permission denied: ICMP blocked"),
+        ),
+        (ProbeSample(_NOW, None, SampleStatus.UNREACHABLE), (None, "unreachable")),
+        (
+            ProbeSample(
+                _NOW, None, SampleStatus.UNREACHABLE, "No route \x1b]0;title\x07 \u202eto host"
+            ),
+            (None, r"No route \x1b]0;title\x07 \u202eto host"),
+        ),
+    ],
+    ids=["ok", "timeout", "error", "unreachable", "escaped-error"],
+)
+def test_loopback_icmp_probe_uses_the_probe_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    sample: ProbeSample,
+    expected: tuple[float | None, str | None],
+) -> None:
+    calls: list[tuple[str, float, AddressFamily]] = []
+
+    async def fake_icmp_probe(
+        address: str, *, timeout_s: float, address_family: AddressFamily
+    ) -> ProbeSample:
+        calls.append((address, timeout_s, address_family))
+        return sample
+
+    monkeypatch.setattr(doctor, "icmp_probe", fake_icmp_probe)
+
+    assert doctor._loopback_icmp_probe("::1") == expected
+    assert calls == [("::1", 1.0, AddressFamily.IPV6)]
+
+
+def test_loopback_icmp_probe_reports_unexpected_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken_icmp_probe(*_: object, **__: object) -> ProbeSample:
+        raise RuntimeError("engine exploded")
+
+    monkeypatch.setattr(doctor, "icmp_probe", broken_icmp_probe)
+
+    assert doctor._loopback_icmp_probe() == (None, "RuntimeError: engine exploded")
+
+
+def test_loopback_icmp_probe_real_loopback() -> None:
+    try:
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP).close()
+    except OSError as exc:
+        pytest.skip(f"unprivileged ICMP sockets are not available: {exc}")
+
+    latency_ms, error = doctor._loopback_icmp_probe("127.0.0.1")
+
+    assert error is None
+    assert latency_ms is not None and latency_ms >= 0
+
+
+def _check_with_fd_limit(monkeypatch: pytest.MonkeyPatch, limit: FdLimit | None) -> tuple[int, str]:
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("10.0.0.10", 1.0, None))
+    monkeypatch.setattr(doctor, "read_fd_limit", lambda: limit)
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    return exit_code, output.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [
+        (
+            FdLimit(20000, 20000),
+            "[ok]    Open-file limit 20000 (hard 20000) fits --concurrency up to 1024 in TCP mode",
+        ),
+        (
+            FdLimit(None, None),
+            "[ok]    Open-file limit unlimited (hard unlimited) "
+            "fits --concurrency up to 1024 in TCP mode",
+        ),
+        (
+            FdLimit(256, None),
+            "[ok]    Open-file limit 256 (hard unlimited); "
+            "raised at startup to fit --concurrency up to 1024 in TCP mode",
+        ),
+        (
+            FdLimit(1024, 524288),
+            "[ok]    Open-file limit 1024 (hard 524288); "
+            "raised at startup to fit --concurrency up to 1024 in TCP mode",
+        ),
+    ],
+)
+def test_doctor_reports_open_file_limit_that_fits_maximum_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+    limit: FdLimit,
+    expected: str,
+) -> None:
+    exit_code, text = _check_with_fd_limit(monkeypatch, limit)
+
+    assert exit_code == 0
+    assert "\nOpen files\n" in text
+    assert expected in text
+    assert "Raise the hard limit" not in text
+
+
+def test_doctor_warns_when_hard_open_file_limit_caps_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exit_code, text = _check_with_fd_limit(monkeypatch, FdLimit(256, 512))
+
+    # A low open-file limit only bounds TCP mode; ICMP probes share a few sockets.
+    assert exit_code == 0
+    assert "[warn]  Open-file limit 256 (hard 512) caps --concurrency at 256 in TCP mode\n" in text
+    assert (
+        "Raise the hard limit to at least 1472 to allow --concurrency 1024 in TCP mode.\n"
+        "          ICMP probes share a few sockets and are not limited by it.\n"
+    ) in text
+
+
+def test_doctor_flags_open_file_limit_below_default_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, text = _check_with_fd_limit(monkeypatch, FdLimit(100, 100))
+
+    assert (
+        "[warn]  Open-file limit 100 (hard 100) caps --concurrency at 50 in TCP mode, "
+        "below the default minimum of 64"
+    ) in text
+
+
+def test_doctor_scales_the_reserve_for_a_small_open_file_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Matches the runtime: a 160-descriptor limit keeps half of itself in reserve.
+    _, text = _check_with_fd_limit(monkeypatch, FdLimit(160, 160))
+
+    assert "[warn]  Open-file limit 160 (hard 160) caps --concurrency at 80 in TCP mode\n" in text
+
+
+def test_doctor_reports_unavailable_open_file_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    exit_code, text = _check_with_fd_limit(monkeypatch, None)
+
+    assert exit_code == 0
+    assert "[warn]  Open-file limit not available on this platform" in text
