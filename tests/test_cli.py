@@ -164,6 +164,32 @@ def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
     assert "stdout is not a terminal; pass --no-tui" in capsys.readouterr().err
 
 
+def test_main_refuses_the_tui_when_stderr_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # With descriptor 2 closed at startup the TUI has nowhere to draw and hung;
+    # line output does not need stderr and still runs.
+    calls: list[bool] = []
+
+    async def fake_run(args: object, **__: object) -> int:
+        calls.append(bool(getattr(args, "no_tui", False)))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys, "__stderr__", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    assert main(["127.0.0.1"]) == 1
+    assert calls == []
+    assert main(["--no-tui", "127.0.0.1"]) == 0
+    assert calls == [True]
+    assert capsys.readouterr().out == ""
+
+
 def test_main_does_not_warn_about_stdout_when_no_tui_is_requested(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
