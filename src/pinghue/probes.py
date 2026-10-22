@@ -360,6 +360,25 @@ def _kernel_connect_rtt_ms(sock: socket.socket) -> float | None:
     return float(rtt_us) / 1000
 
 
+def _handshake_rtt_within_ms(sock: socket.socket, timeout_s: float) -> float | None:
+    """Return the handshake RTT of a connect the kernel finished within timeout_s.
+
+    When the event loop stalls past a probe's deadline, the deadline can be
+    handled in the same loop turn as the connect that finished before it, and
+    win. The kernel's handshake RTT tells whether the answer came in time;
+    None (still connecting, failed, no TCP_INFO, or a retransmitted SYN)
+    keeps the timeout.
+    """
+    try:
+        sock.getpeername()
+    except OSError:
+        return None
+    rtt_ms = _kernel_connect_rtt_ms(sock)
+    if rtt_ms is None or rtt_ms > timeout_s * 1000:
+        return None
+    return rtt_ms
+
+
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:
     """Probe a TCP port by connecting a non-blocking socket on the event loop.
 
@@ -369,7 +388,9 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
 
     The connect time is measured on the event loop, so it also counts any
     time the loop was busy elsewhere. On Linux the kernel's handshake RTT
-    replaces it when that is smaller and no SYN was retransmitted.
+    replaces it when that is smaller and no SYN was retransmitted, and a
+    connect the kernel finished within the timeout still counts when a
+    stalled loop only got to it after the deadline.
     """
     timestamp = datetime.now(timezone.utc)
     loop = asyncio.get_running_loop()
@@ -378,14 +399,21 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
 
     try:
         sock = _open_tcp_socket(address)
-        await asyncio.wait_for(loop.sock_connect(sock, (address, port)), timeout=timeout_s)
-        latency_ms = (time.perf_counter() - start) * 1000
-        kernel_rtt_ms = _kernel_connect_rtt_ms(sock)
-        if kernel_rtt_ms is not None:
-            latency_ms = min(latency_ms, kernel_rtt_ms)
+        try:
+            await asyncio.wait_for(loop.sock_connect(sock, (address, port)), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            in_time_rtt_ms = _handshake_rtt_within_ms(sock, timeout_s)
+            if in_time_rtt_ms is None:
+                return ProbeSample(
+                    timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT
+                )
+            latency_ms = in_time_rtt_ms
+        else:
+            latency_ms = (time.perf_counter() - start) * 1000
+            kernel_rtt_ms = _kernel_connect_rtt_ms(sock)
+            if kernel_rtt_ms is not None:
+                latency_ms = min(latency_ms, kernel_rtt_ms)
         latency_ms = round(latency_ms, 2)
-    except asyncio.TimeoutError:
-        return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except ConnectionRefusedError as exc:
         return ProbeSample(
             timestamp=timestamp,

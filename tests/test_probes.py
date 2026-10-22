@@ -19,9 +19,17 @@ from pinghue.probes import ResolvedTarget, icmp_probe, resolve_target, tcp_probe
 class FakeTcpSocket:
     """Stands in for tcp_probe's socket; a fake connect never touches it."""
 
-    def __init__(self, *, tcp_info: bytes | None = None) -> None:
+    def __init__(
+        self, *, tcp_info: bytes | None = None, peer: tuple[str, int] | None = None
+    ) -> None:
         self.tcp_info = tcp_info
+        self.peer = peer
         self.closed = False
+
+    def getpeername(self) -> tuple[str, int]:
+        if self.peer is None:
+            raise OSError(errno.ENOTCONN, "Transport endpoint is not connected")
+        return self.peer
 
     def getsockopt(self, level: int, option: int, buflen: int) -> bytes:
         assert (level, option, buflen) == (socket.IPPROTO_TCP, 11, 104)
@@ -31,6 +39,9 @@ class FakeTcpSocket:
 
     def close(self) -> None:
         self.closed = True
+
+
+PEER = ("127.0.0.1", 443)
 
 
 def _tcp_info(*, rtt_us: int, total_retrans: int) -> bytes:
@@ -249,6 +260,60 @@ async def test_tcp_probe_real_loopback_excludes_event_loop_stall() -> None:
 
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms is not None and sample.latency_ms < 25
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="TCP_INFO is read on Linux")
+async def test_tcp_probe_real_loopback_keeps_a_connect_finished_before_a_stalled_deadline() -> None:
+    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        probe = asyncio.create_task(tcp_probe("127.0.0.1", port, timeout_s=0.05))
+        await asyncio.sleep(0)
+        # The handshake finishes at once, but the loop stalls past the probe's
+        # deadline before it can see that.
+        time.sleep(0.2)
+        sample = await probe
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None and sample.latency_ms < 25
+
+
+@pytest.mark.parametrize(
+    ("tcp_info_option", "sock"),
+    [
+        (11, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0))),
+        (11, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=60_000, total_retrans=0), peer=PEER)),
+        (11, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=1), peer=PEER)),
+        (None, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0), peer=PEER)),
+    ],
+    ids=["still-connecting", "answered-after-timeout", "syn-retransmitted", "no-tcp-info"],
+)
+async def test_tcp_probe_keeps_the_timeout_unless_the_kernel_connected_in_time(
+    monkeypatch: pytest.MonkeyPatch, tcp_info_option: int | None, sock: FakeTcpSocket
+) -> None:
+    monkeypatch.setattr(probes, "_TCP_INFO", tcp_info_option)
+    _install_tcp_connect(monkeypatch, sock, _slow_connect(1.0))
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=0.05)
+
+    assert sample.status == SampleStatus.TIMEOUT
+    assert sample.latency_ms is None
+    assert sock.closed
+
+
+async def test_tcp_probe_reports_a_connect_the_kernel_finished_in_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The deadline won over a connect that the kernel had finished in time.
+    monkeypatch.setattr(probes, "_TCP_INFO", 11)
+    sock = FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0), peer=PEER)
+    _install_tcp_connect(monkeypatch, sock, _slow_connect(1.0))
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=0.05)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms == 1.5
+    assert sock.closed
 
 
 async def test_tcp_probe_reports_refused(monkeypatch: pytest.MonkeyPatch) -> None:
