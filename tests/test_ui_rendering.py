@@ -1,5 +1,5 @@
-"""Target table rendering: change tracking, the per-pass budget, and the
-DataTable geometry the renderer and the layout rely on.
+"""Target table rendering: change tracking, the per-pass budget, the fleet
+summary, and the DataTable geometry the renderer and the layout rely on.
 
 The Pilot tests pin Textual behavior that pinghue works around (scroll extent
 after column width changes, row-to-line mapping for partial repaints), so a
@@ -18,7 +18,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.geometry import Region
 from textual.widget import Widget
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Header
 
 import pinghue.app as app_module
 import pinghue.runner as runner_module
@@ -36,14 +36,22 @@ from pinghue.models import (
 from pinghue.ui import (
     AMBER,
     COLUMN_KEYS,
+    ELLIPSIS,
+    MUTED,
+    PENDING_LABEL,
     RED,
+    FleetSummary,
     TargetTable,
     TargetTableRenderer,
     apply_column_widths,
     compute_table_layout,
+    fleet_summary_parts,
+    format_age,
     format_history_cell,
     target_row_cells,
     target_row_key,
+    target_state,
+    truncate_middle,
 )
 
 T0 = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
@@ -130,6 +138,7 @@ def fresh_cells(target: TargetRun, widths: dict[str, int] = WIDTHS) -> list[str]
             history_style="bar",
             jitter_threshold_ms=50.0,
             slow_latency_ms=SLOW_MS,
+            host_width=widths["host"],
         )
     ]
 
@@ -234,6 +243,7 @@ def test_layout_change_rerenders_every_row() -> None:
 
     for index in range(3):
         assert len(table.cell(index, "history").plain) == 9
+        assert table.cell(index, "host").plain == truncate_middle(long_name, 14)
         assert table.cell(index, "address").plain == ""
 
 
@@ -265,11 +275,13 @@ def test_state_changes_are_written_on_the_next_full_pass() -> None:
     for target in targets:
         add(target, ok(41.0))
     targets[40].status = TargetStatus.DOWN
-    renderer.sync(table, targets)
+    summary = renderer.sync(table, targets)
 
     # Only one row was rebuilt this pass, but every state label is current.
     assert table.cell(40, "state").plain == "down"
     assert table.cell(40, "last").plain != "41.00"
+    assert summary is not None
+    assert summary.counts == {"healthy": 49, "down": 1}
 
 
 def test_viewport_rows_are_refreshed_without_a_full_pass() -> None:
@@ -281,8 +293,9 @@ def test_viewport_rows_are_refreshed_without_a_full_pass() -> None:
 
     for target in targets:
         add(target, ok(43.0))
-    renderer.sync(table, targets, priority=range(10, 20), full=False)
+    summary = renderer.sync(table, targets, priority=range(10, 20), full=False)
 
+    assert summary is None
     assert table.updated_rows() == {target_row_key(index) for index in range(10, 20)}
 
 
@@ -345,6 +358,120 @@ def test_history_cell_uses_one_span_per_run_of_equal_styles() -> None:
         (3, 5, RED),
         (5, 6, ui.GREEN),
     ]
+
+
+def test_resolved_target_without_results_is_pending() -> None:
+    resolving = TargetRun("a.example", status=TargetStatus.RESOLVING)
+    resolved = TargetRun("a.example", resolved_address="127.0.253.1", status=TargetStatus.RESOLVING)
+    unprobed = TargetRun("a.example", resolved_address="127.0.253.1", status=TargetStatus.DOWN)
+    probed_down = TargetRun(
+        "a.example",
+        resolved_address="127.0.253.1",
+        status=TargetStatus.DOWN,
+        samples=[lost()],
+    )
+
+    assert target_state(resolving) == ("resolving", MUTED)
+    assert target_state(resolved) == (PENDING_LABEL, MUTED)
+    assert target_state(unprobed) == (PENDING_LABEL, MUTED)
+    assert target_state(probed_down) == ("down", RED)
+    # Only the TUI label changes; JSON output keeps the model status.
+    assert resolved.status.value == "resolving"
+
+
+def test_truncate_middle_keeps_the_distinguishing_tail() -> None:
+    first = truncate_middle("db-primary-01.dc1.example.net", 24)
+    second = truncate_middle("db-primary-02.dc1.example.net", 24)
+
+    assert first == f"db-pr{ELLIPSIS}01.dc1.example.net"
+    assert second == f"db-pr{ELLIPSIS}02.dc1.example.net"
+    assert truncate_middle("short.example", 24) == "short.example"
+    assert truncate_middle("abcdef", 1) == ELLIPSIS
+    assert truncate_middle("abcdef", 0) == ""
+
+
+def test_host_cell_escapes_control_characters_before_truncating() -> None:
+    target = TargetRun("evil\x1b[31m" + "x" * 40 + ".example", resolved_address="127.0.253.1")
+
+    host = target_row_cells(
+        target,
+        show_address=False,
+        mode="icmp",
+        history_width=10,
+        history_style="bar",
+        jitter_threshold_ms=50.0,
+        slow_latency_ms=SLOW_MS,
+        host_width=16,
+    )[0].plain
+
+    assert len(host) == 16
+    assert "\x1b" not in host
+    assert host.startswith("evi")
+    assert host.endswith("xxxx.example")
+
+
+def test_fleet_summary_counts_states_and_the_oldest_result() -> None:
+    targets = [
+        healthy("healthy.example", ok(5.0, at=9.0)),
+        TargetRun(
+            "flappy.example",
+            resolved_address="127.0.253.2",
+            status=TargetStatus.INTERMITTENT,
+            samples=[ok(5.0, at=4.0), lost(at=5.0)],
+        ),
+        TargetRun(
+            "down.example",
+            resolved_address="127.0.253.3",
+            status=TargetStatus.DOWN,
+            samples=[lost(at=8.0)],
+        ),
+        TargetRun("nxdomain.example", status=TargetStatus.DNS_FAILURE),
+        TargetRun(
+            "denied.example",
+            resolved_address="127.0.253.4",
+            status=TargetStatus.PERMISSION_DENIED,
+        ),
+        TargetRun("slow-dns.example", status=TargetStatus.RESOLVING),
+        TargetRun("new.example", resolved_address="127.0.253.5", status=TargetStatus.RESOLVING),
+        TargetRun("reset.example", resolved_address="127.0.253.6", status=TargetStatus.DOWN),
+    ]
+    table = RecordingTable()
+
+    summary = make_renderer().sync(table, targets, now=T0 + timedelta(seconds=10))
+
+    assert summary == FleetSummary(
+        counts={
+            "healthy": 1,
+            "intermittent": 1,
+            "down": 1,
+            "dns": 1,
+            "denied": 1,
+            PENDING_LABEL: 3,
+        },
+        oldest_result_age_s=5.0,
+    )
+    parts = fleet_summary_parts(summary, stale_after_s=4.0)
+    assert "".join(text for text, _style in parts) == (
+        "1 healthy  1 intermittent  1 down  1 dns  1 denied  3 pending  oldest result 5.0s ago"
+    )
+    assert ("5.0s", AMBER) in parts
+    assert ("5.0s", MUTED) in fleet_summary_parts(summary, stale_after_s=6.0)
+
+
+def test_fleet_summary_without_results_has_no_age() -> None:
+    summary = make_renderer().sync(
+        RecordingTable(),
+        [TargetRun("a.example", status=TargetStatus.RESOLVING)],
+    )
+
+    assert summary == FleetSummary(counts={PENDING_LABEL: 1}, oldest_result_age_s=None)
+    assert fleet_summary_parts(summary, stale_after_s=1.0) == [("1", MUTED), (" pending", MUTED)]
+
+
+def test_format_age_stays_short() -> None:
+    assert format_age(0.84) == "0.8s"
+    assert format_age(12.4) == "12s"
+    assert format_age(300.0) == "5m"
 
 
 class TableApp(App[None]):
@@ -555,6 +682,30 @@ async def test_resize_and_address_toggle_recompute_the_scroll_extent() -> None:
         await pilot.pause()
         _assert_geometry(table)
         assert table.max_scroll_x == 0
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_header_shows_the_fleet_summary() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 20)) as pilot:
+        await _start(pilot, app)
+
+        assert app.sub_title.startswith("2 healthy  oldest result ")
+        title = app.query_one(Header).format_title().plain
+        assert title.startswith(f"{app.title}  2 healthy  oldest result ")
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_reset_selected_shows_pending_at_once() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 20)) as pilot:
+        table = await _start(pilot, app)
+        assert table.get_cell(target_row_key(0), "state").plain == "healthy"
+
+        await pilot.press("r")
+
+        assert table.get_cell(target_row_key(0), "state").plain == PENDING_LABEL
+        assert app.targets[0].status == TargetStatus.RESOLVING
 
 
 @pytest.mark.usefixtures("stub_network")

@@ -9,6 +9,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.content import Content
 from textual.css.query import NoMatches
 from textual.events import Click, Key, Resize
 from textual.widgets import DataTable, Footer, Header, Static
@@ -32,6 +33,7 @@ from pinghue.ui import (
     TargetTableRenderer,
     apply_column_widths,
     compute_table_layout,
+    fleet_summary_parts,
     focus_table,
     format_history_legend,
 )
@@ -120,6 +122,7 @@ class PinghueTextualApp(App[None]):
         )
         self._last_full_refresh = float("-inf")
         self._watching_scroll = False
+        self._summary_parts: list[tuple[str, str]] = []
         self._column_widths: dict[str, int] = {}
         self._finishing = False
 
@@ -321,12 +324,18 @@ class PinghueTextualApp(App[None]):
         full = now - self._last_full_refresh >= UI_REFRESH_INTERVAL / 2
         if full:
             self._last_full_refresh = now
-        self._table_renderer.sync(
+        summary = self._table_renderer.sync(
             table,
             self.targets,
             priority=self._priority_rows(table),
             full=full,
         )
+        if summary is not None:
+            stale_after = 2 * (
+                max(self.args_config.interval, self.args_config.timeout) + self.args_config.timeout
+            )
+            self._summary_parts = fleet_summary_parts(summary, stale_after_s=stale_after)
+            self.sub_title = "".join(text for text, _style in self._summary_parts)
 
     def _refresh_visible_rows(self) -> None:
         try:
@@ -339,6 +348,12 @@ class PinghueTextualApp(App[None]):
             priority=self._priority_rows(table),
             full=False,
         )
+
+    def format_title(self, title: str, sub_title: str) -> Content:
+        # The header shows the fleet summary in color after the title.
+        if not sub_title or not self._summary_parts:
+            return super().format_title(title, sub_title)
+        return Content.assemble(Content(title), ("  ", ""), *self._summary_parts)
 
     def on_resize(self, event: Resize) -> None:
         # Runs before App._on_resize records the new size: lay the columns out

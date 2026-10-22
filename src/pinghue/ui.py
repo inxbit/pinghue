@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 import time
 from bisect import bisect_left
+from collections import Counter
 from collections.abc import Iterable, Iterator, MutableMapping, Sequence
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from rich.text import Span, Text
@@ -85,6 +88,8 @@ FIXED_COLUMN_WIDTHS = {
 # address column only collapses while it is the hidden placeholder.
 NARROW_COLLAPSE_ORDER = ("address", "mode", "min", "max")
 
+ELLIPSIS = "…"
+PENDING_LABEL = "pending"
 HOST_INDEX = COLUMN_KEYS.index("host")
 STATE_INDEX = COLUMN_KEYS.index("state")
 HISTORY_INDEX = COLUMN_KEYS.index("history")
@@ -102,6 +107,17 @@ _STATE_LABELS: dict[TargetStatus, CellValue] = {
     TargetStatus.ERROR: ("error", RED),
 }
 
+# Fleet-summary categories in display order, with the color of their count.
+SUMMARY_CATEGORIES: tuple[CellValue, ...] = (
+    ("healthy", GREEN),
+    ("intermittent", AMBER),
+    ("down", RED),
+    ("dns", RED),
+    ("denied", RED),
+    ("error", RED),
+    (PENDING_LABEL, MUTED),
+)
+
 # Row refresh scheduling: rows near the viewport are refreshed on every pass;
 # the rest are refreshed round-robin within a per-pass time budget, but at
 # least MIN_ROWS_PER_PASS and len(targets) / FULL_SWEEP_PASSES rows per pass,
@@ -111,6 +127,8 @@ ROW_REFRESH_BUDGET_S = 0.02
 FULL_SWEEP_PASSES = 8
 MIN_ROWS_PER_PASS = 256
 VIEWPORT_MARGIN_ROWS = 4
+
+_NO_SAMPLE = datetime.max.replace(tzinfo=timezone.utc)
 
 
 def issue_styles(
@@ -176,6 +194,22 @@ def compact_loss(value: float) -> str:
     return f"{value:.2f}%"
 
 
+def truncate_middle(value: str, width: int) -> str:
+    """Shorten text to ``width`` with a middle ellipsis that keeps most of the tail.
+
+    Host names in one fleet usually share a prefix and differ near the end
+    (``db-primary-01.dc1.example.net`` vs ``db-primary-02.dc1.example.net``),
+    so the tail gets three quarters of the space.
+    """
+    if len(value) <= width:
+        return value
+    if width <= 1:
+        return ELLIPSIS[: max(width, 0)]
+    head = (width - 1) // 4
+    tail = width - 1 - head
+    return f"{value[:head]}{ELLIPSIS}{value[-tail:]}"
+
+
 def format_state_cell(status: TargetStatus) -> Text:
     """Return a styled target-state cell."""
     label, style = _STATE_LABELS.get(status, (status.value, RED))
@@ -183,8 +217,18 @@ def format_state_cell(status: TargetStatus) -> Text:
 
 
 def target_state(target: TargetRun) -> CellValue:
-    """Return the TUI state label and style for a target."""
-    return _STATE_LABELS.get(target.status, (target.status.value, RED))
+    """Return the TUI state label and style for a target.
+
+    A target with an address but no probe result yet (just resolved, or reset)
+    is ``pending`` rather than ``resolving`` or ``down``: there is no evidence
+    about it yet. JSON output keeps the underlying status.
+    """
+    status = target.status
+    if target.resolved_address and (
+        status == TargetStatus.RESOLVING or (status == TargetStatus.DOWN and not target.samples)
+    ):
+        return PENDING_LABEL, MUTED
+    return _STATE_LABELS.get(status, (status.value, RED))
 
 
 def history_text(glyphs: str, codes: str) -> Text:
@@ -261,8 +305,12 @@ def _last_latency(samples: Sequence[ProbeSample]) -> float | None:
     return None
 
 
-def _host_value(target: TargetRun) -> CellValue:
-    return sanitize_display(target.target), GREEN
+def _host_value(target: TargetRun, host_width: int | None) -> CellValue:
+    # Escape first, so truncation can never reintroduce a control character.
+    host = sanitize_display(target.target)
+    if host_width is not None:
+        host = truncate_middle(host, host_width)
+    return host, GREEN
 
 
 def _address_value(target: TargetRun, show_address: bool) -> CellValue:
@@ -305,10 +353,11 @@ def target_row_values(
     history_style: str,
     jitter_threshold_ms: float,
     slow_latency_ms: float,
+    host_width: int | None = None,
 ) -> RowValues:
     """Return the plain text and style of every cell in one target row."""
     return (
-        _host_value(target),
+        _host_value(target, host_width),
         _address_value(target, show_address),
         *_metric_values(
             target,
@@ -340,6 +389,7 @@ def target_row_cells(
     history_style: str,
     jitter_threshold_ms: float,
     slow_latency_ms: float,
+    host_width: int | None = None,
 ) -> tuple[Text, ...]:
     """Return rendered cells for one target row."""
     values = target_row_values(
@@ -350,6 +400,7 @@ def target_row_cells(
         history_style=history_style,
         jitter_threshold_ms=jitter_threshold_ms,
         slow_latency_ms=slow_latency_ms,
+        host_width=host_width,
     )
     return tuple(_cell_text(index, value) for index, value in enumerate(values))
 
@@ -459,6 +510,7 @@ def sync_target_table(
     jitter_threshold_ms: float,
     slow_latency_ms: float,
     cell_cache: MutableMapping[tuple[str, str], object] | None = None,
+    host_width: int | None = None,
 ) -> bool:
     """Add rows once, then update every row's changed cells in place.
 
@@ -478,6 +530,7 @@ def sync_target_table(
             history_style=history_style,
             jitter_threshold_ms=jitter_threshold_ms,
             slow_latency_ms=slow_latency_ms,
+            host_width=host_width,
         )
         if not initialized:
             table.add_row(
@@ -499,6 +552,55 @@ def sync_target_table(
                 cell_cache[cache_key] = value
 
     return True
+
+
+@dataclass(frozen=True)
+class FleetSummary:
+    """Host counts per displayed state, and how stale the stalest result is."""
+
+    counts: dict[str, int]
+    # Among targets with at least one sample, the age of the oldest "newest
+    # sample". Well above the probe interval means probes are falling behind.
+    oldest_result_age_s: float | None
+
+
+def _summary_category(label: str) -> str:
+    return PENDING_LABEL if label == "resolving" else label
+
+
+def format_age(seconds: float) -> str:
+    """Return a short age such as 0.8s, 12s or 3m."""
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    if seconds < 120:
+        return f"{seconds:.0f}s"
+    return f"{seconds / 60:.0f}m"
+
+
+def fleet_summary_parts(summary: FleetSummary, *, stale_after_s: float) -> list[CellValue]:
+    """Return (text, style) parts of the always-visible fleet summary.
+
+    States with no hosts are left out; the result age turns amber once it
+    exceeds ``stale_after_s``.
+    """
+    parts: list[CellValue] = []
+    for category, style in SUMMARY_CATEGORIES:
+        count = summary.counts.get(category, 0)
+        if not count:
+            continue
+        if parts:
+            parts.append(("  ", MUTED))
+        parts.append((str(count), style))
+        parts.append((f" {category}", MUTED))
+
+    age = summary.oldest_result_age_s
+    if age is not None:
+        if parts:
+            parts.append(("  ", MUTED))
+        parts.append(("oldest result ", MUTED))
+        parts.append((format_age(age), AMBER if age > stale_after_s else MUTED))
+        parts.append((" ago", MUTED))
+    return parts
 
 
 class TargetTable(DataTable[Any]):
@@ -615,16 +717,19 @@ class TargetTableRenderer:
         self.min_rows_per_pass = min_rows_per_pass
         self._rows: list[_RowState] = []
         self._row_keys: list[Any] = []
+        self._categories: list[str] = []
+        self._newest: list[datetime] = []
         self._show_address = False
+        self._host_width: int | None = None
         self._history_width = 0
         self._generation = 0
         self._cursor = 0
 
     def set_layout(self, *, show_address: bool, widths: ColumnWidths) -> None:
         """Record the layout the cells depend on; a change re-renders every row."""
-        layout = (show_address, widths["history"])
-        if layout != (self._show_address, self._history_width):
-            self._show_address, self._history_width = layout
+        layout = (show_address, widths["host"], widths["history"])
+        if layout != (self._show_address, self._host_width, self._history_width):
+            self._show_address, self._host_width, self._history_width = layout
             self._generation += 1
 
     def sync(
@@ -634,12 +739,13 @@ class TargetTableRenderer:
         *,
         priority: range = range(0),
         full: bool = True,
-    ) -> None:
+        now: datetime | None = None,
+    ) -> FleetSummary | None:
         """Bring the table up to date with ``targets``.
 
         ``priority`` rows (the viewport) are always refreshed. A ``full`` pass
-        also writes changed state labels everywhere and refreshes the other
-        changed rows round-robin.
+        also writes changed state labels everywhere, refreshes the other
+        changed rows round-robin, and returns the fleet summary.
         """
         # Rows are added outside the batch: add_row's own repaint request
         # must not be dropped.
@@ -660,6 +766,7 @@ class TargetTableRenderer:
         refresh_rows = getattr(table, "refresh_rows", None)
         if changed and refresh_rows is not None:
             refresh_rows(changed)
+        return self._summary(count, now) if full else None
 
     def _refresh_changed_rows(
         self,
@@ -729,8 +836,8 @@ class TargetTableRenderer:
 
     def _values(self, row: _RowState, target: TargetRun) -> RowValues:
         host = row.values[HOST_INDEX]
-        if host is None or row.target is not target:
-            host = _host_value(target)
+        if host is None or row.target is not target or row.generation != self._generation:
+            host = _host_value(target, self._host_width)
         return (
             host,
             _address_value(target, self._show_address),
@@ -758,6 +865,8 @@ class TargetTableRenderer:
             # DataTable.add_row returns the RowKey; reusing it skips a key
             # conversion on every later update_cell.
             self._row_keys.append(key if added is None else added)
+            self._categories.append(PENDING_LABEL)
+            self._newest.append(_NO_SAMPLE)
             self._mark_rendered(index, target)
 
     def _mark_rendered(self, index: int, target: TargetRun) -> None:
@@ -769,6 +878,11 @@ class TargetTableRenderer:
         row.status = target.status
         row.address = target.resolved_address
         row.generation = self._generation
+        self._remember_state(index, row.values[STATE_INDEX] or target_state(target), samples)
+
+    def _remember_state(self, index: int, state: CellValue, samples: SampleWindow) -> None:
+        self._categories[index] = _summary_category(state[0])
+        self._newest[index] = samples[-1].timestamp if samples else _NO_SAMPLE
 
     def _refresh_state(self, table: Any, index: int, target: TargetRun) -> bool:
         """Write a changed state label ahead of the rest of the row."""
@@ -783,6 +897,7 @@ class TargetTableRenderer:
                 update_width=False,
             )
             row.values[STATE_INDEX] = state
+        self._remember_state(index, state, target.samples)
         return changed
 
     def _render_row(self, table: Any, index: int, target: TargetRun) -> bool:
@@ -804,6 +919,15 @@ class TargetTableRenderer:
             changed = True
         self._mark_rendered(index, target)
         return changed
+
+    def _summary(self, count: int, now: datetime | None) -> FleetSummary:
+        counts = Counter(self._categories[:count])
+        oldest = min(self._newest[:count], default=_NO_SAMPLE)
+        age = None
+        if oldest is not _NO_SAMPLE:
+            current = datetime.now(timezone.utc) if now is None else now
+            age = max(0.0, (current - oldest).total_seconds())
+        return FleetSummary(counts=dict(counts), oldest_result_age_s=age)
 
 
 def restore_cursor_row(table: Any, *, preferred_row: int, row_count: int) -> None:
