@@ -293,13 +293,25 @@ def fit_host_name(name: str, width: int, span: tuple[int, int]) -> str:
     return head + core + tail
 
 
-def host_labels(names: Sequence[str], width: int | None) -> list[str]:
-    """Return display-safe host labels at most ``width`` wide that keep the
-    part of each name that tells it apart from the rest of the fleet."""
+def display_host_names(names: Sequence[str]) -> tuple[list[str], list[tuple[int, int]]]:
+    """Return each host name escaped for display, and the span of the escaped
+    name that tells it apart from the rest of the fleet (see host_name_spans).
+
+    Every host label the TUI draws comes from here: names are escaped first,
+    so shortening one with fit_host_labels can never bring back a control
+    character.
+    """
     safe_names = [sanitize_display(name) for name in names]
+    return safe_names, host_name_spans(safe_names)
+
+
+def fit_host_labels(
+    safe_names: Sequence[str], spans: Sequence[tuple[int, int]], width: int | None
+) -> list[str]:
+    """Return display_host_names output as labels at most ``width`` wide that
+    keep the part of each name that tells it apart from the rest of the fleet."""
     if width is None:
-        return safe_names
-    spans = host_name_spans(safe_names)
+        return list(safe_names)
     return [fit_host_name(name, width, span) for name, span in zip(safe_names, spans, strict=True)]
 
 
@@ -921,19 +933,11 @@ class TargetTableRenderer:
         names_changed = names != self._names
         if names_changed:
             self._names = names
-            self._safe_names = [sanitize_display(name) for name in names]
-            self._name_spans = host_name_spans(self._safe_names)
+            self._safe_names, self._name_spans = display_host_names(names)
         width = self._host_width
         if names_changed or width != self._labels_width:
             self._labels_width = width
-            self._host_labels = (
-                list(self._safe_names)
-                if width is None
-                else [
-                    fit_host_name(name, width, span)
-                    for name, span in zip(self._safe_names, self._name_spans, strict=True)
-                ]
-            )
+            self._host_labels = fit_host_labels(self._safe_names, self._name_spans, width)
             self._generation += 1
 
     def _refresh_changed_rows(

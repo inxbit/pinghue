@@ -49,10 +49,11 @@ from pinghue.ui import (
     TargetTableRenderer,
     apply_column_widths,
     compute_table_layout,
+    display_host_names,
+    fit_host_labels,
     fleet_summary_parts,
     format_age,
     format_history_cell,
-    host_labels,
     target_row_cells,
     target_row_key,
     target_state,
@@ -150,6 +151,11 @@ def fresh_cells(target: TargetRun, widths: dict[str, int] = WIDTHS) -> list[str]
 
 def shown_cells(table: RecordingTable, index: int) -> list[str]:
     return [table.cell(index, column).plain for column in COLUMN_KEYS]
+
+
+def host_labels(names: list[str], width: int | None) -> list[str]:
+    """The host column the renderer draws for ``names`` at ``width``."""
+    return fit_host_labels(*display_host_names(names), width)
 
 
 def test_unchanged_rows_are_skipped_without_rebuilding_cells(
@@ -494,18 +500,13 @@ def test_host_labels_escape_control_characters_first() -> None:
 
 def test_host_cell_escapes_control_characters_before_truncating() -> None:
     target = TargetRun("evil\x1b[31m" + "x" * 40 + ".example", resolved_address="127.0.253.1")
+    table = RecordingTable()
+    renderer = make_renderer()
+    renderer.set_layout(show_address=False, widths=dict(WIDTHS, host=16))
 
-    host = target_row_cells(
-        target,
-        show_address=False,
-        mode="icmp",
-        history_width=10,
-        history_style="bar",
-        jitter_threshold_ms=50.0,
-        slow_latency_ms=SLOW_MS,
-        host_width=16,
-    )[0].plain
+    renderer.sync(table, [target])
 
+    host = table.cell(0, "host").plain
     assert len(host) == 16
     assert "\x1b" not in host
     assert host.startswith("evi")
