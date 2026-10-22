@@ -9,7 +9,7 @@ from typing import Any
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.css.query import NoMatches
-from textual.events import Click, Key
+from textual.events import Click, Key, Resize
 from textual.widgets import DataTable, Footer, Header, Static
 
 from pinghue import __version__
@@ -23,7 +23,9 @@ from pinghue.runner import (
     stagger_delay,
 )
 from pinghue.ui import (
+    CELL_PADDING,
     COLUMN_KEYS,
+    SCROLLBAR_WIDTH,
     apply_column_widths,
     compute_table_layout,
     focus_table,
@@ -269,16 +271,22 @@ class PinghueTextualApp(App[None]):
         await self._stop_background_task(self._deadline_task)
         await self._stop_background_task(self._completion_task)
 
-    def _refresh_table(self) -> None:
+    def _table_layout(self, table: DataTable[Any], width: int) -> dict[str, int]:
+        styles = getattr(table, "styles", None)
+        return compute_table_layout(
+            width=max(width, 1),
+            targets=self.targets,
+            show_address=self.show_address,
+            cell_padding=getattr(table, "cell_padding", CELL_PADDING),
+            scrollbar_width=getattr(styles, "scrollbar_size_vertical", SCROLLBAR_WIDTH),
+        )
+
+    def _refresh_table(self, width: int | None = None) -> None:
         try:
             table = self.query_one("#targets", DataTable)
         except NoMatches:
             return
-        column_widths = compute_table_layout(
-            width=max(self.size.width, 1),
-            targets=self.targets,
-            show_address=self.show_address,
-        )
+        column_widths = self._table_layout(table, self.size.width if width is None else width)
         if column_widths != self._column_widths:
             apply_column_widths(table, column_widths)
             self._column_widths = column_widths
@@ -295,6 +303,11 @@ class PinghueTextualApp(App[None]):
             slow_latency_ms=SLOW_LATENCY_MS,
             cell_cache=self._cell_cache,
         )
+
+    def on_resize(self, event: Resize) -> None:
+        # Runs before App._on_resize records the new size: lay the columns out
+        # for the new width now instead of up to one refresh interval later.
+        self._refresh_table(width=event.size.width)
 
     def on_click(self, event: Click) -> None:
         event.prevent_default()

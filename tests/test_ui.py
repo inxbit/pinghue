@@ -12,9 +12,13 @@ from pinghue.models import (
 )
 from pinghue.ui import (
     AMBER,
+    CELL_PADDING,
     COLUMN_KEYS,
     GREEN,
+    MIN_HOST_WIDTH,
     RED,
+    SCROLLBAR_WIDTH,
+    TABLE_CHROME_WIDTH,
     apply_column_widths,
     compact_loss,
     compact_ms,
@@ -227,10 +231,10 @@ def test_compute_table_layout_keeps_metrics_fixed_and_resizes_history() -> None:
         TargetRun("test.sin2.servers.com", resolved_address="94.242.10.1"),
     ]
 
-    narrow = compute_table_layout(width=96, targets=targets, show_address=True)
-    wide = compute_table_layout(width=140, targets=targets, show_address=True)
+    narrow = compute_table_layout(width=140, targets=targets, show_address=True)
+    wide = compute_table_layout(width=180, targets=targets, show_address=True)
     hidden_address = compute_table_layout(
-        width=96,
+        width=140,
         targets=targets,
         show_address=False,
     )
@@ -252,10 +256,56 @@ def test_compute_table_layout_uses_extra_wide_terminal_width() -> None:
 
     width = 180
     layout = compute_table_layout(width=width, targets=targets, show_address=True)
-    used_width = sum(layout.values()) + len(COLUMN_KEYS) + 2
+    # Each column also renders CELL_PADDING blank cells on both sides, and the
+    # border and the vertical scrollbar are always reserved.
+    used_width = (
+        sum(layout.values())
+        + 2 * CELL_PADDING * len(COLUMN_KEYS)
+        + TABLE_CHROME_WIDTH
+        + SCROLLBAR_WIDTH
+    )
 
     assert used_width == width
     assert layout["history"] > 48
+
+
+def test_compute_table_layout_fits_common_terminal_widths_exactly() -> None:
+    targets = [
+        TargetRun("db-primary-01.dc1.example.net", resolved_address="127.0.253.1"),
+        TargetRun("db-primary-02.dc1.example.net", resolved_address="127.0.253.2"),
+    ]
+
+    for show_address in (False, True):
+        for width in range(100, 221, 4):
+            layout = compute_table_layout(width=width, targets=targets, show_address=show_address)
+            used_width = (
+                sum(layout.values())
+                + 2 * CELL_PADDING * len(COLUMN_KEYS)
+                + TABLE_CHROME_WIDTH
+                + SCROLLBAR_WIDTH
+            )
+
+            assert used_width == width, (show_address, width)
+            assert layout["host"] >= MIN_HOST_WIDTH
+            assert layout["history"] > 0
+
+
+def test_compute_table_layout_collapses_minor_columns_before_the_host() -> None:
+    targets = [TargetRun("db-primary-01.dc1.example.net", resolved_address="127.0.253.1")]
+
+    layout = compute_table_layout(width=90, targets=targets, show_address=False)
+    narrower = compute_table_layout(width=80, targets=targets, show_address=False)
+    with_address = compute_table_layout(width=90, targets=targets, show_address=True)
+
+    assert layout["address"] == 0
+    assert layout["host"] >= MIN_HOST_WIDTH
+    assert layout["history"] > 0
+    assert narrower["host"] >= MIN_HOST_WIDTH
+    assert narrower["mode"] == narrower["min"] == 0
+    assert narrower["state"] == len("intermittent")
+    # A visible address column is never collapsed.
+    assert with_address["address"] == 15
+    assert with_address["host"] >= MIN_HOST_WIDTH
 
 
 def test_apply_column_widths_only_updates_changed_widths() -> None:
@@ -266,21 +316,13 @@ def test_apply_column_widths_only_updates_changed_widths() -> None:
     class FakeTable:
         def __init__(self) -> None:
             self.columns = {"host": FakeColumn(8), "history": FakeColumn(10)}
-            self.refreshed: list[int] = []
-
-        def get_column_index(self, key: str) -> int:
-            return 0 if key == "host" else 1
-
-        def refresh_column(self, index: int) -> None:
-            self.refreshed.append(index)
 
     table = FakeTable()
 
-    apply_column_widths(table, {"host": 12, "history": 10})
-
+    assert apply_column_widths(table, {"host": 12, "history": 10}) is True
     assert table.columns["host"].width == 12
     assert table.columns["history"].width == 10
-    assert table.refreshed == [0]
+    assert apply_column_widths(table, {"host": 12, "history": 10}) is False
 
 
 def test_sync_target_table_updates_existing_rows_without_clearing() -> None:
