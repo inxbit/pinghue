@@ -21,6 +21,11 @@ from pinghue.runner import MIN_OVERRUN_SLEEP
 INTERVAL_MINIMUM = 0.1
 CONCURRENCY_DEFAULT_MINIMUM = 64
 CONCURRENCY_MAXIMUM = 1024
+# Every in-flight ICMP probe blocks a daemon thread on its own socket. Past a few
+# hundred of them, GIL contention lags the event loop and inflates measured RTTs,
+# so the automatic ICMP default stops here. On macOS every unconnected ICMP socket
+# also wakes for every echo reply, so there it stays at the minimum.
+ICMP_CONCURRENCY_DEFAULT_MAXIMUM = 256
 # Spare slots above the all-silent estimate, so queueing jitter near saturation
 # does not stretch the probe cadence.
 CONCURRENCY_HEADROOM = 1.25
@@ -91,7 +96,9 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             f"maximum concurrent probes, 1-{CONCURRENCY_MAXIMUM}; ICMP daemon workers are "
             "bounded by this limit (default: automatic, sized from the target count, "
-            f"timeout and interval within {CONCURRENCY_DEFAULT_MINIMUM}-{CONCURRENCY_MAXIMUM})"
+            f"timeout and interval: {CONCURRENCY_DEFAULT_MINIMUM}-{CONCURRENCY_MAXIMUM} "
+            f"for TCP, {CONCURRENCY_DEFAULT_MINIMUM}-{ICMP_CONCURRENCY_DEFAULT_MAXIMUM} "
+            f"for ICMP, {CONCURRENCY_DEFAULT_MINIMUM} for ICMP on macOS)"
         ),
     )
     parser.add_argument(
@@ -163,17 +170,35 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def default_concurrency(target_count: int, *, interval: float, timeout: float) -> int:
+def default_concurrency_ceiling(mode: ProbeMode, *, platform: str | None = None) -> int:
+    """Return the most probe slots the automatic default may use in ``mode``."""
+    if mode == ProbeMode.TCP:
+        return CONCURRENCY_MAXIMUM
+    if (sys.platform if platform is None else platform) == "darwin":
+        return CONCURRENCY_DEFAULT_MINIMUM
+    return ICMP_CONCURRENCY_DEFAULT_MAXIMUM
+
+
+def default_concurrency(
+    target_count: int,
+    *,
+    interval: float,
+    timeout: float,
+    mode: ProbeMode,
+    platform: str | None = None,
+) -> int:
     """Return enough probe slots to keep every target on cadence even when all are silent.
 
     A silent target holds its slot for the whole timeout, then sleeps out the rest of
     its cycle: the interval, or the timeout plus the minimum overrun sleep when the
     timeout fills the interval. Fewer slots than targets x timeout / cycle make every
-    target, healthy ones included, queue for a slot and fall behind the interval.
+    target, healthy ones included, queue for a slot and fall behind the interval. The
+    result stays within ``default_concurrency_ceiling`` for the probe mode.
     """
     cycle = max(interval, timeout + MIN_OVERRUN_SLEEP)
     needed = math.ceil(target_count * (timeout / cycle) * CONCURRENCY_HEADROOM)
-    return max(CONCURRENCY_DEFAULT_MINIMUM, min(CONCURRENCY_MAXIMUM, needed))
+    ceiling = default_concurrency_ceiling(mode, platform=platform)
+    return max(CONCURRENCY_DEFAULT_MINIMUM, min(ceiling, needed))
 
 
 def dedupe_targets(targets: list[str]) -> list[str]:
@@ -302,7 +327,10 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
 
     if args.concurrency is None:
         args.concurrency = default_concurrency(
-            len(args.targets), interval=args.interval, timeout=args.timeout
+            len(args.targets),
+            interval=args.interval,
+            timeout=args.timeout,
+            mode=ProbeMode.TCP if args.port else ProbeMode.ICMP,
         )
 
     if args.numeric:
