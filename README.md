@@ -238,9 +238,9 @@ pinghue [OPTIONS] [TARGET ...]
 | `2` | Usage error: unknown flag or invalid value. |
 | `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
 
-A target the run never probed, for example one still `resolving` when
-`--duration` ends, has no evidence that it is up, so both `--fail-on-*` options
-count it as down.
+A target the run never probed, for example one still `resolving` (shown as
+`pending` in the TUI) when `--duration` ends, has no evidence that it is up,
+so both `--fail-on-*` options count it as down.
 
 ## TUI Controls
 
