@@ -582,9 +582,9 @@ async def probe_target_loop(
         if probe_limit is not None and probes_completed >= probe_limit:
             return
 
-        # A probe may swallow the cancellation that shutdown sends it (TCP
-        # close teardown keeps a success measured before the stop), so check
-        # for a stop here rather than waiting out another interval.
+        # A probe may swallow the cancellation that shutdown sends it and
+        # return a result measured before the stop, so check for a stop here
+        # rather than waiting out another interval.
         if stop_event.is_set() or _cancel_requested():
             return
 
@@ -725,8 +725,8 @@ async def _run_probe_loops_until_shutdown(
         return None
     finally:
         # Set the stop event before cancelling: a probe that swallows its
-        # cancellation (TCP close teardown) then ends its loop instead of
-        # probing on past the deadline and keeping the run alive.
+        # cancellation then ends its loop instead of probing on past the
+        # deadline and keeping the run alive.
         stop_event.set()
         for task in tasks:
             task.cancel()

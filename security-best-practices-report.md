@@ -104,7 +104,7 @@ requires the next major release; it must not ship as a patch or minor version.
 
 | Area | Resolution |
 | --- | --- |
-| TCP evidence accuracy | Records connect latency before close (on Linux, the kernel handshake RTT unless the SYN was retransmitted), bounds and suppresses teardown after success, and preserves the primary-address failure when all failovers fail. |
+| TCP evidence accuracy | Records connect latency before close (on Linux, the kernel handshake RTT unless the SYN was retransmitted), closes the socket without waiting for teardown after success, and preserves the primary-address failure when all failovers fail. |
 | Cancellation | Absolute duration and signal deadlines include startup work, cancel active resolution/probe work, preserve ordered placeholders/sample budgets, and print probes completed just before shutdown. |
 | ICMP concurrency | Runs every ICMP probe on the event loop over a few shared non-blocking datagram sockets per address family (no per-probe threads or file descriptors); replies must match sequence, source address, and a random per-probe token, so other ICMP traffic on the host cannot mark a down target up. |
 | Long-run state | Maintains whole-run counters/statistics, latches loss and peak jitter, and keeps consecutive-failure classification beyond the retained tail. |
