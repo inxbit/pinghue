@@ -14,6 +14,7 @@ from pinghue import __version__
 from pinghue.config import RunConfig
 from pinghue.display import sanitize_display
 from pinghue.doctor import run_check
+from pinghue.export import check_output_path
 from pinghue.hostfile import TARGET_COUNT_MAXIMUM, TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 from pinghue.runner import MIN_OVERRUN_SLEEP
@@ -26,6 +27,18 @@ CONCURRENCY_MAXIMUM = 1024
 CONCURRENCY_HEADROOM = 1.25
 HOST_LABEL_MAXIMUM = 128
 HISTORY_STYLES = ("bar", "dots", "sparkline", "none")
+
+
+def _output_path(value: str) -> Path:
+    path = Path(value)
+    if value == "-" or str(path) != "-":
+        return path
+    # pathlib collapses "./-" to "-", the stdout marker; an explicit relative
+    # spelling names a file called "-" in the current directory instead.
+    try:
+        return Path.cwd() / path
+    except OSError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -63,7 +76,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        type=Path,
+        type=_output_path,
         help="write a JSON run summary to PATH on exit ('-' for stdout)",
     )
     parser.add_argument(
@@ -370,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
     try:
+        if args.output is not None:
+            # Refuse an unusable report path before probing, not after the run.
+            check_output_path(args.output, overwrite=args.overwrite)
         return asyncio.run(run(args, mode=mode))
     except OSError as exc:
         print(f"pinghue: error: {sanitize_display(str(exc))}", file=sys.stderr)

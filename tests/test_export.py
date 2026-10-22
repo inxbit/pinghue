@@ -14,7 +14,7 @@ import jsonschema
 import pytest
 
 import pinghue.export as export_module
-from pinghue.export import build_output_document, write_output_json
+from pinghue.export import build_output_document, check_output_path, write_output_json
 from pinghue.models import (
     MAX_TARGET_SAMPLES,
     AddressFamily,
@@ -206,8 +206,8 @@ def test_overwrite_does_not_replace_node_swapped_to_fifo(
 def test_existing_special_device_rejects_identity_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    before = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=10)
-    after = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=11)
+    before = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=10, st_uid=os.geteuid())
+    after = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=11, st_uid=os.geteuid())
     closed: list[int] = []
 
     monkeypatch.setattr(os, "lstat", lambda _path: before)
@@ -219,6 +219,384 @@ def test_existing_special_device_rejects_identity_change(
         export_module._existing_special_device_fd(Path("out.fifo"))
 
     assert closed == [99]
+
+
+def _pretend_other_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Files created by the test are owned by the real effective user; reporting a
+    # different effective uid makes them look like another local user's nodes.
+    other_uid = os.geteuid() + 1
+    monkeypatch.setattr(os, "geteuid", lambda: other_uid)
+
+
+def _leftover_temp_files(directory: Path) -> list[Path]:
+    return sorted(directory.glob("*.tmp"))
+
+
+def test_write_output_json_refuses_fifo_owned_by_another_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # In a shared sticky directory another user can pre-create the report path
+    # as a FIFO with a reader attached; the report must not be delivered to it.
+    output_path = tmp_path / "out.json"
+    os.mkfifo(output_path, 0o666)
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        _pretend_other_user(monkeypatch)
+
+        with pytest.raises(PermissionError, match="FIFO owned by another user"):
+            _write(output_path)
+        with pytest.raises(PermissionError, match="FIFO owned by another user"):
+            _write(output_path, overwrite=True)
+
+        assert os.read(reader_fd, 4096) == b""
+    finally:
+        os.close(reader_fd)
+    assert stat.S_ISFIFO(output_path.lstat().st_mode)
+    assert _leftover_temp_files(tmp_path) == []
+
+
+def test_write_output_json_writes_owned_fifo_with_reader(tmp_path: Path) -> None:
+    output_path = tmp_path / "out.fifo"
+    os.mkfifo(output_path)
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        _write(output_path)
+
+        document = json.loads(os.read(reader_fd, 1 << 16).decode("utf-8"))
+    finally:
+        os.close(reader_fd)
+    assert document["run"]["host"] == "ops-laptop-04"
+
+
+def test_existing_special_device_rejects_fifo_owner_change_after_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=10, st_uid=os.geteuid())
+    after = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=10, st_uid=os.geteuid() + 1)
+    closed: list[int] = []
+
+    monkeypatch.setattr(os, "lstat", lambda _path: before)
+    monkeypatch.setattr(os, "open", lambda _path, _flags: 99)
+    monkeypatch.setattr(os, "fstat", lambda _fd: after)
+    monkeypatch.setattr(os, "close", closed.append)
+
+    with pytest.raises(PermissionError, match="FIFO owned by another user"):
+        export_module._existing_special_device_fd(Path("out.fifo"))
+
+    assert closed == [99]
+
+
+def test_write_output_json_allows_character_device_owned_by_another_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Unprivileged users can create only the inert whiteout device, so real
+    # devices such as /dev/null stay valid destinations whoever owns them.
+    _pretend_other_user(monkeypatch)
+
+    _write(Path("/dev/null"))
+    _write(Path("/dev/null"), overwrite=True)
+
+
+def _whiteout_node() -> SimpleNamespace:
+    return SimpleNamespace(
+        st_mode=stat.S_IFCHR | 0o666,
+        st_dev=1,
+        st_ino=10,
+        st_rdev=0,
+        st_uid=os.geteuid() + 1,
+    )
+
+
+def test_whiteout_device_is_refused_before_it_is_opened(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Linux lets any user create the driverless 0:0 whiteout device in a shared
+    # directory; accepting it would lose the report when the run ends.
+    opened: list[str] = []
+    monkeypatch.setattr(export_module, "_LINUX", True)
+    monkeypatch.setattr(os, "lstat", lambda _path: _whiteout_node())
+    monkeypatch.setattr(os, "open", lambda path, _flags: opened.append(path))
+
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        check_output_path(Path("out.json"))
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        export_module._existing_special_device_fd(Path("out.json"))
+
+    assert opened == []
+
+
+def test_zero_device_number_is_not_a_whiteout_outside_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On macOS 0:0 is the console device, which only root can create.
+    monkeypatch.setattr(export_module, "_LINUX", False)
+    monkeypatch.setattr(os, "lstat", lambda _path: _whiteout_node())
+    monkeypatch.setattr(os, "access", lambda _path, _mode: True)
+
+    check_output_path(Path("console"))
+
+
+@pytest.mark.skipif(not export_module._LINUX, reason="whiteout devices are Linux-only")
+def test_write_output_json_refuses_real_whiteout_device(tmp_path: Path) -> None:
+    output_path = tmp_path / "out.json"
+    try:
+        os.mknod(output_path, stat.S_IFCHR | 0o666, os.makedev(0, 0))
+    except OSError:
+        pytest.skip("this kernel or sandbox does not permit whiteout devices")
+
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        check_output_path(output_path)
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        _write(output_path)
+
+    assert stat.S_ISCHR(output_path.lstat().st_mode)
+    assert _leftover_temp_files(tmp_path) == []
+
+
+def test_write_output_json_refuses_to_overwrite_file_owned_by_another_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+    output_path.chmod(0o644)
+    _pretend_other_user(monkeypatch)
+
+    with pytest.raises(PermissionError, match="owned by another user"):
+        _write(output_path, overwrite=True)
+
+    assert output_path.read_text(encoding="utf-8") == "previous\n"
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o644
+    assert _leftover_temp_files(tmp_path) == []
+
+
+def test_overwrite_rechecks_file_owner_on_the_opened_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+    observed = output_path.lstat()
+    real_fstat = os.fstat
+
+    def foreign_owner_fstat(fd: int) -> object:
+        result = real_fstat(fd)
+        if (result.st_dev, result.st_ino) != (observed.st_dev, observed.st_ino):
+            return result
+        return SimpleNamespace(
+            st_mode=result.st_mode,
+            st_dev=result.st_dev,
+            st_ino=result.st_ino,
+            st_nlink=result.st_nlink,
+            st_uid=os.geteuid() + 1,
+        )
+
+    monkeypatch.setattr(os, "fstat", foreign_owner_fstat)
+
+    with pytest.raises(PermissionError, match="owned by another user"):
+        _write(output_path, overwrite=True)
+
+    assert output_path.read_text(encoding="utf-8") == "previous\n"
+    assert _leftover_temp_files(tmp_path) == []
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="changing file ownership requires root")
+def test_root_refuses_fifo_and_overwrite_of_nodes_owned_by_another_user(
+    tmp_path: Path,
+) -> None:
+    nobody = 65534
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o1777)
+    fifo_path = shared / "fifo.json"
+    os.mkfifo(fifo_path, 0o666)
+    os.chown(fifo_path, nobody, nobody)
+    file_path = shared / "file.json"
+    file_path.write_text("previous\n", encoding="utf-8")
+    os.chown(file_path, nobody, nobody)
+
+    reader_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(PermissionError, match="FIFO owned by another user"):
+            _write(fifo_path)
+        assert os.read(reader_fd, 4096) == b""
+    finally:
+        os.close(reader_fd)
+
+    with pytest.raises(PermissionError, match="owned by another user"):
+        _write(file_path, overwrite=True)
+    assert file_path.read_text(encoding="utf-8") == "previous\n"
+    assert file_path.stat().st_uid == nobody
+    assert _leftover_temp_files(shared) == []
+
+
+def test_check_output_path_accepts_new_and_writable_destinations(tmp_path: Path) -> None:
+    check_output_path("-")
+    check_output_path(tmp_path / "out.json")
+    check_output_path(tmp_path / "missing" / "nested" / "out.json")
+    check_output_path(Path("/dev/null"), overwrite=False)
+
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    check_output_path(existing, overwrite=True)
+
+    fifo = tmp_path / "out.fifo"
+    os.mkfifo(fifo)
+    check_output_path(fifo)
+
+
+def test_check_output_path_matches_writer_refusals(tmp_path: Path) -> None:
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    alias = tmp_path / "alias.json"
+    linked = tmp_path / "linked.json"
+    linked.write_text("previous\n", encoding="utf-8")
+    os.link(linked, alias)
+    symlink = tmp_path / "symlink.json"
+    symlink.symlink_to(existing)
+
+    with pytest.raises(FileExistsError, match="use --overwrite to replace"):
+        check_output_path(existing)
+    with pytest.raises(FileExistsError, match="multiple hard links"):
+        check_output_path(linked, overwrite=True)
+    with pytest.raises(FileExistsError, match="not a regular file"):
+        check_output_path(symlink, overwrite=True)
+    with pytest.raises(FileExistsError, match="not a regular file"):
+        check_output_path(tmp_path, overwrite=True)
+    with pytest.raises(NotADirectoryError):
+        check_output_path(existing / "out.json")
+
+    assert existing.read_text(encoding="utf-8") == "previous\n"
+
+
+def test_check_output_path_refuses_nodes_owned_by_another_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    fifo = tmp_path / "out.fifo"
+    os.mkfifo(fifo)
+    _pretend_other_user(monkeypatch)
+
+    with pytest.raises(PermissionError, match="owned by another user"):
+        check_output_path(existing, overwrite=True)
+    with pytest.raises(PermissionError, match="FIFO owned by another user"):
+        check_output_path(fifo)
+    check_output_path(Path("/dev/null"))
+
+
+def test_check_output_path_refuses_unwritable_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    checked: list[Path] = []
+
+    def deny_directories(path: Path, _mode: int) -> bool:
+        checked.append(Path(path))
+        return not os.path.isdir(path)
+
+    monkeypatch.setattr(os, "access", deny_directories)
+
+    with pytest.raises(PermissionError, match="output directory is not writable"):
+        check_output_path(tmp_path / "missing" / "out.json")
+    with pytest.raises(PermissionError, match="output directory is not writable"):
+        check_output_path(existing, overwrite=True)
+
+    assert checked == [tmp_path, existing, tmp_path]
+
+
+def test_check_output_path_refuses_existing_node_it_cannot_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A report the operator made read-only, or a FIFO or device without write
+    # permission, would otherwise fail with EACCES only after the run.
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    fifo = tmp_path / "out.fifo"
+    os.mkfifo(fifo)
+    denied = {existing, fifo, Path("/dev/null")}
+    real_access = os.access
+    monkeypatch.setattr(
+        os, "access", lambda path, mode: Path(path) not in denied and real_access(path, mode)
+    )
+
+    for path in sorted(denied):
+        with pytest.raises(PermissionError, match="output path is not writable"):
+            check_output_path(path, overwrite=True)
+
+    assert existing.read_text(encoding="utf-8") == "previous\n"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permission bits")
+def test_check_output_path_refuses_read_only_report_before_overwrite(tmp_path: Path) -> None:
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    existing.chmod(0o444)
+
+    with pytest.raises(PermissionError, match="output path is not writable"):
+        check_output_path(existing, overwrite=True)
+
+
+def test_check_output_path_refuses_dangling_symlink_in_parent_chain(tmp_path: Path) -> None:
+    # A dangling symlink is not a missing directory: mkdir cannot create
+    # through it, so the write at exit would fail after the whole run.
+    (tmp_path / "logs").symlink_to(tmp_path / "missing-target")
+    regular = tmp_path / "regular"
+    regular.write_text("", encoding="utf-8")
+    regular.chmod(0o755)
+
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        check_output_path(tmp_path / "logs" / "out.json")
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        check_output_path(tmp_path / "logs" / "nested" / "out.json")
+    with pytest.raises(NotADirectoryError):
+        check_output_path(regular / "nested" / "out.json")
+
+    assert not (tmp_path / "missing-target").exists()
+
+
+def test_check_output_path_follows_symlinked_directory(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "logs").symlink_to(tmp_path / "real")
+
+    check_output_path(tmp_path / "logs" / "out.json")
+    check_output_path(tmp_path / "logs" / "nested" / "out.json")
+
+
+def test_write_output_json_accepts_name_at_the_file_name_limit(tmp_path: Path) -> None:
+    # The staged temporary name adds a random suffix; it must not push a
+    # valid report name over the directory's file-name limit.
+    name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    output_path = tmp_path / ("r" * (name_max - len(".json")) + ".json")
+
+    check_output_path(output_path)
+    _write(output_path)
+
+    assert json.loads(output_path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert _leftover_temp_files(tmp_path) == []
+
+
+def test_temp_prefix_falls_back_when_name_limit_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    long_path = Path("é" * 200)
+
+    def unsupported(_path: object, _name: str) -> int:
+        raise OSError(errno.EINVAL, "pathconf unsupported")
+
+    monkeypatch.setattr(os, "pathconf", unsupported)
+    prefix = export_module._temp_prefix(long_path)
+    assert prefix.endswith(".")
+    assert len(os.fsencode(prefix)) + export_module._TEMP_NAME_EXTRA_BYTES <= 255
+
+    monkeypatch.setattr(os, "pathconf", lambda _path, _name: -1)
+    assert export_module._temp_prefix(long_path) == prefix
+    assert export_module._temp_prefix(Path("out.json")) == "out.json."
 
 
 def test_existing_output_rejects_unsupported_socket_node(

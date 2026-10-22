@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pinghue.hostfile import TARGET_MAXIMUM, parse_host_file
+from pinghue.hostfile import MAX_HOST_FILE_LINES, TARGET_MAXIMUM, parse_host_file
 
 
 def test_parse_host_file_ignores_blank_lines_and_comments(tmp_path: Path) -> None:
@@ -107,3 +107,57 @@ def test_parse_host_file_rejects_invalid_utf8(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not valid UTF-8"):
         parse_host_file(path)
+
+
+@pytest.mark.parametrize(
+    "separator",
+    ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"],
+)
+def test_parse_host_file_splits_lines_only_on_newline(tmp_path: Path, separator: str) -> None:
+    # str.splitlines() also breaks on these characters; one host-file line must
+    # stay one target so target validation sees the character.
+    path = tmp_path / "hosts.txt"
+    path.write_text(f"127.0.0.1{separator}127.0.0.2\n127.0.0.3\n", encoding="utf-8")
+
+    assert parse_host_file(path) == [f"127.0.0.1{separator}127.0.0.2", "127.0.0.3"]
+
+
+def test_parse_host_file_accepts_crlf_and_lone_carriage_return(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_bytes(b"127.0.0.1\r\n# comment\r\n127.0.0.2 # inline\r\n127.0.0.3\r127.0.0.4\r\n")
+
+    assert parse_host_file(path) == ["127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"]
+
+
+def test_parse_host_file_line_numbers_ignore_unicode_separators(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_text(
+        "one\u2028two\x0cthree\n" + "a" * (TARGET_MAXIMUM + 1) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="line 2$"):
+        parse_host_file(path)
+
+
+def test_parse_host_file_line_limit_counts_newlines_only(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    lines = [f"host-{index}" for index in range(MAX_HOST_FILE_LINES)]
+    lines[0] = "host-a\u2028host-b\x85host-c"
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert len(parse_host_file(path)) == MAX_HOST_FILE_LINES
+
+    path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    assert len(parse_host_file(path)) == MAX_HOST_FILE_LINES
+
+    path.write_text("\n".join([*lines, "extra"]), encoding="utf-8")
+    with pytest.raises(ValueError, match="too many lines"):
+        parse_host_file(path)
+
+
+def test_parse_host_file_accepts_empty_file(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_bytes(b"")
+
+    assert parse_host_file(path) == []

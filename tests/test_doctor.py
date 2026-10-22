@@ -242,6 +242,52 @@ def test_run_check_sanitizes_dns_diagnostics(monkeypatch: pytest.MonkeyPatch) ->
     assert r"\x1b[31mboom" in text
 
 
+def test_run_check_sanitizes_system_and_icmp_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # os-release comes from the (possibly container) image and socket/probe
+    # errors from the platform; neither may reach the terminal unescaped.
+    real_socket = socket.socket
+
+    def socket_factory(family: int, type_: int, proto: int = 0, *rest: object) -> object:
+        if rest:
+            # asyncio.run builds its event loop's self-pipe through socket(..., fileno).
+            return real_socket(family, type_, proto, *rest)  # type: ignore[arg-type]
+        if family == doctor.socket.AF_INET6:
+            raise OSError(97, "family \x1b[2J unsupported")
+        return FakeSocket()
+
+    monkeypatch.setattr(doctor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(doctor.platform, "release", lambda: "6.5.0")
+    monkeypatch.setattr(doctor.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        doctor.platform,
+        "freedesktop_os_release",
+        lambda: {"PRETTY_NAME": "Distro\x1b]0;title\x07 \u202eLinux"},
+    )
+    monkeypatch.setattr(doctor.sys, "executable", "/opt/\x1b[31mpython")
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(doctor.socket, "socket", socket_factory)
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _: ("127.0.0.1", 1.0, None))
+
+    async def failing_icmp_probe(*_: object, **__: object) -> ProbeSample:
+        raise RuntimeError("reply from \x1b[5mloopback")
+
+    monkeypatch.setattr(doctor, "icmp_probe", failing_icmp_probe)
+    output = io.StringIO()
+
+    doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    text = output.getvalue()
+    assert "\x1b" not in text
+    assert "\x07" not in text
+    assert "\u202e" not in text
+    assert r"Distro\x1b]0;title\x07 \u202eLinux" in text
+    assert r"/opt/\x1b[31mpython" in text
+    assert r"RuntimeError: reply from \x1b[5mloopback" in text
+    assert r"OSError: [Errno 97] family \x1b[2J unsupported" in text
+
+
 def test_dns_probe_times_out_when_resolver_hangs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -280,8 +326,14 @@ def test_dns_probe_budget_matches_runner_lookup_budget() -> None:
             (None, "permission denied: ICMP blocked"),
         ),
         (ProbeSample(_NOW, None, SampleStatus.UNREACHABLE), (None, "unreachable")),
+        (
+            ProbeSample(
+                _NOW, None, SampleStatus.UNREACHABLE, "No route \x1b]0;title\x07 \u202eto host"
+            ),
+            (None, r"No route \x1b]0;title\x07 \u202eto host"),
+        ),
     ],
-    ids=["ok", "timeout", "error", "unreachable"],
+    ids=["ok", "timeout", "error", "unreachable", "escaped-error"],
 )
 def test_loopback_icmp_probe_uses_the_probe_engine(
     monkeypatch: pytest.MonkeyPatch,

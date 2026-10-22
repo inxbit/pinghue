@@ -61,11 +61,11 @@ Open questions:
 | Boundary | Data crossing it | Main controls |
 | --- | --- | --- |
 | Operator shell -> CLI parser | Targets, timing, ports, concurrency, output path, labels | Type/range/finite checks; 253-character target limit; 5,000 unique-target cap |
-| Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; BOM/error handling |
+| Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; newline-only line splitting; BOM/error handling |
 | Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency and resolver-thread caps; per-name cooldown and backoff |
 | Resolved address -> network | ICMP datagram or TCP connection | Outbound-only probes; bounded concurrency/timeouts; per-target exception containment |
-| Probe/library errors -> terminal | Target, address, status, error text | Central display sanitization; literal escaping of controls and non-ASCII text |
-| Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; schema tests |
+| Probe/library errors -> terminal | Target, address, status, error text; doctor OS metadata and socket errors | Central display sanitization; literal escaping of controls and non-ASCII text |
+| Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; effective-user ownership for FIFOs and overwritten files; pre-run path check; schema tests |
 | Git tag -> release workflow | Source commit and package artifacts | Signed annotated-tag identity/target checks; main ancestry; exact-commit validation; protected environment; OIDC; attestations |
 | Dependency metadata -> package indexes | Locked requirements and advisory queries | Hash-enforced installs; narrow runtime ranges; Dependabot and scheduled audits |
 | Docs source -> GitHub Pages | Static HTML/CSS/JS and assets, one same-origin video | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; self-only CSP with no inline script or style (`media-src 'self'` admits only the hero clip in `docs/media/`); Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
@@ -88,6 +88,8 @@ An attacker or mistake may:
 - Influence a hostname, host-file line, DNS answer, or socket/library error.
 - Supply an oversized or malformed local inventory through an operator workflow.
 - Race an output path as the same local user.
+- Pre-create a FIFO or regular file at a predictable report path in a shared,
+  world-writable directory such as `/tmp` as a different local user.
 - Cause timeouts, refused connections, partial address failures, or resolver
   failures intended to distort status evidence.
 - Compromise a dependency or attempt to exploit weak release/tag permissions.
@@ -128,7 +130,12 @@ within 1-1,024 in both modes.
 A symlink, FIFO, device, socket, oversized file, or invalid UTF-8 file could
 block or redirect parsing. The parser opens without following symlinks where
 supported, verifies the opened descriptor is a regular file, performs bounded
-reads, and reports encoding errors without a traceback.
+reads, and reports encoding errors without a traceback. Lines end only at
+`\n` (optionally preceded by `\r`), so vertical tabs, form feeds, file/group/
+record separators, NEL, and Unicode line/paragraph separators cannot split one
+line into several targets or shift line numbers and the line limit; they stay
+in the value, where target validation rejects control characters and display
+sanitization escapes the rest.
 
 ### 4. Output-path race or partial evidence
 
@@ -140,11 +147,30 @@ file. Symlinks, sockets, unsupported special nodes, and multiply linked regular
 files are not replaced. Existing character devices and FIFOs are written only
 after the opened descriptor matches the observed node.
 
+In a shared sticky directory another local user can create the report path
+first. A FIFO is written only when the effective user owns it, both as
+observed and as opened, so the report is never delivered to another user's
+reader. Character devices remain accepted regardless of owner because the
+only one an unprivileged user can create is the Linux `0:0` whiteout device,
+which has no driver and is refused. These refusals exit with status 1,
+write nothing, and leave no temporary file behind. The CLI runs the
+same type, link-count, and ownership checks, plus write-permission checks on
+an existing node and on the nearest existing parent directory (which must be
+a directory, not a dangling symlink), before probing starts so a refused path
+does not discard a completed run; the write-time checks remain authoritative.
+The containing directory itself is not judged: a user who owns it, or can
+write to it without the sticky bit, can still rename, replace, or remove a
+finished report, so evidence belongs in a directory only the operator
+controls.
+
 Explicit `--overwrite` of an existing single-link regular file keeps the
-verified inode and rewrites it in place. This closes replacement races against
-special nodes, but an abrupt process or system failure during the final write
-can leave a partial report. Evidence-preserving workflows should accept output
-only after a successful exit and JSON validation, then rotate it separately.
+verified inode and rewrites it in place. The file must be owned by the
+effective user, both as observed and as opened, because its owner could
+otherwise read the rewritten report whatever mode PingHue applies. This closes
+replacement races against special nodes, but an abrupt process or system
+failure during the final write can leave a partial report. Evidence-preserving
+workflows should accept output only after a successful exit and JSON
+validation, then rotate it separately.
 
 ### 5. Misleading network classification
 
@@ -200,8 +226,10 @@ malformed responses, and other HTTP/network failures remain blocking.
 Runtime dependencies have constrained ranges. CI/release dependency installs
 use hash-pinned lock files, dependency audit covers development, build, and
 audit locks, external actions are pinned to full commit SHAs, and build
-provenance is attested. Advisory databases and package-index availability are
-external dependencies, so fresh audits remain a release gate.
+provenance is attested. No workflow restores a dependency cache, so a cache
+written by one run cannot feed a release build. Advisory databases and
+package-index availability are external dependencies, so fresh audits remain a
+release gate.
 
 ## Risk register
 
@@ -209,8 +237,8 @@ external dependencies, so fresh audits remain a release gate.
 | --- | --- | --- | --- | --- |
 | TM-001 | Terminal/control-character injection | Central sanitization and adversarial rendering tests | A future output caller could omit sanitization | Low |
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
-| TM-003 | Host-file symlink/special-file race | Descriptor-based open/type validation and bounded reads | Same-user content modification remains possible | Low |
-| TM-004 | Output replacement or partial report | No-clobber default, randomized temp, inode/type/link checks | Explicit overwrite and no-hardlink copy fallback are not crash-atomic | Medium |
+| TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and newline-only line splitting | Same-user content modification remains possible | Low |
+| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report | Medium |
 | TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats | Remote routing/DNS state is inherently external | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
@@ -223,9 +251,14 @@ external dependencies, so fresh audits remain a release gate.
 - Every operator-controlled rendered/exported string is sanitized.
 - Target, file, resolver, probe, and retained-sample bounds stay enforced.
 - Host input and existing output nodes are validated by opened descriptor.
+- Existing FIFOs and `--overwrite` targets must be owned by the effective user.
 - Existing output files remain no-clobber by default.
 - Release actions remain full-SHA pinned and checkout credentials are not
   persisted.
+- Workflow `run:` steps receive event and repository values only through
+  environment variables, never inline `${{ }}` expressions; workflows keep
+  read-only default token permissions, use no dependency caches, and do not
+  use `pull_request_target` or `workflow_run` triggers.
 - PyPI OIDC and repository-write capability remain in separate jobs.
 - The exact tagged commit passes the release validation suite before publish.
 - Hosted hardening is manually checked with adequate read permission before

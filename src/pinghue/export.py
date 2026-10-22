@@ -21,6 +21,12 @@ from pinghue.models import MAX_TARGET_SAMPLES, ProbeConfig, ProbeSample, TargetR
 
 SCHEMA_VERSION = 1
 
+_LINUX = sys.platform.startswith("linux")
+
+# NamedTemporaryFile names the staged report <prefix><8 random characters>.tmp.
+_TEMP_NAME_EXTRA_BYTES = 8 + len(".tmp")
+_DEFAULT_NAME_MAX = 255
+
 
 def format_timestamp(value: datetime) -> str:
     """Return UTC RFC 3339 timestamp with millisecond precision."""
@@ -118,12 +124,46 @@ def _multiple_hard_links_error(output_path: Path) -> FileExistsError:
     )
 
 
+def _not_regular_file_error(output_path: Path) -> FileExistsError:
+    return FileExistsError(f"output path already exists and is not a regular file: {output_path}")
+
+
+def _existing_output_error(output_path: Path) -> FileExistsError:
+    return FileExistsError(f"output file already exists; use --overwrite to replace: {output_path}")
+
+
+def _require_fifo_owner(output_path: Path, observed: os.stat_result) -> None:
+    # A FIFO pre-created by another local user (for example in a shared sticky
+    # directory such as /tmp) would hand the report to that user's reader.
+    # Character devices stay allowed whoever owns them: the only one an
+    # unprivileged user can create is the inert whiteout device refused below.
+    if stat.S_ISFIFO(observed.st_mode) and observed.st_uid != os.geteuid():
+        raise PermissionError(f"refusing to write to a FIFO owned by another user: {output_path}")
+
+
+def _refuse_whiteout_device(output_path: Path, observed: os.stat_result) -> None:
+    # Since Linux 5.8 any user may create the 0:0 "whiteout" character device
+    # that overlay filesystems use. It has no driver, so a report written to it
+    # is lost. On macOS 0:0 is the console device, so the check is Linux-only.
+    if _LINUX and stat.S_ISCHR(observed.st_mode) and observed.st_rdev == 0:
+        raise FileExistsError(
+            f"output path is a whiteout character device (0, 0) with no driver: {output_path}"
+        )
+
+
+def _require_regular_file_owner(output_path: Path, observed: os.stat_result) -> None:
+    # --overwrite rewrites the inode in place, so the file's owner could read
+    # the report regardless of the mode PingHue applies.
+    if observed.st_uid != os.geteuid():
+        raise PermissionError(f"refusing to overwrite a file owned by another user: {output_path}")
+
+
 def _existing_special_device_fd(output_path: Path) -> int | None:
     """Return a write fd if output_path is an existing char device or FIFO.
 
-    Symlinks and unsupported special nodes are rejected. An opened character
-    device or FIFO must match the identity observed by lstat, closing the
-    lstat/open replacement race.
+    Symlinks, unsupported special nodes, whiteout devices, and FIFOs owned by
+    another user are rejected. An opened character device or FIFO must match
+    the identity observed by lstat, closing the lstat/open replacement race.
     """
     try:
         pre = os.lstat(output_path)
@@ -132,9 +172,9 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
     if stat.S_ISREG(pre.st_mode):
         return None
     if stat.S_ISLNK(pre.st_mode) or not (stat.S_ISCHR(pre.st_mode) or stat.S_ISFIFO(pre.st_mode)):
-        raise FileExistsError(
-            f"output path already exists and is not a regular file: {output_path}"
-        )
+        raise _not_regular_file_error(output_path)
+    _require_fifo_owner(output_path, pre)
+    _refuse_whiteout_device(output_path, pre)
 
     flags = os.O_WRONLY
     if stat.S_ISFIFO(pre.st_mode) and hasattr(os, "O_NONBLOCK"):
@@ -150,6 +190,7 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
             stat.S_ISCHR(post.st_mode) or stat.S_ISFIFO(post.st_mode)
         ):
             raise _output_changed_error(output_path)
+        _require_fifo_owner(output_path, post)
         if stat.S_ISFIFO(post.st_mode) and hasattr(os, "O_NONBLOCK"):
             # The nonblocking flag is needed only for the race-safe open. Once a
             # reader is present, restore normal FIFO semantics so a large report
@@ -208,6 +249,7 @@ def _overwrite_existing_regular_file(
             raise _output_changed_error(output_path)
         if opened.st_nlink != 1:
             raise _multiple_hard_links_error(output_path)
+        _require_regular_file_owner(output_path, opened)
 
         os.fchmod(fd, mode)
         before_write = os.fstat(fd)
@@ -258,11 +300,10 @@ def _overwrite_output_file(tmp_path: Path, output_path: Path, *, mode: int) -> N
                 return
 
         if not stat.S_ISREG(observed.st_mode):
-            raise FileExistsError(
-                f"output path already exists and is not a regular file: {output_path}"
-            )
+            raise _not_regular_file_error(output_path)
         if observed.st_nlink != 1:
             raise _multiple_hard_links_error(output_path)
+        _require_regular_file_owner(output_path, observed)
         try:
             _overwrite_existing_regular_file(
                 tmp_path,
@@ -282,12 +323,11 @@ def _install_output_file(tmp_path: Path, output_path: Path, *, overwrite: bool, 
         _overwrite_output_file(tmp_path, output_path, mode=mode)
         return
 
-    friendly = f"output file already exists; use --overwrite to replace: {output_path}"
     try:
         os.link(tmp_path, output_path)
         return
     except FileExistsError as exc:
-        raise FileExistsError(friendly) from exc
+        raise _existing_output_error(output_path) from exc
     except OSError:
         # Filesystem does not support hardlinks (e.g. exFAT, some FUSE/overlay
         # mounts). Fall back to an exclusive create that still refuses to clobber.
@@ -296,8 +336,75 @@ def _install_output_file(tmp_path: Path, output_path: Path, *, overwrite: bool, 
     try:
         fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     except FileExistsError as exc:
-        raise FileExistsError(friendly) from exc
+        raise _existing_output_error(output_path) from exc
     _write_temp_to_created_fd(tmp_path, output_path, fd)
+
+
+def _require_writable_directory(output_path: Path) -> None:
+    # The report is staged in a temporary file beside output_path and missing
+    # parents are created at write time, so check the nearest existing one.
+    # lexists stops at a dangling symlink, which mkdir cannot create through.
+    for directory in (output_path.parent, *output_path.parent.parents):
+        if not os.path.lexists(directory):
+            continue
+        if not os.path.isdir(directory):
+            raise NotADirectoryError(f"output directory is not a directory: {directory}")
+        if not os.access(directory, os.W_OK | os.X_OK):
+            raise PermissionError(f"output directory is not writable: {directory}")
+        return
+
+
+def _require_writable_node(output_path: Path) -> None:
+    if not os.access(output_path, os.W_OK):
+        raise PermissionError(f"output path is not writable: {output_path}")
+
+
+def _temp_prefix(output_path: Path) -> str:
+    # Keep the staged name within the directory's file-name limit even when the
+    # report name itself is close to it; the report keeps its full name.
+    try:
+        name_max = os.pathconf(output_path.parent, "PC_NAME_MAX")
+    except (OSError, ValueError):
+        name_max = _DEFAULT_NAME_MAX
+    if name_max <= 0:
+        name_max = _DEFAULT_NAME_MAX
+    prefix = output_path.name + "."
+    while len(prefix) > 1 and len(os.fsencode(prefix)) + _TEMP_NAME_EXTRA_BYTES > name_max:
+        prefix = prefix[:-2] + "."
+    return prefix
+
+
+def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
+    """Raise OSError early when write_output_json would refuse path.
+
+    This lets a run fail before probing instead of losing its report at exit.
+    It is advisory: write_output_json repeats every check against the opened
+    node when it writes, so a path changed during the run is still refused.
+    """
+    if str(path) == "-":
+        return
+
+    output_path = Path(path)
+    try:
+        observed = os.lstat(output_path)
+    except FileNotFoundError:
+        _require_writable_directory(output_path)
+        return
+
+    if stat.S_ISCHR(observed.st_mode) or stat.S_ISFIFO(observed.st_mode):
+        _require_fifo_owner(output_path, observed)
+        _refuse_whiteout_device(output_path, observed)
+        _require_writable_node(output_path)
+        return
+    if not stat.S_ISREG(observed.st_mode):
+        raise _not_regular_file_error(output_path)
+    if not overwrite:
+        raise _existing_output_error(output_path)
+    if observed.st_nlink != 1:
+        raise _multiple_hard_links_error(output_path)
+    _require_regular_file_owner(output_path, observed)
+    _require_writable_node(output_path)
+    _require_writable_directory(output_path)
 
 
 def write_output_json(
@@ -335,7 +442,7 @@ def write_output_json(
             mode="w",
             encoding="utf-8",
             dir=output_path.parent,
-            prefix=output_path.name + ".",
+            prefix=_temp_prefix(output_path),
             suffix=".tmp",
             delete=False,
         ) as tmp_file:

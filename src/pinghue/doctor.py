@@ -84,7 +84,9 @@ def _check_dgram_icmp_socket(
     except PermissionError as exc:
         return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}")
     except OSError as exc:
-        return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}: {exc}")
+        return IcmpSocketCheck(
+            False, f"{descriptor} → {type(exc).__name__}: {sanitize_display(str(exc))}"
+        )
 
     probe_socket.close()
     return IcmpSocketCheck(True, f"{descriptor} succeeded")
@@ -165,13 +167,14 @@ def _loopback_icmp_probe(address: str = "127.0.0.1") -> tuple[float | None, str 
             icmp_probe(address, timeout_s=1.0, address_family=family_from_ip(address))
         )
     except Exception as exc:  # noqa: BLE001 - doctor reports exact environment failures
-        return None, f"{type(exc).__name__}: {exc}"
+        return None, sanitize_display(f"{type(exc).__name__}: {exc}")
 
     if sample.status == SampleStatus.OK and sample.latency_ms is not None:
         return float(sample.latency_ms), None
     if sample.status == SampleStatus.TIMEOUT:
         return None, "timeout"
-    return None, sample.error or sample.status.value
+    # The engine's error text carries OS and socket messages.
+    return None, sanitize_display(sample.error or sample.status.value)
 
 
 def _write_header(lines: list[str]) -> None:
@@ -180,8 +183,10 @@ def _write_header(lines: list[str]) -> None:
             f"pinghue {__version__} — environment check",
             "",
             "System",
-            f"  OS              {_os_label()}",
-            f"  Python          {platform.python_version()} ({sys.executable})",
+            # OS metadata (for example os-release in a container image) and the
+            # interpreter path are not PingHue-controlled text.
+            f"  OS              {sanitize_display(_os_label())}",
+            f"  Python          {platform.python_version()} ({sanitize_display(sys.executable)})",
             f"  Effective UID   {_uid_label()}",
             "",
         ]
