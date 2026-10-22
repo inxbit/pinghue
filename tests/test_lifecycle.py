@@ -23,8 +23,10 @@ from pinghue.models import (
 )
 from pinghue.probes import ResolvedTarget
 from pinghue.runner import (
+    first_probe_delay,
     probe_target_loop,
     run_no_tui,
+    stagger_window,
     target_run_from_resolution,
 )
 
@@ -229,6 +231,164 @@ async def test_probe_target_loop_ends_promptly_after_a_probe_swallows_its_cancel
     assert probes == 1
     # The result measured before the cancellation is still reported.
     assert reported == [ok_sample()]
+
+
+# Probing starts per target as soon as that target resolves.
+
+
+async def test_run_no_tui_probes_resolved_targets_while_lookups_are_pending(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    installed = capture_stop_event(monkeypatch)
+    lookup_cancelled = asyncio.Event()
+    probed = asyncio.Event()
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "slow.example":
+            try:
+                await asyncio.Event().wait()
+            finally:
+                lookup_cancelled.set()
+        return resolved(target)
+
+    async def recording_probe(target: TargetRun, **kwargs: object) -> ProbeSample:
+        sample = await applying_probe(target, **kwargs)
+        probed.set()
+        return sample
+
+    monkeypatch.setattr(runner, "resolve_run_target", fake_resolve_run_target)
+    monkeypatch.setattr(runner, "probe_once", recording_probe)
+
+    run_task = asyncio.create_task(
+        run_no_tui(no_tui_args(targets=["slow.example", "192.0.2.1"]), ProbeMode.ICMP)
+    )
+    try:
+        await asyncio.wait({asyncio.ensure_future(probed.wait())}, timeout=1.0)
+        probed_before_lookup_finished = probed.is_set()
+    finally:
+        installed[0].set()
+    assert await settle(run_task, installed)
+
+    assert probed_before_lookup_finished
+    targets, exit_reason, _, _ = run_task.result()
+    assert exit_reason == "interrupted"
+    # Completed lookups are kept in place and requested order is preserved.
+    assert [target.target for target in targets] == ["slow.example", "192.0.2.1"]
+    assert [target.status for target in targets] == [
+        TargetStatus.RESOLVING,
+        TargetStatus.HEALTHY,
+    ]
+    assert lookup_cancelled.is_set()
+    assert "192.0.2.1 ok latency=1.00ms" in capsys.readouterr().out
+
+
+async def test_run_no_tui_count_waits_for_targets_that_resolve_late(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed = capture_stop_event(monkeypatch)
+    probed: list[str] = []
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "slow.example":
+            await asyncio.sleep(0.05)
+        return resolved(target, "192.0.2.9" if target == "slow.example" else None)
+
+    async def recording_probe(target: TargetRun, **kwargs: object) -> ProbeSample:
+        probed.append(target.target)
+        return await applying_probe(target, **kwargs)
+
+    monkeypatch.setattr(runner, "resolve_run_target", fake_resolve_run_target)
+    monkeypatch.setattr(runner, "probe_once", recording_probe)
+
+    run_task = asyncio.create_task(
+        run_no_tui(
+            no_tui_args(targets=["slow.example", "192.0.2.1"], count=2, interval=0.01),
+            ProbeMode.ICMP,
+        )
+    )
+
+    assert await settle(run_task, installed)
+    targets, exit_reason, _, _ = run_task.result()
+    assert exit_reason == "completed"
+    assert sorted(probed) == ["192.0.2.1", "192.0.2.1", "slow.example", "slow.example"]
+    assert [target.stats.sent for target in targets] == [2, 2]
+
+
+async def test_ip_literals_do_not_queue_behind_dns_lookups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def queued_lookup(*_: object, **__: object) -> ResolvedTarget:
+        pytest.fail("an IP literal waited for a resolver slot")
+
+    monkeypatch.setattr(runner, "_resolve_target_bounded", queued_lookup)
+
+    literal = await runner.resolve_run_target("2001:db8::1", no_tui_args())
+    numeric_name = await runner.resolve_run_target("service.example", no_tui_args(numeric=True))
+
+    assert (literal.status, literal.resolved_address, literal.resolved_family) == (
+        TargetStatus.RESOLVING,
+        "2001:db8::1",
+        AddressFamily.IPV6,
+    )
+    assert literal._last_resolve_time is not None
+    assert (numeric_name.status, numeric_name.error) == (
+        TargetStatus.DNS_FAILURE,
+        "--numeric requires an IP literal",
+    )
+
+
+# No-TUI first probes are staggered like the TUI.
+
+
+def test_stagger_window_compresses_for_short_durations() -> None:
+    assert stagger_window(interval=1.0, remaining=None) == 1.0
+    assert stagger_window(interval=1.0, remaining=10.0) == 1.0
+    assert stagger_window(interval=1.0, remaining=0.5) == 0.25
+    assert stagger_window(interval=1.0, remaining=-1.0) == 0.0
+
+
+def test_first_probe_delay_keeps_slots_from_a_fixed_start() -> None:
+    assert first_probe_delay(index=2, count=4, window=1.0, elapsed=0.2) == pytest.approx(0.3)
+    # A target that resolves after its slot has passed starts at once.
+    assert first_probe_delay(index=1, count=4, window=1.0, elapsed=0.9) == 0.0
+
+
+async def _record_initial_delays(
+    monkeypatch: pytest.MonkeyPatch, **overrides: object
+) -> dict[str, float]:
+    delays: dict[str, float] = {}
+
+    async def fake_probe_target_loop(target: TargetRun, *, initial_delay: float, **_: Any) -> None:
+        delays[target.target] = initial_delay
+
+    monkeypatch.setattr(runner, "probe_target_loop", fake_probe_target_loop)
+    _, exit_reason, _, _ = await run_no_tui(no_tui_args(**overrides), ProbeMode.ICMP)
+    assert exit_reason == "completed"
+    return delays
+
+
+async def test_run_no_tui_staggers_first_probes_across_the_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    targets = [f"192.0.2.{index}" for index in range(1, 5)]
+
+    delays = await _record_initial_delays(monkeypatch, targets=targets, count=1, interval=1.0)
+
+    assert delays[targets[0]] == 0.0
+    for target, slot in zip(targets[1:], (0.25, 0.5, 0.75), strict=True):
+        assert slot - 0.1 < delays[target] <= slot
+
+
+async def test_run_no_tui_short_duration_compresses_the_stagger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Every host must get a first probe well before a short deadline.
+    targets = [f"192.0.2.{index}" for index in range(1, 5)]
+
+    delays = await _record_initial_delays(monkeypatch, targets=targets, duration=0.4, interval=1.0)
+
+    assert max(delays.values()) <= 0.15
 
 
 # Resolved targets stay pending until their first probe.

@@ -1,7 +1,10 @@
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 import pinghue.app as app_module
 from pinghue.app import PinghueTextualApp
@@ -14,6 +17,8 @@ from pinghue.models import (
     TargetRun,
     TargetStatus,
 )
+from pinghue.probes import ResolvedTarget
+from pinghue.runner import target_run_from_resolution
 
 
 def test_tui_app_class_is_module_scoped() -> None:
@@ -75,18 +80,23 @@ async def test_tui_resolution_preserves_aggregate_sample_budget(monkeypatch) -> 
     ]
     app_module.apply_retained_sample_budget(app.targets)
 
+    started: list[int] = []
+
     async def fake_resolve_one(index: int, target: str) -> tuple[int, TargetRun]:
         return index, TargetRun(target, resolved_address=target)
 
+    def record_start(index: int, _target: TargetRun, **_kwargs: object) -> None:
+        started.append(index)
+
     monkeypatch.setattr(app, "_resolve_one_target", fake_resolve_one)
-    monkeypatch.setattr(app, "_refresh_table", lambda: None)
-    monkeypatch.setattr(app, "_start_probe_tasks", lambda: None)
+    monkeypatch.setattr(app, "_start_probe_task", record_start)
 
     await app._resolve_targets()
 
     assert {target.samples.maxlen for target in app.targets} == {
         MAX_TOTAL_RETAINED_SAMPLES // target_count
     }
+    assert sorted(started) == list(range(target_count))
 
 
 async def test_tui_preserves_aggregate_budget_during_partial_resolution(
@@ -131,6 +141,7 @@ def build_args(**overrides: object) -> SimpleNamespace:
         "history_style": "bar",
         "interval": 1.0,
         "jitter_threshold": 50.0,
+        "numeric": False,
         "port": None,
         "targets": ["example.com"],
         "timeout": 1.0,
@@ -371,4 +382,170 @@ async def test_on_mount_renders_targets_before_dns_resolution(monkeypatch) -> No
     assert app.targets[0].status == TargetStatus.RESOLVING
     assert table.added_rows
     await asyncio.wait_for(resolve_started.wait(), timeout=1.0)
+    await app.on_unmount()
+
+
+async def _eventually(predicate: Callable[[], object], *, turns: int = 200) -> bool:
+    for _ in range(turns):
+        if predicate():
+            return True
+        await asyncio.sleep(0)
+    return bool(predicate())
+
+
+def _resolved(target: str, address: str) -> TargetRun:
+    return target_run_from_resolution(ResolvedTarget(target, address, AddressFamily.IPV4))
+
+
+def _mount_with_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    app: PinghueTextualApp,
+    *,
+    resolve: Callable[..., Any],
+    probe_loop: Callable[..., Any],
+) -> FakeTable:
+    table = FakeTable()
+    monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
+    monkeypatch.setattr(app, "set_interval", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app, "exit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module, "resolve_run_target", resolve)
+    monkeypatch.setattr(app_module, "probe_target_loop", probe_loop)
+    return table
+
+
+async def test_tui_resolution_does_not_redraw_the_table_per_target(monkeypatch) -> None:
+    # A full-table refresh per resolved target made startup O(N^2) and
+    # stalled the event loop for seconds before any probe started.
+    targets = [f"127.0.{index // 250}.{index % 250 + 1}" for index in range(1000)]
+    app = PinghueTextualApp(args=build_args(targets=targets, interval=60.0), mode=ProbeMode.ICMP)
+    started: list[str] = []
+
+    async def fake_probe_target_loop(target: TargetRun, *, stop_event: Any, **_: Any) -> None:
+        started.append(target.target)
+        await stop_event.wait()
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=app_module.resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+    original_refresh = app._refresh_table
+    refreshes = 0
+
+    def counting_refresh() -> None:
+        nonlocal refreshes
+        refreshes += 1
+        original_refresh()
+
+    monkeypatch.setattr(app, "_refresh_table", counting_refresh)
+
+    await app.on_mount()
+    assert app._resolution_task is not None
+    await asyncio.wait_for(app._resolution_task, timeout=10.0)
+    assert await _eventually(lambda: len(started) == len(targets))
+
+    # Only the initial render on mount; the interval timer redraws after that.
+    assert refreshes <= 1
+    assert sorted(started) == sorted(targets)
+    await app.on_unmount()
+
+
+async def test_tui_starts_each_probe_loop_as_its_target_resolves(monkeypatch) -> None:
+    # IP literals are probed while a slow lookup is still pending, and
+    # --count completion still waits for the loop of the target resolved last.
+    app = PinghueTextualApp(
+        args=build_args(targets=["slow.example", "192.0.2.1", "192.0.2.2"], count=1),
+        mode=ProbeMode.ICMP,
+    )
+    release_slow = asyncio.Event()
+    started: dict[str, tuple[asyncio.Event, float]] = {}
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "slow.example":
+            await release_slow.wait()
+            return _resolved(target, "192.0.2.9")
+        return _resolved(target, target)
+
+    async def fake_probe_target_loop(
+        target: TargetRun,
+        *,
+        stop_event: asyncio.Event,
+        immediate_event: asyncio.Event,
+        initial_delay: float,
+        **_: Any,
+    ) -> None:
+        started[target.target] = (immediate_event, initial_delay)
+        await stop_event.wait()
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=fake_resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+
+    await app.on_mount()
+    # One "probe now" event per row exists before any target resolves.
+    assert len(app._immediate_events) == 3
+    assert await _eventually(lambda: set(started) == {"192.0.2.1", "192.0.2.2"})
+
+    assert app._completion_task is None
+    assert app.targets[0].resolved_address is None
+    # Resolved but not yet probed is pending, not DOWN.
+    assert [target.status for target in app.targets] == [TargetStatus.RESOLVING] * 3
+    assert started["192.0.2.1"][0] is app._immediate_events[1]
+    assert started["192.0.2.2"][0] is app._immediate_events[2]
+    # First probes keep their slots across one interval from a fixed start.
+    assert 0.2 < started["192.0.2.1"][1] <= 1 / 3
+    assert 0.5 < started["192.0.2.2"][1] <= 2 / 3
+
+    release_slow.set()
+    assert await _eventually(lambda: "slow.example" in started)
+    assert started["slow.example"][0] is app._immediate_events[0]
+    assert app.targets[0].resolved_address == "192.0.2.9"
+    assert app._completion_task is not None
+    assert len(app._probe_tasks) == 3
+    await app.on_unmount()
+
+
+async def test_tui_finish_cancels_pending_lookups_and_started_loops(monkeypatch) -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["slow.example", "192.0.2.1"]),
+        mode=ProbeMode.ICMP,
+    )
+    lookup_cancelled = asyncio.Event()
+    loop_cancelled = asyncio.Event()
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "slow.example":
+            try:
+                await asyncio.Event().wait()
+            finally:
+                lookup_cancelled.set()
+        return _resolved(target, target)
+
+    async def fake_probe_target_loop(*_: Any, **__: Any) -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            loop_cancelled.set()
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=fake_resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+
+    await app.on_mount()
+    assert await _eventually(lambda: app._probe_tasks)
+    await asyncio.wait_for(app._finish("deadline"), timeout=2.0)
+
+    assert app.exit_reason == "deadline"
+    assert lookup_cancelled.is_set()
+    assert loop_cancelled.is_set()
+    # The completed lookup is kept in place and requested order is preserved.
+    assert [target.target for target in app.targets] == ["slow.example", "192.0.2.1"]
+    assert [target.resolved_address for target in app.targets] == [None, "192.0.2.1"]
     await app.on_unmount()

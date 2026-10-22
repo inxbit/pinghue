@@ -108,8 +108,22 @@ def target_run_from_resolution(resolved: ResolvedTarget) -> TargetRun:
     )
 
 
+def _is_ip_literal(target: str) -> bool:
+    try:
+        family_from_ip(target)
+    except ValueError:
+        return False
+    return True
+
+
 async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
     family = AddressFamily(args.address_family)
+    if args.numeric or _is_ip_literal(target):
+        # Nothing to look up: skip the resolver queue so IP literals can be
+        # probed at once instead of waiting behind slow DNS names.
+        run = target_run_from_resolution(await resolve_target(target, family, numeric=args.numeric))
+        run._last_resolve_time = _monotonic_time()
+        return run
     try:
         resolved = await _resolve_target_bounded(target, family, numeric=args.numeric)
     except Exception as exc:
@@ -282,6 +296,28 @@ def stagger_delay(*, index: int, count: int, interval: float) -> float:
     return round((interval / count) * index, 6)
 
 
+def stagger_window(*, interval: float, remaining: float | None) -> float:
+    """Return the span that first probes are spread across.
+
+    Normally one interval. A ``--duration`` shorter than two intervals spreads
+    them across half of the remaining run instead, so every host still gets
+    its first probe well before the deadline.
+    """
+    if remaining is None:
+        return interval
+    return max(0.0, min(interval, remaining / 2))
+
+
+def first_probe_delay(*, index: int, count: int, window: float, elapsed: float) -> float:
+    """Return how long target ``index`` waits before its first probe.
+
+    Slots are spread evenly across ``window`` from a fixed run start, so a
+    target that resolves late still lands in its own slot instead of bunching
+    up with others, and one whose slot has already passed starts at once.
+    """
+    return max(0.0, stagger_delay(index=index, count=count, interval=window) - elapsed)
+
+
 def _cancel_requested() -> bool:
     """Return whether the running task has a pending cancellation request.
 
@@ -329,7 +365,9 @@ async def probe_target_loop(
             await asyncio.gather(stop_wait, immediate_wait, return_exceptions=True)
         if stop_event.is_set():
             return
-        immediate_event.clear()
+    # A "probe now" request made before the loop started is served by the
+    # first probe rather than triggering a second one right after it.
+    immediate_event.clear()
 
     probes_completed = 0
     probe_limit = args.count
@@ -396,7 +434,7 @@ def _iteration_sleep(*, interval: float, iteration_elapsed: float) -> float:
 
 
 async def _run_probe_loops_until_shutdown(
-    targets: Sequence[TargetRun],
+    targets: list[TargetRun],
     *,
     args: RunConfig,
     mode: ProbeMode,
@@ -405,10 +443,17 @@ async def _run_probe_loops_until_shutdown(
     deadline_at: float | None,
     on_sample: SampleCallback,
 ) -> str | None:
-    """Run every target's probe loop until they finish, a stop is requested, or the deadline.
+    """Resolve and probe every target until done, a stop is requested, or the deadline.
+
+    ``targets`` holds the pending runs in requested order. Each target's probe
+    loop starts as soon as that target resolves, so IP literals and fast
+    lookups are probed while slow names are still resolving. Each resolved run
+    replaces its pending entry in place, so an interrupted or deadline run
+    keeps every completed lookup in the requested order.
 
     Returns ``None`` when every loop completed on its own (``--count``), otherwise
-    the stop reason. Loops still running at shutdown are cancelled promptly.
+    the stop reason. Lookups and loops still running at shutdown are cancelled
+    promptly.
     """
     loop = asyncio.get_running_loop()
     if stop_event.is_set():
@@ -416,24 +461,41 @@ async def _run_probe_loops_until_shutdown(
     if deadline_at is not None and loop.time() >= deadline_at:
         return "deadline"
 
+    # First probes are spread across one interval like the TUI, so N hosts do
+    # not fire in one burst and stay phase-locked into periodic bursts. With
+    # --count the last host therefore finishes up to one interval later.
+    run_start = loop.time()
+    window = stagger_window(
+        interval=args.interval,
+        remaining=None if deadline_at is None else deadline_at - run_start,
+    )
     # No-TUI mode has no "probe now" key, so one shared, never-set event serves
-    # every loop; probes start together rather than staggered across an interval.
+    # every loop.
     immediate_event = asyncio.Event()
-    tasks = [
-        asyncio.create_task(
-            probe_target_loop(
-                target,
-                args=args,
-                mode=mode,
-                semaphore=semaphore,
-                stop_event=stop_event,
-                immediate_event=immediate_event,
-                initial_delay=0.0,
-                on_sample=on_sample,
-            )
+
+    async def resolve_and_probe(index: int) -> None:
+        resolved = await resolve_run_target(targets[index].target, args)
+        resolved.samples = SampleWindow(resolved.samples, maxlen=targets[index].samples.maxlen)
+        targets[index] = resolved
+        if stop_event.is_set():
+            return
+        await probe_target_loop(
+            resolved,
+            args=args,
+            mode=mode,
+            semaphore=semaphore,
+            stop_event=stop_event,
+            immediate_event=immediate_event,
+            initial_delay=first_probe_delay(
+                index=index,
+                count=len(targets),
+                window=window,
+                elapsed=loop.time() - run_start,
+            ),
+            on_sample=on_sample,
         )
-        for target in targets
-    ]
+
+    tasks = [asyncio.create_task(resolve_and_probe(index)) for index in range(len(targets))]
     all_loops = asyncio.gather(*tasks)
     stop_wait = asyncio.create_task(stop_event.wait())
     try:
@@ -472,44 +534,6 @@ async def _run_probe_loops_until_shutdown(
         await asyncio.gather(all_loops, stop_wait, *tasks, return_exceptions=True)
 
 
-async def _resolve_runs_until_shutdown(
-    args: RunConfig,
-    stop_event: asyncio.Event,
-    *,
-    deadline_at: float | None,
-    pending_runs: list[TargetRun] | None = None,
-) -> tuple[list[TargetRun], str | None]:
-    """Resolve targets while honoring both process signals and run duration."""
-    unresolved = pending_runs if pending_runs is not None else _pending_target_runs(args.targets)
-    loop = asyncio.get_running_loop()
-    if stop_event.is_set():
-        return unresolved, "interrupted"
-    if deadline_at is not None and loop.time() >= deadline_at:
-        return unresolved, "deadline"
-
-    resolution = asyncio.create_task(resolve_runs(args))
-    stop_wait = asyncio.create_task(stop_event.wait())
-    try:
-        timeout = None if deadline_at is None else max(0.0, deadline_at - loop.time())
-        await asyncio.wait(
-            (resolution, stop_wait),
-            timeout=timeout,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if stop_event.is_set():
-            return unresolved, "interrupted"
-        if deadline_at is not None and loop.time() >= deadline_at:
-            return unresolved, "deadline"
-        if not resolution.done():
-            return unresolved, "deadline"
-        return await resolution, None
-    finally:
-        stop_wait.cancel()
-        if not resolution.done():
-            resolution.cancel()
-        await asyncio.gather(stop_wait, resolution, return_exceptions=True)
-
-
 async def run_no_tui(
     args: RunConfig,
     mode: ProbeMode,
@@ -530,22 +554,15 @@ async def run_no_tui(
         print_sample(target, sample, stream=sample_stream)
 
     try:
-        targets, stop_reason = await _resolve_runs_until_shutdown(
-            args,
-            stop_event,
+        stop_reason = await _run_probe_loops_until_shutdown(
+            targets,
+            args=args,
+            mode=mode,
+            semaphore=semaphore,
+            stop_event=stop_event,
             deadline_at=deadline_at,
-            pending_runs=targets,
+            on_sample=print_to_stream,
         )
-        if stop_reason is None:
-            stop_reason = await _run_probe_loops_until_shutdown(
-                targets,
-                args=args,
-                mode=mode,
-                semaphore=semaphore,
-                stop_event=stop_event,
-                deadline_at=deadline_at,
-                on_sample=print_to_stream,
-            )
         if stop_reason is not None:
             exit_reason = stop_reason
     except (asyncio.CancelledError, KeyboardInterrupt):
