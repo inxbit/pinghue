@@ -917,6 +917,7 @@ async def test_resolver_thread_start_failure_leaves_target_pending(
             raise RuntimeError("can't start new thread")
 
     monkeypatch.setattr(threading, "Thread", FailingThread)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 0.02)
     args = build_args(targets=["no-thread.example"])
 
     pending = await runner.resolve_run_target("no-thread.example", args)
@@ -1047,6 +1048,51 @@ async def test_probe_loop_retries_resolver_capacity_miss_without_dns_cooldown(
     assert attempts == 3
     assert target.status == TargetStatus.HEALTHY
     assert target.resolved_address == "192.0.2.60"
+
+
+async def test_resolver_thread_start_failures_retry_at_a_bounded_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A pids cgroup or RLIMIT_NPROC cap fails every thread start at once.
+    # Without a wait, each pending name tried to start a thread on every probe
+    # iteration, which flooded the event loop and starved healthy targets.
+    attempts = 0
+
+    class FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("can't start new thread")
+
+    wait_s = 0.1
+    duration = 0.6
+    lookup_concurrency = 4
+    monkeypatch.setattr(threading, "Thread", FailingThread)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", wait_s)
+    monkeypatch.setattr(runner, "DNS_RESOLVE_CONCURRENCY", lookup_concurrency)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    names = [f"name-{index}.no-thread.test" for index in range(50)]
+    literals = ["127.0.0.1", "127.0.0.2", "127.0.0.3"]
+    args = build_args(
+        targets=names + literals,
+        count=None,
+        duration=duration,
+        interval=0.05,
+        concurrency=8,
+    )
+
+    runs, exit_reason, _, _ = await runner.run_no_tui(args, ProbeMode.ICMP)
+
+    assert exit_reason == "deadline"
+    # At most one attempt per lookup slot per wait (about 24 here), instead of
+    # one per pending name per iteration (about 600).
+    assert attempts <= lookup_concurrency * (duration / wait_s + 2)
+    assert {run.status for run in runs[: len(names)]} == {TargetStatus.RESOLVING}
+    assert {run.status for run in runs[len(names) :]} == {TargetStatus.HEALTHY}
+    assert min(run.stats.sent for run in runs[len(names) :]) >= 3
 
 
 async def test_late_resolution_stays_resolving_until_first_sample(

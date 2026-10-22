@@ -464,11 +464,18 @@ async def test_resolver_thread_start_failure_releases_capacity(
             raise RuntimeError("can't start new thread")
 
     monkeypatch.setattr(threading, "Thread", FailingThread)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 0.2)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
     # A thread limit (pids cap, RLIMIT_NPROC) is local capacity, not a DNS verdict.
     with pytest.raises(probes.ResolverBusyError, match="can't start new thread") as raised:
         await resolve_target("start-failure.example", AddressFamily.AUTO)
 
+    # Reported only after the same wait as a lookup that found every thread
+    # busy, so callers that retry at once cannot flood thread starts.
+    assert loop.time() - started >= 0.15
     assert isinstance(raised.value.__cause__, RuntimeError)
+    # The slot is free during that wait, not just after it.
     assert slots.acquire(blocking=False)
     slots.release()
 

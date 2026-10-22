@@ -321,7 +321,8 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     ever exist. A lookup of a name whose previous call is still running joins
     that call instead of starting another thread. When every slot is taken, the
     lookup waits up to DNS_THREAD_WAIT_SECONDS for one, then raises
-    ResolverBusyError; so does a thread that fails to start.
+    ResolverBusyError; so does a thread that fails to start, once the rest of
+    that wait has passed.
     """
     key = (target, family)
     loop = asyncio.get_running_loop()
@@ -360,9 +361,13 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
                 _settle_dns_lookup(key, lookup, [], exc)
                 raise
             # "can't start new thread" (a pids or RLIMIT_NPROC cap, memory) is
-            # local capacity, not a DNS verdict.
+            # local capacity, not a DNS verdict. Free the slot, then wait out
+            # DNS_THREAD_WAIT_SECONDS like a lookup that found every thread
+            # busy: callers retry at once, so without the wait every pending
+            # name would try to start a thread on every probe iteration.
             busy = ResolverBusyError(f"could not start a resolver thread: {exc}")
             _settle_dns_lookup(key, lookup, [], busy)
+            await asyncio.sleep(max(0.0, deadline - loop.time()))
             raise busy from exc
 
     try:
