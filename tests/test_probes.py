@@ -5,7 +5,7 @@ import struct
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
 import pytest
@@ -16,99 +16,186 @@ from pinghue.models import AddressFamily, SampleStatus, TargetRun, TargetStatus
 from pinghue.probes import ResolvedTarget, icmp_probe, resolve_target, tcp_probe
 
 
-class FakeWriter:
-    def close(self) -> None:
-        return None
+class FakeTcpSocket:
+    """Stands in for tcp_probe's socket; a fake connect never touches it."""
 
-    async def wait_closed(self) -> None:
-        return None
+    def __init__(
+        self, *, tcp_info: bytes | None = None, peer: tuple[str, int] | None = None
+    ) -> None:
+        self.tcp_info = tcp_info
+        self.peer = peer
+        self.closed = False
 
-
-async def test_tcp_probe_reports_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        return object(), FakeWriter()
-
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
-
-    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
-
-    assert sample.status == SampleStatus.OK
-    assert sample.latency_ms is not None
-
-
-async def test_tcp_probe_reports_success_when_connection_reset_during_close(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class ResettingWriter(FakeWriter):
-        async def wait_closed(self) -> None:
-            raise ConnectionResetError("peer reset during close")
-
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        return object(), ResettingWriter()
-
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
-
-    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
-
-    assert sample.status == SampleStatus.OK
-    assert sample.latency_ms is not None
-
-
-async def test_tcp_probe_preserves_success_when_cancelled_during_close(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    close_started = asyncio.Event()
-
-    class BlockingWriter(FakeWriter):
-        async def wait_closed(self) -> None:
-            close_started.set()
-            await asyncio.Event().wait()
-
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        return object(), BlockingWriter()
-
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
-
-    probe = asyncio.create_task(tcp_probe("127.0.0.1", 443, timeout_s=1.0))
-    await close_started.wait()
-    probe.cancel()
-    sample = await probe
-
-    assert sample.status == SampleStatus.OK
-    assert sample.latency_ms is not None
-
-
-class _TcpInfoSocket:
-    def __init__(self, *, rtt_us: int, total_retrans: int) -> None:
-        self.info = bytearray(104)
-        struct.pack_into("=I", self.info, 68, rtt_us)
-        struct.pack_into("=I", self.info, 100, total_retrans)
+    def getpeername(self) -> tuple[str, int]:
+        if self.peer is None:
+            raise OSError(errno.ENOTCONN, "Transport endpoint is not connected")
+        return self.peer
 
     def getsockopt(self, level: int, option: int, buflen: int) -> bytes:
         assert (level, option, buflen) == (socket.IPPROTO_TCP, 11, 104)
-        return bytes(self.info)
+        if self.tcp_info is None:
+            raise OSError(errno.ENOPROTOOPT, "Protocol not available")
+        return self.tcp_info
+
+    def close(self) -> None:
+        self.closed = True
 
 
-class _TcpInfoWriter(FakeWriter):
-    def __init__(self, sock: object) -> None:
-        self._sock = sock
-
-    def get_extra_info(self, name: str, default: object = None) -> object:
-        return self._sock if name == "socket" else default
+PEER = ("127.0.0.1", 443)
 
 
-def _slow_connect(writer: FakeWriter, delay_s: float = 0.05) -> Any:
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
+def _tcp_info(*, rtt_us: int, total_retrans: int) -> bytes:
+    info = bytearray(104)
+    struct.pack_into("=I", info, 68, rtt_us)
+    struct.pack_into("=I", info, 100, total_retrans)
+    return bytes(info)
+
+
+ConnectFn = Callable[[object, tuple[str, int]], Awaitable[None]]
+
+
+def _install_tcp_connect(
+    monkeypatch: pytest.MonkeyPatch, sock: FakeTcpSocket, connect: ConnectFn
+) -> None:
+    monkeypatch.setattr(probes, "_open_tcp_socket", lambda _address: sock)
+    monkeypatch.setattr(asyncio.get_running_loop(), "sock_connect", connect)
+
+
+async def _connect_at_once(_sock: object, _address: tuple[str, int]) -> None:
+    return None
+
+
+def _slow_connect(delay_s: float = 0.05) -> ConnectFn:
+    async def connect(_sock: object, _address: tuple[str, int]) -> None:
         await asyncio.sleep(delay_s)  # the connect completes but the loop is late
-        return object(), writer
 
-    return open_connection
+    return connect
+
+
+def _failing_connect(error: OSError) -> ConnectFn:
+    async def connect(_sock: object, _address: tuple[str, int]) -> None:
+        raise error
+
+    return connect
+
+
+async def test_tcp_probe_reports_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    sock = FakeTcpSocket()
+    addresses: list[tuple[str, int]] = []
+
+    async def connect(_sock: object, address: tuple[str, int]) -> None:
+        addresses.append(address)
+
+    _install_tcp_connect(monkeypatch, sock, connect)
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None
+    assert addresses == [("127.0.0.1", 443)]
+    assert sock.closed
+
+
+class _RecordingSocket:
+    opened: list[tuple[int, int]] = []
+
+    def __init__(self, family: int, kind: int) -> None:
+        self.opened.append((family, kind))
+        self.blocking: bool | None = None
+        self.closed = False
+
+    def setblocking(self, flag: bool) -> None:
+        self.blocking = flag
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    ("address", "family"),
+    [
+        ("192.0.2.1", socket.AF_INET),
+        ("2001:db8::1", socket.AF_INET6),
+        ("fe80::1%eth0", socket.AF_INET6),
+    ],
+    ids=["ipv4", "ipv6", "ipv6-scoped"],
+)
+def test_open_tcp_socket_uses_the_address_family(
+    monkeypatch: pytest.MonkeyPatch, address: str, family: int
+) -> None:
+    monkeypatch.setattr(_RecordingSocket, "opened", [])
+    monkeypatch.setattr(probes.socket, "socket", _RecordingSocket)
+
+    sock = probes._open_tcp_socket(address)
+
+    assert _RecordingSocket.opened == [(family, socket.SOCK_STREAM)]
+    assert isinstance(sock, _RecordingSocket)
+    assert sock.blocking is False
+
+
+def test_open_tcp_socket_closes_a_socket_it_cannot_make_non_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made: list[_RecordingSocket] = []
+
+    class StuckSocket(_RecordingSocket):
+        def setblocking(self, _flag: bool) -> None:
+            made.append(self)
+            raise OSError(errno.EBADF, "Bad file descriptor")
+
+    monkeypatch.setattr(probes.socket, "socket", StuckSocket)
+
+    with pytest.raises(OSError, match="Bad file descriptor"):
+        probes._open_tcp_socket("192.0.2.1")
+    assert len(made) == 1 and made[0].closed
+
+
+@pytest.mark.parametrize(
+    "connect",
+    [
+        _failing_connect(ConnectionRefusedError("connection refused")),
+        _failing_connect(OSError(errno.EHOSTUNREACH, "unreachable")),
+        _slow_connect(1.0),
+    ],
+    ids=["refused", "unreachable", "timeout"],
+)
+async def test_tcp_probe_closes_its_socket_when_the_connect_fails(
+    monkeypatch: pytest.MonkeyPatch, connect: ConnectFn
+) -> None:
+    sock = FakeTcpSocket()
+    _install_tcp_connect(monkeypatch, sock, connect)
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=0.05)
+
+    assert sample.status != SampleStatus.OK
+    assert sock.closed
+
+
+async def test_tcp_probe_cancelled_during_connect_closes_its_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sock = FakeTcpSocket()
+    connect_started = asyncio.Event()
+
+    async def hanging_connect(_sock: object, _address: tuple[str, int]) -> None:
+        connect_started.set()
+        await asyncio.Event().wait()
+
+    _install_tcp_connect(monkeypatch, sock, hanging_connect)
+
+    probe = asyncio.create_task(tcp_probe("127.0.0.1", 443, timeout_s=10.0))
+    await connect_started.wait()
+    probe.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await probe
+    assert sock.closed
 
 
 async def test_tcp_probe_reports_kernel_handshake_rtt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probes, "_TCP_INFO", 11)
-    writer = _TcpInfoWriter(_TcpInfoSocket(rtt_us=1500, total_retrans=0))
-    monkeypatch.setattr(asyncio, "open_connection", _slow_connect(writer))
+    sock = FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0))
+    _install_tcp_connect(monkeypatch, sock, _slow_connect())
 
     sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
 
@@ -117,19 +204,19 @@ async def test_tcp_probe_reports_kernel_handshake_rtt(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize(
-    "sock",
+    "tcp_info",
     [
-        _TcpInfoSocket(rtt_us=1500, total_retrans=1),
-        _TcpInfoSocket(rtt_us=0, total_retrans=0),
-        None,
+        _tcp_info(rtt_us=1500, total_retrans=1),
+        _tcp_info(rtt_us=0, total_retrans=0),
+        b"",
     ],
-    ids=["syn-retransmitted", "no-rtt-sample", "no-socket"],
+    ids=["syn-retransmitted", "no-rtt-sample", "short-tcp-info"],
 )
 async def test_tcp_probe_keeps_connect_time_when_kernel_rtt_would_hide_it(
-    monkeypatch: pytest.MonkeyPatch, sock: object
+    monkeypatch: pytest.MonkeyPatch, tcp_info: bytes
 ) -> None:
     monkeypatch.setattr(probes, "_TCP_INFO", 11)
-    monkeypatch.setattr(asyncio, "open_connection", _slow_connect(_TcpInfoWriter(sock)))
+    _install_tcp_connect(monkeypatch, FakeTcpSocket(tcp_info=tcp_info), _slow_connect())
 
     sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
 
@@ -138,37 +225,11 @@ async def test_tcp_probe_keeps_connect_time_when_kernel_rtt_would_hide_it(
 
 
 async def test_tcp_probe_ignores_tcp_info_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FailingSocket:
-        def getsockopt(self, *_: object) -> bytes:
-            raise OSError(errno.ENOPROTOOPT, "Protocol not available")
-
     monkeypatch.setattr(probes, "_TCP_INFO", 11)
-    monkeypatch.setattr(
-        asyncio, "open_connection", _slow_connect(_TcpInfoWriter(FailingSocket()), 0.0)
-    )
+    _install_tcp_connect(monkeypatch, FakeTcpSocket(tcp_info=None), _connect_at_once)
 
     sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
 
-    assert sample.status == SampleStatus.OK
-    assert sample.latency_ms is not None
-
-
-async def test_tcp_probe_bounds_slow_teardown(monkeypatch: pytest.MonkeyPatch) -> None:
-    class StuckWriter(FakeWriter):
-        async def wait_closed(self) -> None:
-            await asyncio.Event().wait()
-
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        return object(), StuckWriter()
-
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
-    monkeypatch.setattr(probes, "TCP_CLOSE_TIMEOUT_SECONDS", 0.05)
-
-    probe = asyncio.ensure_future(tcp_probe("127.0.0.1", 443, timeout_s=1.0))
-    done, _ = await asyncio.wait({probe}, timeout=2.0)
-
-    assert probe in done
-    sample = probe.result()
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms is not None
 
@@ -201,16 +262,81 @@ async def test_tcp_probe_real_loopback_excludes_event_loop_stall() -> None:
     assert sample.latency_ms is not None and sample.latency_ms < 25
 
 
-async def test_tcp_probe_reports_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        raise ConnectionRefusedError("connection refused")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="TCP_INFO is read on Linux")
+async def test_tcp_probe_real_loopback_keeps_a_connect_finished_before_a_stalled_deadline() -> None:
+    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        probe = asyncio.create_task(tcp_probe("127.0.0.1", port, timeout_s=0.05))
+        await asyncio.sleep(0)
+        # The handshake finishes at once, but the loop stalls past the probe's
+        # deadline before it can see that.
+        time.sleep(0.2)
+        sample = await probe
 
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None and sample.latency_ms < 25
+
+
+@pytest.mark.parametrize(
+    ("tcp_info_option", "sock"),
+    [
+        (11, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0))),
+        (11, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=60_000, total_retrans=0), peer=PEER)),
+        (11, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=1), peer=PEER)),
+        (None, FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0), peer=PEER)),
+    ],
+    ids=["still-connecting", "answered-after-timeout", "syn-retransmitted", "no-tcp-info"],
+)
+async def test_tcp_probe_keeps_the_timeout_unless_the_kernel_connected_in_time(
+    monkeypatch: pytest.MonkeyPatch, tcp_info_option: int | None, sock: FakeTcpSocket
+) -> None:
+    monkeypatch.setattr(probes, "_TCP_INFO", tcp_info_option)
+    _install_tcp_connect(monkeypatch, sock, _slow_connect(1.0))
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=0.05)
+
+    assert sample.status == SampleStatus.TIMEOUT
+    assert sample.latency_ms is None
+    assert sock.closed
+
+
+async def test_tcp_probe_reports_a_connect_the_kernel_finished_in_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The deadline won over a connect that the kernel had finished in time.
+    monkeypatch.setattr(probes, "_TCP_INFO", 11)
+    sock = FakeTcpSocket(tcp_info=_tcp_info(rtt_us=1500, total_retrans=0), peer=PEER)
+    _install_tcp_connect(monkeypatch, sock, _slow_connect(1.0))
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=0.05)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms == 1.5
+    assert sock.closed
+
+
+async def test_tcp_probe_reports_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_tcp_connect(
+        monkeypatch, FakeTcpSocket(), _failing_connect(ConnectionRefusedError("connection refused"))
+    )
 
     sample = await tcp_probe("127.0.0.1", 1, timeout_s=1.0)
 
     assert sample.status == SampleStatus.REFUSED
     assert sample.error is not None
+
+
+async def test_tcp_probe_real_loopback_reports_refused() -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()  # nothing listens on the port now
+
+    sample = await tcp_probe("127.0.0.1", port, timeout_s=2.0)
+
+    assert sample.status == SampleStatus.REFUSED
+    assert sample.error
 
 
 @pytest.mark.parametrize(
@@ -226,10 +352,9 @@ async def test_tcp_probe_reports_platform_unreachable_errno(
     monkeypatch: pytest.MonkeyPatch,
     error_number: int,
 ) -> None:
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        raise OSError(error_number, "unreachable")
-
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    _install_tcp_connect(
+        monkeypatch, FakeTcpSocket(), _failing_connect(OSError(error_number, "unreachable"))
+    )
 
     sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
 
@@ -239,14 +364,29 @@ async def test_tcp_probe_reports_platform_unreachable_errno(
 async def test_tcp_probe_reports_unknown_oserror_as_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
-        raise OSError(errno.EPERM, "not an unreachable network")
-
-    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    _install_tcp_connect(
+        monkeypatch,
+        FakeTcpSocket(),
+        _failing_connect(OSError(errno.EPERM, "not an unreachable network")),
+    )
 
     sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
 
     assert sample.status == SampleStatus.ERROR
+
+
+async def test_tcp_probe_reports_a_socket_that_cannot_open_as_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_socket(_address: str) -> FakeTcpSocket:
+        raise OSError(errno.EMFILE, "Too many open files")
+
+    monkeypatch.setattr(probes, "_open_tcp_socket", no_socket)
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
+
+    assert sample.status == SampleStatus.ERROR
+    assert sample.error is not None and "Too many open files" in sample.error
 
 
 async def test_resolve_target_numeric_rejects_hostname() -> None:
