@@ -265,7 +265,7 @@ Use `--history-style dots` or `--history-style none` when a terminal font or wor
 
 `pinghue` classifies each host from the **whole run**, not just the most recent probes. Once a host has replied successfully, `down` requires `--fail-threshold` consecutive failures. A run with no successful replies is `down` immediately, even if it ends before the threshold. Any packet loss, or any observed jitter above `--jitter-threshold`, latches the host as `intermittent` until you reset it (`r` or `R` in the TUI). The reported `jitter_ms` remains the current decaying RFC 3550 estimate, so it can later fall below the threshold while the whole-run status stays `intermittent`. This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
 
-A name that resolves only to `0.0.0.0` or `::`, which DNS filters return for blocked names, is reported as `dns_failure` rather than probed.
+Hostnames are resolved with the operating system resolver, up to 32 lookups at a time. A name that does not resolve shows `dns_failure` and is retried after about 10 seconds; a name whose lookups keep timing out backs off to about 30 and then 60 seconds, with jitter so failed names do not retry together. A lookup that runs out of time keeps its resolver thread until the OS resolver returns (at most 128 threads); if every thread is busy, a host waiting for one keeps its current state (`resolving` before its first lookup) and retries on its next probe instead of being reported as a DNS failure. A name that resolves only to `0.0.0.0` or `::`, which DNS filters return for blocked names, is reported as `dns_failure` rather than probed.
 
 ## Slate + Signal Palette
 

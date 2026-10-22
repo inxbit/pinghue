@@ -2,7 +2,7 @@ import asyncio
 import errno
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -325,32 +325,6 @@ async def test_daemon_worker_pool_recovers_capacity_after_thread_start_failure(
     assert await pool.run(lambda: 2) == 2
 
 
-async def test_daemon_thread_start_failure_releases_capacity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slots = threading.BoundedSemaphore(1)
-
-    class FailingThread:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-        def start(self) -> None:
-            raise RuntimeError("thread creation failed")
-
-    monkeypatch.setattr(threading, "Thread", FailingThread)
-
-    with pytest.raises(RuntimeError, match="thread creation failed"):
-        await probes._run_daemon_thread(
-            lambda: None,
-            name="pinghue-test",
-            slots=slots,
-            unavailable_error="no worker available",
-        )
-
-    assert slots.acquire(blocking=False)
-    slots.release()
-
-
 async def test_icmp_probe_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _make_backend(
         v4_factory=lambda *_: _FakeSocket(receive_error=TimeoutExceeded(1.0)),
@@ -452,33 +426,209 @@ def _answer(address: str, family: int = socket.AF_INET) -> tuple[Any, ...]:
     return (family, socket.SOCK_STREAM, 6, "", (address, 0))
 
 
-async def test_resolve_target_bounds_abandoned_resolver_threads(
+class _HangingResolver:
+    """getaddrinfo stand-in: names starting with "hang" block until released."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.release = threading.Event()
+
+    def __call__(self, host: str, *_: object, **__: object) -> list[Any]:
+        self.calls.append(host)
+        if host.startswith("hang") and not self.release.wait(5.0):
+            raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+        return [_answer("192.0.2.99" if host.startswith("hang") else "192.0.2.1")]
+
+
+async def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        assert loop.time() < deadline, "condition not reached in time"
+        await asyncio.sleep(0.01)
+
+
+async def test_resolver_thread_start_failure_releases_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slots = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(probes, "_dns_thread_slots", slots)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_, **__: [_answer("192.0.2.30")])
+    real_thread = threading.Thread
+
+    class FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("thread creation failed")
+
+    monkeypatch.setattr(threading, "Thread", FailingThread)
+    with pytest.raises(RuntimeError, match="thread creation failed"):
+        await resolve_target("start-failure.example", AddressFamily.AUTO)
+
+    assert slots.acquire(blocking=False)
+    slots.release()
+
+    # The failed lookup also left the registry, so a retry starts a fresh one
+    # instead of joining a call that never ran.
+    monkeypatch.setattr(threading, "Thread", real_thread)
+    resolved = await asyncio.wait_for(
+        resolve_target("start-failure.example", AddressFamily.AUTO), timeout=2.0
+    )
+    assert resolved.address == "192.0.2.30"
+
+
+async def test_resolve_target_joins_running_lookup_of_the_same_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = _HangingResolver()
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+
+    try:
+        for _ in range(3):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    resolve_target("hang-join.example", AddressFamily.AUTO), timeout=0.05
+                )
+        # Retries waited on the abandoned call instead of each starting a thread.
+        assert resolver.calls == ["hang-join.example"]
+
+        retry = asyncio.ensure_future(resolve_target("hang-join.example", AddressFamily.AUTO))
+        await asyncio.sleep(0.05)
+        resolver.release.set()
+        resolved = await asyncio.wait_for(retry, timeout=2.0)
+    finally:
+        resolver.release.set()
+
+    assert resolved.address == "192.0.2.99"
+    assert resolver.calls == ["hang-join.example"]
+
+
+async def test_resolve_target_uses_late_answer_of_abandoned_lookup_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = _HangingResolver()
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    key = ("hang-late.example", socket.AF_UNSPEC)
+
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                resolve_target("hang-late.example", AddressFamily.AUTO), timeout=0.05
+            )
+        resolver.release.set()
+        await _wait_until(lambda: key in probes._dns_late_answers)
+
+        late = await resolve_target("hang-late.example", AddressFamily.AUTO)
+        assert late.address == "192.0.2.99"
+        assert resolver.calls == ["hang-late.example"]
+
+        fresh = await resolve_target("hang-late.example", AddressFamily.AUTO)
+    finally:
+        resolver.release.set()
+
+    assert fresh.address == "192.0.2.99"
+    assert resolver.calls == ["hang-late.example", "hang-late.example"]
+
+
+async def test_resolve_target_ignores_expired_late_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = _HangingResolver()
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    monkeypatch.setattr(probes, "_DNS_LATE_ANSWER_MAX_AGE_SECONDS", -1.0)
+    key = ("hang-expired.example", socket.AF_UNSPEC)
+
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                resolve_target("hang-expired.example", AddressFamily.AUTO), timeout=0.05
+            )
+        resolver.release.set()
+        await _wait_until(lambda: key in probes._dns_late_answers)
+
+        await resolve_target("hang-expired.example", AddressFamily.AUTO)
+    finally:
+        resolver.release.set()
+
+    assert resolver.calls == ["hang-expired.example", "hang-expired.example"]
+    assert key not in probes._dns_late_answers
+
+
+async def test_late_answer_keeps_only_the_entries_resolve_target_uses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     release = threading.Event()
-    monkeypatch.setattr(probes, "_dns_thread_slots", threading.BoundedSemaphore(2))
+    answers = {
+        "hang-huge.example": [_answer("0.0.0.0")] * 1_000
+        + [_answer(f"192.0.2.{index}") for index in range(1, 201)],
+        "hang-sinkhole.example": [_answer("0.0.0.0")] * 1_000,
+    }
 
-    def blocking_getaddrinfo(*_: object, **__: object) -> list[object]:
+    def slow_getaddrinfo(host: str, *_: object, **__: object) -> list[Any]:
         release.wait(5.0)
-        return []
+        return answers[host]
 
-    monkeypatch.setattr(socket, "getaddrinfo", blocking_getaddrinfo)
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+    keys = [(name, socket.AF_UNSPEC) for name in answers]
+
+    try:
+        for name in answers:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(resolve_target(name, AddressFamily.AUTO), timeout=0.05)
+        release.set()
+        await _wait_until(lambda: all(key in probes._dns_late_answers for key in keys))
+    finally:
+        release.set()
+
+    # A huge abandoned answer pins at most the failover set, not the whole answer.
+    assert len(probes._dns_late_answers[keys[0]][1]) == probes.MAX_FAILOVER_ADDRESSES
+    assert len(probes._dns_late_answers[keys[1]][1]) == 1
+    huge = await resolve_target("hang-huge.example", AddressFamily.AUTO)
+    sinkhole = await resolve_target("hang-sinkhole.example", AddressFamily.AUTO)
+
+    assert huge.addresses == tuple(f"192.0.2.{index}" for index in range(1, 9))
+    assert sinkhole.address is None
+    assert sinkhole.error is not None and "only unspecified addresses" in sinkhole.error
+
+
+async def test_resolver_capacity_exhaustion_waits_instead_of_failing_the_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver = _HangingResolver()
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    monkeypatch.setattr(probes, "_dns_thread_slots", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 0.2)
+    loop = asyncio.get_running_loop()
 
     try:
         for index in range(2):
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
-                    resolve_target(f"stuck{index}.example", AddressFamily.AUTO),
+                    resolve_target(f"hang-capacity{index}.example", AddressFamily.AUTO),
                     timeout=0.05,
                 )
 
-        resolved = await resolve_target("stuck2.example", AddressFamily.AUTO)
+        # Both threads are still stuck: the next lookup waits for one and then
+        # reports local capacity, never a DNS error or a third thread.
+        started = loop.time()
+        with pytest.raises(probes.ResolverBusyError):
+            await resolve_target("ok-capacity.example", AddressFamily.AUTO)
+        assert loop.time() - started >= 0.2
+        assert resolver.calls == ["hang-capacity0.example", "hang-capacity1.example"]
 
-        assert resolved.address is None
-        assert resolved.error is not None
-        assert "resolver worker limit reached" in resolved.error
+        monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 2.0)
+        waiting = asyncio.ensure_future(resolve_target("ok-capacity.example", AddressFamily.AUTO))
+        await asyncio.sleep(0.05)
+        assert not waiting.done()
+        resolver.release.set()
+        resolved = await asyncio.wait_for(waiting, timeout=2.0)
     finally:
-        release.set()
+        resolver.release.set()
+
+    assert resolved.error is None
+    assert resolved.address == "192.0.2.1"
 
 
 async def test_resolve_target_drops_unspecified_addresses(

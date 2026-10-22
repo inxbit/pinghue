@@ -62,7 +62,7 @@ Open questions:
 | --- | --- | --- |
 | Operator shell -> CLI parser | Targets, timing, ports, concurrency, output path, labels | Type/range/finite checks; 253-character target limit; 5,000 unique-target cap |
 | Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; BOM/error handling |
-| Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency cap and cooldown |
+| Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency and resolver-thread caps; per-name cooldown and backoff |
 | Resolved address -> network | ICMP datagram or TCP connection | Outbound-only probes; bounded concurrency/timeouts; per-target exception containment |
 | Probe/library errors -> terminal | Target, address, status, error text | Central display sanitization; literal escaping of controls and non-ASCII text |
 | Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; schema tests |
@@ -147,8 +147,9 @@ from timeout, computes statistics over the whole run, and latches observed
 loss/high-jitter excursions for final classification. A DNS answer made only of
 unspecified addresses (`0.0.0.0`, `::`), the usual DNS-filter sinkhole reply, is
 reported as a DNS failure instead of probed, because probing it would reach the
-local host and report a blocked name healthy. External DNS and routing state
-remain outside the tool's control.
+local host and report a blocked name healthy. Local resolver capacity limits
+leave a host pending rather than producing a DNS verdict. External DNS and
+routing state remain outside the tool's control.
 
 ### 6. Unsafe ICMP privilege remediation
 

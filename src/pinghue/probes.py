@@ -11,7 +11,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any, TypeVar
@@ -19,7 +19,7 @@ from typing import Any, TypeVar
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
 MAX_FAILOVER_ADDRESSES = 8
-MAX_DNS_DAEMON_THREADS = 16
+MAX_DNS_DAEMON_THREADS = 128
 MAX_ICMP_DAEMON_THREADS = 1_024
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
 _T = TypeVar("_T")
@@ -197,41 +197,114 @@ def family_from_ip(address: str) -> AddressFamily:
     return AddressFamily.IPV6 if ipaddress.ip_address(address).version == 6 else AddressFamily.IPV4
 
 
-async def _run_daemon_thread(
-    function: Callable[[], _T],
-    *,
-    name: str,
-    slots: threading.BoundedSemaphore,
-    unavailable_error: str,
-) -> _T:
-    """Run blocking work on a bounded daemon thread and await its result."""
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[_T] = loop.create_future()
-    if not slots.acquire(blocking=False):
-        raise OSError(unavailable_error)
+# A timed-out getaddrinfo keeps its daemon thread, and that thread's slot, until
+# libc returns. MAX_DNS_DAEMON_THREADS sits well above the runner's DNS
+# concurrency so a few stuck names still leave threads for fresh lookups.
+#
+# A new lookup waits up to DNS_THREAD_WAIT_SECONDS for a free thread. The wait
+# counts against the caller's lookup budget, so it stays short next to
+# runner.DNS_LOOKUP_TIMEOUT_SECONDS.
+DNS_THREAD_WAIT_SECONDS = 1.0
+_DNS_THREAD_POLL_SECONDS = 0.05
+# A successful answer that arrives after every caller gave up is kept for the
+# next lookup of the same name; this outlives the runner's longest DNS backoff.
+_DNS_LATE_ANSWER_MAX_AGE_SECONDS = 90.0
 
-    def deliver(apply: Callable[[], None]) -> None:
-        if not future.done():
-            apply()
 
-    def worker() -> None:
-        try:
-            result = function()
-        except BaseException as exc:  # noqa: BLE001 - re-raised via the future
-            outcome = partial(future.set_exception, exc)
-        else:
-            outcome = partial(future.set_result, result)
-        finally:
-            slots.release()
-        with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(deliver, outcome)
+class ResolverBusyError(Exception):
+    """No resolver thread came free in time, so no lookup ran.
 
+    This reflects local capacity, not a DNS verdict: callers keep the target's
+    state and retry soon instead of reporting a DNS failure.
+    """
+
+
+_DnsKey = tuple[str, int]
+_DnsWaiter = tuple[asyncio.AbstractEventLoop, asyncio.Future[list[Any]]]
+
+
+@dataclass
+class _DnsLookup:
+    """One getaddrinfo call on a daemon thread, shared by callers of the same name."""
+
+    slots: threading.BoundedSemaphore
+    waiters: list[_DnsWaiter] = field(default_factory=list)
+
+
+_dns_lock = threading.Lock()
+_dns_lookups: dict[_DnsKey, _DnsLookup] = {}
+_dns_late_answers: dict[_DnsKey, tuple[float, list[Any]]] = {}
+
+
+def _deliver_dns_outcome(
+    future: asyncio.Future[list[Any]],
+    result: list[Any],
+    error: BaseException | None,
+) -> None:
+    if future.done():
+        return
+    if error is None:
+        future.set_result(result)
+    else:
+        future.set_exception(error)
+
+
+def _settle_dns_lookup(
+    key: _DnsKey,
+    lookup: _DnsLookup,
+    result: list[Any],
+    error: BaseException | None,
+) -> None:
+    """Hand a finished lookup's outcome to its waiters and free its thread slot."""
+    with _dns_lock:
+        if _dns_lookups.get(key) is lookup:
+            del _dns_lookups[key]
+        waiters, lookup.waiters = lookup.waiters, []
+        # Free the slot only once the lookup has left the registry, so whoever
+        # takes the slot next can never join this finished call.
+        lookup.slots.release()
+    if waiters:
+        for loop, future in waiters:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(_deliver_dns_outcome, future, result, error)
+    elif error is None and result:
+        # Every caller already gave up; keep the answer for the next lookup of
+        # this name instead of paying for the slow resolution again. Only the
+        # entries resolve_target would use are kept, so a huge answer cannot pin
+        # memory; an answer with none keeps one entry to repeat its verdict.
+        kept = _usable_addresses(result, prefer_ipv4=key[1] == socket.AF_UNSPEC) or result[:1]
+        with _dns_lock:
+            _dns_late_answers.pop(key, None)
+            _dns_late_answers[key] = (time.monotonic(), kept)
+            if len(_dns_late_answers) > MAX_DNS_DAEMON_THREADS:
+                del _dns_late_answers[next(iter(_dns_late_answers))]
+
+
+def _run_dns_lookup(key: _DnsKey, lookup: _DnsLookup, resolve: Callable[[], list[Any]]) -> None:
     try:
-        threading.Thread(target=worker, name=name, daemon=True).start()
-    except BaseException:
-        slots.release()
-        raise
-    return await future
+        result = resolve()
+    except BaseException as exc:  # noqa: BLE001 - delivered to every waiter
+        _settle_dns_lookup(key, lookup, [], exc)
+    else:
+        _settle_dns_lookup(key, lookup, result, None)
+
+
+def _claim_dns_lookup(key: _DnsKey, waiter: _DnsWaiter) -> tuple[_DnsLookup, bool] | None:
+    """Join the running lookup of a name, or register a new one if a slot is free.
+
+    Returns the lookup and whether the caller must start its thread, or None
+    when every resolver thread is taken. The caller holds _dns_lock.
+    """
+    lookup = _dns_lookups.get(key)
+    start_thread = lookup is None
+    if lookup is None:
+        slots = _dns_thread_slots
+        if not slots.acquire(blocking=False):
+            return None
+        lookup = _DnsLookup(slots=slots)
+        _dns_lookups[key] = lookup
+    lookup.waiters.append(waiter)
+    return lookup, start_thread
 
 
 async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
@@ -242,13 +315,58 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     THREAD_JOIN_TIMEOUT=300s by Runner.close), so a resolver call stuck past
     the libc timeouts would keep the finished process from exiting. A daemon
     thread is abandoned instead.
+
+    A caller that stops waiting abandons only its wait: the thread keeps its
+    slot until libc returns, so at most MAX_DNS_DAEMON_THREADS resolver threads
+    ever exist. A lookup of a name whose previous call is still running joins
+    that call instead of starting another thread. When every slot is taken, the
+    lookup waits up to DNS_THREAD_WAIT_SECONDS for one, then raises
+    ResolverBusyError.
     """
-    return await _run_daemon_thread(
-        partial(socket.getaddrinfo, target, None, family=family, type=socket.SOCK_STREAM),
-        name="pinghue-dns",
-        slots=_dns_thread_slots,
-        unavailable_error=(f"resolver worker limit reached ({MAX_DNS_DAEMON_THREADS} in flight)"),
-    )
+    key = (target, family)
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[list[Any]] = loop.create_future()
+    waiter = (loop, future)
+    deadline = loop.time() + DNS_THREAD_WAIT_SECONDS
+    while True:
+        with _dns_lock:
+            late_answer = _dns_late_answers.pop(key, None)
+            if (
+                late_answer is not None
+                and time.monotonic() - late_answer[0] <= _DNS_LATE_ANSWER_MAX_AGE_SECONDS
+            ):
+                return late_answer[1]
+            claimed = _claim_dns_lookup(key, waiter)
+        if claimed is not None:
+            break
+        if loop.time() >= deadline:
+            raise ResolverBusyError(f"all {MAX_DNS_DAEMON_THREADS} resolver threads are busy")
+        await asyncio.sleep(_DNS_THREAD_POLL_SECONDS)
+
+    lookup, start_thread = claimed
+    if start_thread:
+        resolve = partial(socket.getaddrinfo, target, None, family=family, type=socket.SOCK_STREAM)
+        try:
+            threading.Thread(
+                target=_run_dns_lookup,
+                args=(key, lookup, resolve),
+                name="pinghue-dns",
+                daemon=True,
+            ).start()
+        except BaseException as exc:
+            with _dns_lock:
+                lookup.waiters.remove(waiter)
+            _settle_dns_lookup(key, lookup, [], exc)
+            raise
+
+    try:
+        return await future
+    except BaseException:
+        # Leaving early (lookup budget, shutdown) only detaches this caller;
+        # an answer that then has no one to receive it is kept for later.
+        with _dns_lock, contextlib.suppress(ValueError):
+            lookup.waiters.remove(waiter)
+        raise
 
 
 def _is_unspecified(address: str) -> bool:
@@ -293,7 +411,11 @@ async def resolve_target(
     *,
     numeric: bool = False,
 ) -> ResolvedTarget:
-    """Resolve a target to the address used for probing."""
+    """Resolve a target to the address used for probing.
+
+    Raises ResolverBusyError, rather than returning a DNS error, when no
+    resolver thread came free and so no lookup ran.
+    """
     if numeric:
         try:
             return ResolvedTarget(target, target, family_from_ip(target), addresses=(target,))
