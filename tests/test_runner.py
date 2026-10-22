@@ -704,6 +704,37 @@ async def test_resolver_capacity_miss_keeps_target_pending_without_verdict(
     assert runner._dns_retry_delay("busy.example") == runner.DNS_RETRY_INTERVAL_SECONDS
 
 
+async def test_resolver_thread_start_failure_leaves_target_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading, "Thread", FailingThread)
+    args = build_args(targets=["no-thread.example"])
+
+    pending = await runner.resolve_run_target("no-thread.example", args)
+    assert pending.status == TargetStatus.RESOLVING
+    assert pending._last_resolve_time is None
+
+    sample = await runner.probe_once(
+        pending, args=args, mode=ProbeMode.ICMP, semaphore=asyncio.Semaphore(1)
+    )
+
+    # A thread limit is local capacity: no dns_failure verdict, line or cooldown.
+    assert sample is None
+    assert pending.status == TargetStatus.RESOLVING
+    assert pending.error is None
+    assert pending._last_resolve_time is None
+    stream = io.StringIO()
+    runner.print_sample(pending, None, stream=stream)
+    assert stream.getvalue() == ""
+
+
 async def test_resolve_runs_resolves_healthy_names_listed_after_hung_ones(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

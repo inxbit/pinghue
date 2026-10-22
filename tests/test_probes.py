@@ -461,12 +461,14 @@ async def test_resolver_thread_start_failure_releases_capacity(
             pass
 
         def start(self) -> None:
-            raise RuntimeError("thread creation failed")
+            raise RuntimeError("can't start new thread")
 
     monkeypatch.setattr(threading, "Thread", FailingThread)
-    with pytest.raises(RuntimeError, match="thread creation failed"):
+    # A thread limit (pids cap, RLIMIT_NPROC) is local capacity, not a DNS verdict.
+    with pytest.raises(probes.ResolverBusyError, match="can't start new thread") as raised:
         await resolve_target("start-failure.example", AddressFamily.AUTO)
 
+    assert isinstance(raised.value.__cause__, RuntimeError)
     assert slots.acquire(blocking=False)
     slots.release()
 

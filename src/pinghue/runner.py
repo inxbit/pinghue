@@ -132,7 +132,7 @@ async def _resolve_target_bounded(
 ) -> ResolvedTarget | None:
     """Resolve under the shared DNS concurrency bound and lookup budget.
 
-    Returns None when no resolver thread came free, so no lookup ran: that is
+    Returns None when no resolver thread was available, so no lookup ran: that is
     local capacity, not a DNS verdict, and callers keep the target's state.
     Each verdict sets the name's next retry delay.
     """
@@ -284,7 +284,7 @@ async def probe_once(
             resolved = ResolvedTarget(target.target, None, None, str(exc))
 
         if resolved is None:
-            # No resolver thread came free, so no lookup ran and there is no
+            # No resolver thread was available, so no lookup ran and there is no
             # DNS verdict: keep the target's state and retry on the next
             # iteration rather than after the DNS cooldown.
             target._last_resolve_time = last_resolve_time

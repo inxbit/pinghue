@@ -212,7 +212,7 @@ _DNS_LATE_ANSWER_MAX_AGE_SECONDS = 90.0
 
 
 class ResolverBusyError(Exception):
-    """No resolver thread came free in time, so no lookup ran.
+    """No resolver thread came free in time, or none could start, so no lookup ran.
 
     This reflects local capacity, not a DNS verdict: callers keep the target's
     state and retry soon instead of reporting a DNS failure.
@@ -321,7 +321,7 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     ever exist. A lookup of a name whose previous call is still running joins
     that call instead of starting another thread. When every slot is taken, the
     lookup waits up to DNS_THREAD_WAIT_SECONDS for one, then raises
-    ResolverBusyError.
+    ResolverBusyError; so does a thread that fails to start.
     """
     key = (target, family)
     loop = asyncio.get_running_loop()
@@ -356,8 +356,14 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
         except BaseException as exc:
             with _dns_lock:
                 lookup.waiters.remove(waiter)
-            _settle_dns_lookup(key, lookup, [], exc)
-            raise
+            if not isinstance(exc, RuntimeError):
+                _settle_dns_lookup(key, lookup, [], exc)
+                raise
+            # "can't start new thread" (a pids or RLIMIT_NPROC cap, memory) is
+            # local capacity, not a DNS verdict.
+            busy = ResolverBusyError(f"could not start a resolver thread: {exc}")
+            _settle_dns_lookup(key, lookup, [], busy)
+            raise busy from exc
 
     try:
         return await future
@@ -414,7 +420,7 @@ async def resolve_target(
     """Resolve a target to the address used for probing.
 
     Raises ResolverBusyError, rather than returning a DNS error, when no
-    resolver thread came free and so no lookup ran.
+    resolver thread was available and so no lookup ran.
     """
     if numeric:
         try:
