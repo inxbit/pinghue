@@ -251,6 +251,42 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     )
 
 
+def _is_unspecified(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped.is_unspecified
+    return ip.is_unspecified
+
+
+def _usable_addresses(infos: list[Any], *, prefer_ipv4: bool) -> list[Any]:
+    """Return up to MAX_FAILOVER_ADDRESSES getaddrinfo entries, one per address, to probe.
+
+    Keeps getaddrinfo order, with IPv4 first when preferred. Unspecified
+    addresses (0.0.0.0, ::) are what DNS filters and sinkholes answer for
+    blocked names; probing one reaches the local host on Linux and would report
+    a dead name healthy, so they are dropped. One pass that stops filling each
+    group at the cap keeps a huge answer from stalling the event loop.
+    """
+    seen: set[str] = set()
+    preferred: list[Any] = []
+    others: list[Any] = []
+    for info in infos:
+        address = info[4][0]
+        group = preferred if not prefer_ipv4 or info[0] == socket.AF_INET else others
+        if len(group) >= MAX_FAILOVER_ADDRESSES or address in seen:
+            continue
+        seen.add(address)
+        if _is_unspecified(address):
+            continue
+        group.append(info)
+        if len(preferred) >= MAX_FAILOVER_ADDRESSES:
+            break
+    return (preferred + others)[:MAX_FAILOVER_ADDRESSES]
+
+
 async def resolve_target(
     target: str,
     address_family: AddressFamily,
@@ -284,22 +320,22 @@ async def resolve_target(
     if not infos:
         return ResolvedTarget(target, None, None, "getaddrinfo: no addresses returned")
 
-    # Prefer IPv4 in auto mode, then IPv6.
-    if address_family == AddressFamily.AUTO:
-        infos = sorted(infos, key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+    # Prefer IPv4 in auto mode, then IPv6. Cap the failover set so a name
+    # resolving to many dead addresses cannot stretch one probe cycle to
+    # len(addresses) * timeout_s.
+    usable = _usable_addresses(infos, prefer_ipv4=address_family == AddressFamily.AUTO)
+    if not usable:
+        return ResolvedTarget(
+            target,
+            None,
+            None,
+            "getaddrinfo: only unspecified addresses returned (0.0.0.0 or ::); "
+            "the name may be blocked by a DNS filter",
+        )
 
-    addresses: list[str] = []
-    for info in infos:
-        address = info[4][0]
-        if address not in addresses:
-            addresses.append(address)
-
-    family = AddressFamily.IPV4 if infos[0][0] == socket.AF_INET else AddressFamily.IPV6
-    # Cap the failover set so a name resolving to many dead addresses cannot
-    # stretch one probe cycle to len(addresses) * timeout_s.
-    return ResolvedTarget(
-        target, addresses[0], family, addresses=tuple(addresses[:MAX_FAILOVER_ADDRESSES])
-    )
+    family = AddressFamily.IPV4 if usable[0][0] == socket.AF_INET else AddressFamily.IPV6
+    addresses = tuple(info[4][0] for info in usable)
+    return ResolvedTarget(target, addresses[0], family, addresses=addresses)
 
 
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:

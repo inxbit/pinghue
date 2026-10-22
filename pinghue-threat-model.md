@@ -144,8 +144,11 @@ DNS replicas and multi-address hosts can fail inconsistently. PingHue retains
 the primary error when all failover addresses fail, refreshes stale DNS after
 repeated failures, prioritizes working addresses, distinguishes TCP refusal
 from timeout, computes statistics over the whole run, and latches observed
-loss/high-jitter excursions for final classification. External DNS and routing
-state remain outside the tool's control.
+loss/high-jitter excursions for final classification. A DNS answer made only of
+unspecified addresses (`0.0.0.0`, `::`), the usual DNS-filter sinkhole reply, is
+reported as a DNS failure instead of probed, because probing it would reach the
+local host and report a blocked name healthy. External DNS and routing state
+remain outside the tool's control.
 
 ### 6. Unsafe ICMP privilege remediation
 
@@ -194,7 +197,7 @@ external dependencies, so fresh audits remain a release gate.
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
 | TM-003 | Host-file symlink/special-file race | Descriptor-based open/type validation and bounded reads | Same-user content modification remains possible | Low |
 | TM-004 | Output replacement or partial report | No-clobber default, randomized temp, inode/type/link checks | Explicit overwrite and no-hardlink copy fallback are not crash-atomic | Medium |
-| TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, ordered errors, whole-run stats | Remote routing/DNS state is inherently external | Low |
+| TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats | Remote routing/DNS state is inherently external | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
 | TM-008 | Vulnerable/malicious dependency | Hash locks, narrow ranges, Dependabot, three-lock audit | New advisories and index compromise remain external | Medium |

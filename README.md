@@ -265,6 +265,8 @@ Use `--history-style dots` or `--history-style none` when a terminal font or wor
 
 `pinghue` classifies each host from the **whole run**, not just the most recent probes. Once a host has replied successfully, `down` requires `--fail-threshold` consecutive failures. A run with no successful replies is `down` immediately, even if it ends before the threshold. Any packet loss, or any observed jitter above `--jitter-threshold`, latches the host as `intermittent` until you reset it (`r` or `R` in the TUI). The reported `jitter_ms` remains the current decaying RFC 3550 estimate, so it can later fall below the threshold while the whole-run status stays `intermittent`. This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
 
+A name that resolves only to `0.0.0.0` or `::`, which DNS filters return for blocked names, is reported as `dns_failure` rather than probed.
+
 ## Slate + Signal Palette
 
 `pinghue` uses a low-glare Slate + Signal palette designed for long maintenance windows: dark structure, high-contrast text, and saturated status colors that make the affected metric stand out quickly.

@@ -2,6 +2,7 @@ import asyncio
 import errno
 import socket
 import threading
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -447,6 +448,10 @@ async def test_resolve_target_stuck_resolver_is_abandoned(
     release.set()
 
 
+def _answer(address: str, family: int = socket.AF_INET) -> tuple[Any, ...]:
+    return (family, socket.SOCK_STREAM, 6, "", (address, 0))
+
+
 async def test_resolve_target_bounds_abandoned_resolver_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -474,3 +479,100 @@ async def test_resolve_target_bounds_abandoned_resolver_threads(
         assert "resolver worker limit reached" in resolved.error
     finally:
         release.set()
+
+
+async def test_resolve_target_drops_unspecified_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [
+            _answer("0.0.0.0"),
+            _answer("::", socket.AF_INET6),
+            _answer("::ffff:0.0.0.0", socket.AF_INET6),
+            _answer("2001:db8::7", socket.AF_INET6),
+            _answer("192.0.2.7"),
+        ],
+    )
+
+    resolved = await resolve_target("partly-filtered.example", AddressFamily.AUTO)
+
+    assert resolved.error is None
+    assert resolved.address == "192.0.2.7"
+    assert resolved.family == AddressFamily.IPV4
+    assert resolved.addresses == ("192.0.2.7", "2001:db8::7")
+
+
+async def test_resolve_target_treats_sinkhole_answer_as_dns_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # DNS filters answer blocked names with 0.0.0.0 / ::. Probing those reaches
+    # the local host on Linux and would report a dead name healthy.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [_answer("0.0.0.0"), _answer("::", socket.AF_INET6)],
+    )
+
+    resolved = await resolve_target("blocked.example", AddressFamily.AUTO)
+
+    assert resolved.address is None
+    assert resolved.addresses == ()
+    assert resolved.error is not None
+    assert "only unspecified addresses" in resolved.error
+
+
+async def test_resolve_target_keeps_explicit_unspecified_literal() -> None:
+    resolved = await resolve_target("0.0.0.0", AddressFamily.AUTO)
+
+    assert resolved.error is None
+    assert resolved.address == "0.0.0.0"
+
+
+async def test_resolve_target_stops_reading_a_huge_answer_at_the_failover_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    consumed = 0
+
+    class CountingAnswer(list[Any]):
+        def __iter__(self) -> Iterator[Any]:
+            nonlocal consumed
+            for item in super().__iter__():
+                consumed += 1
+                yield item
+
+    answer = CountingAnswer(
+        _answer(f"10.{index // 65536}.{index // 256 % 256}.{index % 256}")
+        for index in range(100_000)
+    )
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_, **__: answer)
+
+    resolved = await resolve_target("huge.example", AddressFamily.AUTO)
+
+    assert len(resolved.addresses) == probes.MAX_FAILOVER_ADDRESSES
+    assert consumed == probes.MAX_FAILOVER_ADDRESSES
+
+
+async def test_resolve_target_checks_each_unique_address_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answer = (
+        [_answer("2001:db8::1", socket.AF_INET6)] * 50_000
+        + [_answer("0.0.0.0")] * 50_000
+        + [_answer("192.0.2.1")]
+    )
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_, **__: answer)
+    checked: list[str] = []
+    real_is_unspecified = probes._is_unspecified
+
+    def counting_is_unspecified(address: str) -> bool:
+        checked.append(address)
+        return real_is_unspecified(address)
+
+    monkeypatch.setattr(probes, "_is_unspecified", counting_is_unspecified)
+
+    resolved = await resolve_target("duplicates.example", AddressFamily.AUTO)
+
+    assert resolved.addresses == ("192.0.2.1", "2001:db8::1")
+    assert checked == ["2001:db8::1", "0.0.0.0", "192.0.2.1"]
