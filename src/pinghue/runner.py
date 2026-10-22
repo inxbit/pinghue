@@ -621,7 +621,8 @@ class _SampleLinePrinter:
 
     When the reader goes away (``| head``, a hung-up terminal) printing stops
     and ``on_closed`` asks the run to stop as if interrupted, so the run still
-    ends cleanly and ``--output`` is still written.
+    ends cleanly and ``--output`` is still written. A ``stream`` of None (its
+    descriptor was closed at startup) drops the lines and lets the run go on.
     """
 
     def __init__(self, stream: TextIO | None, *, on_closed: Callable[[], object]) -> None:
@@ -631,12 +632,12 @@ class _SampleLinePrinter:
         self._closed = False
 
     def __call__(self, target: TargetRun, sample: ProbeSample | None) -> None:
-        if self._closed:
+        if self._closed or self._stream is None:
             return
         try:
             print_sample(target, sample, stream=self._stream)
         except (OSError, ValueError):
-            self._close()
+            self._close(self._stream)
             return
         if not self._flush_scheduled:
             self._flush_scheduled = True
@@ -644,19 +645,17 @@ class _SampleLinePrinter:
 
     def flush(self) -> None:
         self._flush_scheduled = False
-        if self._closed:
+        stream = self._stream
+        if self._closed or stream is None:
             return
         try:
-            self._output().flush()
+            stream.flush()
         except (OSError, ValueError):
-            self._close()
+            self._close(stream)
 
-    def _output(self) -> TextIO:
-        return sys.stdout if self._stream is None else self._stream
-
-    def _close(self) -> None:
+    def _close(self, stream: TextIO) -> None:
         self._closed = True
-        _discard_output(self._output())
+        _discard_output(stream)
         self._on_closed()
 
 
@@ -673,8 +672,11 @@ async def run_no_tui(
     cleanup_signal_handlers = install_stop_signal_handlers(stop_event)
     exit_reason = "completed"
     # With `--output -` the JSON document owns stdout; per-probe lines move to
-    # stderr so the exported document stays machine-parseable.
-    sample_stream = sys.stderr if args.output is not None and str(args.output) == "-" else None
+    # stderr so the exported document stays machine-parseable. A stream that is
+    # None (closed at startup) drops the lines rather than using the other one.
+    sample_stream = (
+        sys.stderr if args.output is not None and str(args.output) == "-" else sys.stdout
+    )
     print_line = _SampleLinePrinter(sample_stream, on_closed=stop_event.set)
 
     try:

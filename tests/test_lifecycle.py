@@ -6,17 +6,20 @@ import asyncio
 import contextlib
 import errno
 import io
+import json
 import os
 import signal
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import pinghue.runner as runner
+from pinghue.cli import parse_args
 from pinghue.models import (
     AddressFamily,
     ProbeMode,
@@ -606,6 +609,45 @@ async def test_sample_printer_stops_the_run_once_the_reader_goes_away() -> None:
     printer.flush()
 
     assert closed == [True]
+
+
+async def test_run_writes_the_report_when_stdout_is_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # `pinghue --no-tui ... >&-` starts with sys.stdout set to None. The lines
+    # have nowhere to go, but the run must still finish and write --output.
+    report = tmp_path / "report.json"
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(runner, "probe_once", applying_probe)
+    args = parse_args(
+        ["--no-tui", "-n", "-c", "2", "-i", "0.1", "--output", str(report)]
+        + ["192.0.2.1", "192.0.2.2"]
+    )
+
+    exit_code = await asyncio.wait_for(runner.run(args, mode=ProbeMode.ICMP), timeout=5.0)
+
+    assert exit_code == 0
+    document = json.loads(report.read_text())
+    assert document["run"]["exit_reason"] == "completed"
+    assert [target["stats"]["sent"] for target in document["targets"]] == [2, 2]
+
+
+async def test_run_no_tui_keeps_lines_out_of_the_json_document_when_stderr_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With `--output -` the lines belong on stderr. A closed stderr must drop
+    # them instead of mixing them into the JSON document on stdout.
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", None)
+    monkeypatch.setattr(runner, "probe_once", applying_probe)
+
+    _, exit_reason, _, _ = await asyncio.wait_for(
+        run_no_tui(no_tui_args(count=1, output="-"), ProbeMode.ICMP), timeout=5.0
+    )
+
+    assert exit_reason == "completed"
+    assert stdout.getvalue() == ""
 
 
 def test_flush_or_discard_output_drops_what_a_hung_up_terminal_cannot_take(
