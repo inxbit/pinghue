@@ -262,6 +262,20 @@ async def test_linux_echo_reply_is_matched(engines: list[icmp.IcmpEngine]) -> No
     assert pending_count(engine) == 0
 
 
+@pytest.mark.parametrize("timeout_s", [1e300, float(2**40)])
+async def test_huge_timeout_still_matches_the_reply(
+    engines: list[icmp.IcmpEngine], timeout_s: float
+) -> None:
+    # The CLI accepts any finite --timeout; near the float maximum the
+    # nanosecond conversions used to overflow and fail every probe.
+    engine = make_engine(engines, FakeSocketFactory(responder=linux_echo()))
+
+    result = await engine.echo("127.0.0.1", ipv6=False, timeout_s=timeout_s)
+
+    assert result.status == SampleStatus.OK, result.error
+    assert pending_count(engine) == 0
+
+
 @pytest.mark.parametrize(
     "responder",
     [
