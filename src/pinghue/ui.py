@@ -6,7 +6,7 @@ import re
 import time
 from bisect import bisect_left
 from collections import Counter
-from collections.abc import Iterable, Iterator, MutableMapping, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -190,11 +190,6 @@ def issue_styles(
     return styles
 
 
-def format_text_cell(value: str, style: str = TEXT) -> Text:
-    """Return a styled table cell."""
-    return Text(value, style=style)
-
-
 def compact_ms(value: float | None) -> str:
     """Return a latency value sized for dense terminal columns."""
     if value is None:
@@ -315,23 +310,15 @@ def fit_host_labels(
     return [fit_host_name(name, width, span) for name, span in zip(safe_names, spans, strict=True)]
 
 
-def format_state_cell(status: TargetStatus) -> Text:
-    """Return a styled target-state cell."""
-    label, style = _STATE_LABELS.get(status, (status.value, RED))
-    return Text(label, style=style)
-
-
 def target_state(target: TargetRun) -> CellValue:
     """Return the TUI state label and style for a target.
 
-    A target with an address but no probe result yet (just resolved, or reset)
-    is ``pending`` rather than ``resolving`` or ``down``: there is no evidence
+    A target that has an address but is still ``resolving`` (just resolved,
+    or reset, with no probe result yet) is ``pending``: there is no evidence
     about it yet. JSON output keeps the underlying status.
     """
     status = target.status
-    if target.resolved_address and (
-        status == TargetStatus.RESOLVING or (status == TargetStatus.DOWN and not target.samples)
-    ):
+    if status == TargetStatus.RESOLVING and target.resolved_address:
         return PENDING_LABEL, MUTED
     return _STATE_LABELS.get(status, (status.value, RED))
 
@@ -345,23 +332,6 @@ def history_text(glyphs: str, codes: str) -> Text:
             for run in _STYLE_RUNS.finditer(codes)
         ],
     )
-
-
-def format_history_cell(
-    samples: Sequence[ProbeSample],
-    *,
-    width: int,
-    style: str,
-    slow_latency_ms: float,
-) -> Text:
-    """Return a colored history cell."""
-    glyphs, codes = render_history_parts(
-        samples,
-        width=width,
-        style=style,
-        slow_latency_ms=slow_latency_ms,
-    )
-    return history_text(glyphs, codes)
 
 
 def format_history_legend(style: str = "bar") -> Text:
@@ -410,14 +380,6 @@ def _last_latency(samples: Sequence[ProbeSample]) -> float | None:
     return None
 
 
-def _host_value(target: TargetRun, host_width: int | None) -> CellValue:
-    # Escape first, so truncation can never reintroduce a control character.
-    host = sanitize_display(target.target)
-    if host_width is not None:
-        host = truncate_middle(host, host_width)
-    return host, GREEN
-
-
 def _address_value(target: TargetRun, show_address: bool) -> CellValue:
     address = (target.resolved_address or "") if show_address else ""
     return sanitize_display(address), GREEN if address else MUTED
@@ -449,65 +411,10 @@ def _metric_values(
     )
 
 
-def target_row_values(
-    target: TargetRun,
-    *,
-    show_address: bool,
-    mode: str,
-    history_width: int,
-    history_style: str,
-    jitter_threshold_ms: float,
-    slow_latency_ms: float,
-    host_width: int | None = None,
-) -> RowValues:
-    """Return the plain text and style of every cell in one target row."""
-    return (
-        _host_value(target, host_width),
-        _address_value(target, show_address),
-        *_metric_values(
-            target,
-            jitter_threshold_ms=jitter_threshold_ms,
-            slow_latency_ms=slow_latency_ms,
-        ),
-        (mode, TEXT),
-        render_history_parts(
-            target.samples,
-            width=history_width,
-            style=history_style,
-            slow_latency_ms=slow_latency_ms,
-        ),
-    )
-
-
 def _cell_text(column_index: int, value: CellValue) -> Text:
     if column_index == HISTORY_INDEX:
         return history_text(*value)
     return Text(value[0], style=value[1])
-
-
-def target_row_cells(
-    target: TargetRun,
-    *,
-    show_address: bool,
-    mode: str,
-    history_width: int,
-    history_style: str,
-    jitter_threshold_ms: float,
-    slow_latency_ms: float,
-    host_width: int | None = None,
-) -> tuple[Text, ...]:
-    """Return rendered cells for one target row."""
-    values = target_row_values(
-        target,
-        show_address=show_address,
-        mode=mode,
-        history_width=history_width,
-        history_style=history_style,
-        jitter_threshold_ms=jitter_threshold_ms,
-        slow_latency_ms=slow_latency_ms,
-        host_width=host_width,
-    )
-    return tuple(_cell_text(index, value) for index, value in enumerate(values))
 
 
 def _uses_ipv6(targets: Sequence[TargetRun]) -> bool:
@@ -606,62 +513,6 @@ def apply_column_widths(table: Any, widths: ColumnWidths) -> bool:
     if changed:
         refresh_table_geometry(table)
     return changed
-
-
-def sync_target_table(
-    table: Any,
-    targets: Sequence[TargetRun],
-    *,
-    initialized: bool,
-    show_address: bool,
-    mode: str,
-    history_width: int,
-    history_style: str,
-    jitter_threshold_ms: float,
-    slow_latency_ms: float,
-    cell_cache: MutableMapping[tuple[str, str], object] | None = None,
-    host_width: int | None = None,
-) -> bool:
-    """Add rows once, then update every row's changed cells in place.
-
-    This is the simple path without change tracking or a time budget; the TUI
-    uses TargetTableRenderer.
-    """
-    if not targets:
-        return initialized
-
-    for index, target in enumerate(targets):
-        row_key = target_row_key(index)
-        values = target_row_values(
-            target,
-            show_address=show_address,
-            mode=mode,
-            history_width=history_width,
-            history_style=history_style,
-            jitter_threshold_ms=jitter_threshold_ms,
-            slow_latency_ms=slow_latency_ms,
-            host_width=host_width,
-        )
-        if not initialized:
-            table.add_row(
-                *(_cell_text(column, value) for column, value in enumerate(values)),
-                key=row_key,
-            )
-            if cell_cache is not None:
-                for column_key, value in zip(COLUMN_KEYS, values, strict=True):
-                    cell_cache[(row_key, column_key)] = value
-            continue
-
-        for column, (column_key, value) in enumerate(zip(COLUMN_KEYS, values, strict=True)):
-            cache_key = (row_key, column_key)
-            if cell_cache is not None and cell_cache.get(cache_key) == value:
-                continue
-
-            table.update_cell(row_key, column_key, _cell_text(column, value), update_width=False)
-            if cell_cache is not None:
-                cell_cache[cache_key] = value
-
-    return True
 
 
 @dataclass(frozen=True)

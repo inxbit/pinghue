@@ -24,21 +24,6 @@ HISTORY_SLOW = "a"
 HISTORY_FAILED = "r"
 
 
-def history_symbol(sample: ProbeSample) -> str:
-    """Return the single-character history glyph for a sample."""
-    if sample.status == SampleStatus.REFUSED:
-        return "!"
-
-    if sample.status != SampleStatus.OK or sample.latency_ms is None:
-        return "·"
-
-    index = bisect_left(_BAR_LIMITS, sample.latency_ms)
-    if index < len(BAR_BUCKETS):
-        return BAR_BUCKETS[index][1]
-
-    return "█"
-
-
 def visible_history_samples(samples: Sequence[ProbeSample], *, width: int) -> list[ProbeSample]:
     """Return the visible tail of probe samples without copying the whole history."""
     count = min(width, len(samples))

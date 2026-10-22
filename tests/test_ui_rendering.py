@@ -26,6 +26,7 @@ import pinghue.app as app_module
 import pinghue.runner as runner_module
 import pinghue.ui as ui
 from pinghue.app import PinghueTextualApp
+from pinghue.history import render_history_parts
 from pinghue.models import (
     AddressFamily,
     ProbeMode,
@@ -53,8 +54,7 @@ from pinghue.ui import (
     fit_host_labels,
     fleet_summary_parts,
     format_age,
-    format_history_cell,
-    target_row_cells,
+    history_text,
     target_row_key,
     target_state,
     truncate_middle,
@@ -133,29 +133,26 @@ def make_renderer(**overrides: Any) -> TargetTableRenderer:
     return renderer
 
 
-def fresh_cells(target: TargetRun, widths: dict[str, int] = WIDTHS) -> list[str]:
-    return [
-        cell.plain
-        for cell in target_row_cells(
-            target,
-            show_address=True,
-            mode="icmp",
-            history_width=widths["history"],
-            history_style="bar",
-            jitter_threshold_ms=50.0,
-            slow_latency_ms=SLOW_MS,
-            host_width=widths["host"],
-        )
-    ]
-
-
 def shown_cells(table: RecordingTable, index: int) -> list[str]:
     return [table.cell(index, column).plain for column in COLUMN_KEYS]
+
+
+def fresh_cells(targets: list[TargetRun], index: int) -> list[str]:
+    """Row ``index`` as a renderer that has never seen ``targets`` draws it."""
+    table = RecordingTable()
+    make_renderer().sync(table, targets)
+    return shown_cells(table, index)
 
 
 def host_labels(names: list[str], width: int | None) -> list[str]:
     """The host column the renderer draws for ``names`` at ``width``."""
     return fit_host_labels(*display_host_names(names), width)
+
+
+def history_cell(samples: Any, *, width: int) -> Text:
+    return history_text(
+        *render_history_parts(samples, width=width, style="bar", slow_latency_ms=SLOW_MS)
+    )
 
 
 def test_unchanged_rows_are_skipped_without_rebuilding_cells(
@@ -234,7 +231,7 @@ def test_every_way_a_target_changes_rerenders_its_row(mutate: Any) -> None:
     renderer.sync(table, targets)
 
     assert table.updated_rows() == {target_row_key(5)}
-    assert shown_cells(table, 5) == fresh_cells(targets[5])
+    assert shown_cells(table, 5) == fresh_cells(targets, 5)
 
     table.updates.clear()
     renderer.sync(table, targets)
@@ -381,12 +378,7 @@ def test_incremental_history_matches_a_full_render() -> None:
         renderer.sync(table, targets)
 
         for index, target in enumerate(targets):
-            expected = format_history_cell(
-                target.samples,
-                width=widths["history"],
-                style="bar",
-                slow_latency_ms=SLOW_MS,
-            )
+            expected = history_cell(target.samples, width=widths["history"])
             shown = table.cell(index, "history")
             assert (shown.plain, shown.spans) == (expected.plain, expected.spans), step
 
@@ -394,7 +386,7 @@ def test_incremental_history_matches_a_full_render() -> None:
 def test_history_cell_uses_one_span_per_run_of_equal_styles() -> None:
     samples = [ok(5.0), ok(6.0), ok(150.0), lost(), lost(), ok(7.0)]
 
-    cell = format_history_cell(samples, width=10, style="bar", slow_latency_ms=SLOW_MS)
+    cell = history_cell(samples, width=10)
 
     assert [(span.start, span.end, span.style) for span in cell.spans] == [
         (0, 2, ui.GREEN),
@@ -406,8 +398,9 @@ def test_history_cell_uses_one_span_per_run_of_equal_styles() -> None:
 
 def test_resolved_target_without_results_is_pending() -> None:
     resolving = TargetRun("a.example", status=TargetStatus.RESOLVING)
+    # Just resolved, or reset with "r": the runner and the app both leave the
+    # target resolving with an address and no samples.
     resolved = TargetRun("a.example", resolved_address="127.0.253.1", status=TargetStatus.RESOLVING)
-    unprobed = TargetRun("a.example", resolved_address="127.0.253.1", status=TargetStatus.DOWN)
     probed_down = TargetRun(
         "a.example",
         resolved_address="127.0.253.1",
@@ -417,7 +410,6 @@ def test_resolved_target_without_results_is_pending() -> None:
 
     assert target_state(resolving) == ("resolving", MUTED)
     assert target_state(resolved) == (PENDING_LABEL, MUTED)
-    assert target_state(unprobed) == (PENDING_LABEL, MUTED)
     assert target_state(probed_down) == ("down", RED)
     # Only the TUI label changes; JSON output keeps the model status.
     assert resolved.status.value == "resolving"
@@ -536,7 +528,7 @@ def test_fleet_summary_counts_states_and_the_oldest_result() -> None:
         ),
         TargetRun("slow-dns.example", status=TargetStatus.RESOLVING),
         TargetRun("new.example", resolved_address="127.0.253.5", status=TargetStatus.RESOLVING),
-        TargetRun("reset.example", resolved_address="127.0.253.6", status=TargetStatus.DOWN),
+        TargetRun("reset.example", resolved_address="127.0.253.6", status=TargetStatus.RESOLVING),
     ]
     table = RecordingTable()
 
