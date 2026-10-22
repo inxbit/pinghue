@@ -15,6 +15,7 @@ from pinghue.ui import (
     CELL_PADDING,
     COLUMN_KEYS,
     GREEN,
+    MAX_HOST_WIDTH,
     MIN_HOST_WIDTH,
     RED,
     SCROLLBAR_WIDTH,
@@ -319,6 +320,32 @@ def test_compute_table_layout_collapses_minor_columns_before_the_host() -> None:
     # A visible address column is never collapsed.
     assert with_address["address"] == 15
     assert with_address["host"] >= MIN_HOST_WIDTH
+
+
+def test_compute_table_layout_collapses_spare_columns_before_shortening_hosts() -> None:
+    targets = [TargetRun(f"db-primary-{index:02d}.dc1.example.net") for index in range(3)]
+
+    for show_address in (False, True):
+        layouts = [
+            compute_table_layout(width=width, targets=targets, show_address=show_address)
+            for width in range(90, 181)
+        ]
+        # While min and max are shown, the host column never narrows as the
+        # terminal grows.
+        host_widths = [layout["host"] for layout in layouts if layout["min"] and layout["max"]]
+        assert len(host_widths) > 60
+        assert host_widths == sorted(host_widths), show_address
+
+    layout = compute_table_layout(width=120, targets=targets, show_address=False)
+    # The empty address placeholder goes before host names are shortened.
+    assert layout["address"] == 0
+    assert layout["host"] == MAX_HOST_WIDTH
+    assert layout["mode"] == 4
+    narrower = compute_table_layout(width=110, targets=targets, show_address=False)
+    # So does the mode column, which is the same on every row.
+    assert narrower["mode"] == 0
+    assert narrower["host"] == MAX_HOST_WIDTH
+    assert narrower["min"] == len("1200.00")
 
 
 def test_apply_column_widths_only_updates_changed_widths() -> None:

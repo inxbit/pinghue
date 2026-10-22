@@ -87,6 +87,10 @@ FIXED_COLUMN_WIDTHS = {
 # the host stays readable and the newest history glyphs stay on screen. The
 # address column only collapses while it is the hidden placeholder.
 NARROW_COLLAPSE_ORDER = ("address", "mode", "min", "max")
+# The hidden address placeholder carries no data and mode is the same on every
+# row, so they collapse before host names are shortened at all; min and max
+# collapse only to keep host names MIN_HOST_WIDTH wide.
+SPARE_COLUMNS = frozenset({"address", "mode"})
 
 ELLIPSIS = "…"
 PENDING_LABEL = "pending"
@@ -427,9 +431,10 @@ def compute_table_layout(
     Every column also renders ``2 * cell_padding`` blank cells, and the border
     and the vertical scrollbar are always reserved, so the widths fit without
     horizontal scrolling. As the terminal narrows, history shrinks to
-    MIN_HISTORY_WIDTH first, then the host column to MIN_HOST_WIDTH, then the
-    NARROW_COLLAPSE_ORDER columns collapse; below that history goes and the
-    table scrolls horizontally instead of squeezing host names unreadable.
+    MIN_HISTORY_WIDTH first, then the SPARE_COLUMNS collapse, then the host
+    column shrinks to MIN_HOST_WIDTH and min and max collapse; below that
+    history goes and the table scrolls horizontally instead of squeezing host
+    names unreadable.
     """
     layout = dict(FIXED_COLUMN_WIDTHS)
     if not show_address:
@@ -441,13 +446,17 @@ def compute_table_layout(
 
     padding = len(COLUMN_KEYS) * 2 * max(cell_padding, 0)
     available = width - TABLE_CHROME_WIDTH - scrollbar_width - padding
-    collapsible = [key for key in NARROW_COLLAPSE_ORDER if key != "address" or not show_address]
+    preferred_host_width = _target_width(targets)
     flexible = available - sum(layout.values())
-    while flexible < MIN_HOST_WIDTH + MIN_HISTORY_WIDTH and collapsible:
-        layout[collapsible.pop(0)] = 0
-        flexible = available - sum(layout.values())
+    for key in NARROW_COLLAPSE_ORDER:
+        if key == "address" and show_address:
+            continue
+        kept_host_width = preferred_host_width if key in SPARE_COLUMNS else MIN_HOST_WIDTH
+        if flexible < kept_host_width + MIN_HISTORY_WIDTH:
+            layout[key] = 0
+            flexible = available - sum(layout.values())
 
-    host_width = max(MIN_HOST_WIDTH, min(_target_width(targets), flexible - MIN_HISTORY_WIDTH))
+    host_width = max(MIN_HOST_WIDTH, min(preferred_host_width, flexible - MIN_HISTORY_WIDTH))
     layout["host"] = host_width
     layout["history"] = max(0, flexible - host_width)
     return {key: layout[key] for key in COLUMN_KEYS}
