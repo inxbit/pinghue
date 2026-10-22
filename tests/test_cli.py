@@ -247,6 +247,33 @@ def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
     assert "stdout is not a terminal; pass --no-tui" in capsys.readouterr().err
 
 
+def test_main_refuses_output_path_before_warning_about_the_tui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A run that cannot start says only why, not how the TUI would have behaved.
+    output_path = tmp_path / "out.json"
+    output_path.write_text("previous\n", encoding="utf-8")
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    assert main(["--output", str(output_path), "1.1.1.1"]) == 1
+
+    err = capsys.readouterr().err
+    assert err.startswith("pinghue: error: output file already exists")
+    assert "stdout is not a terminal" not in err
+    assert calls == []
+
+
 def test_main_does_not_warn_about_stdout_when_no_tui_is_requested(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

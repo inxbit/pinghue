@@ -363,12 +363,26 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
     return args
 
 
+def _report_error(exc: OSError) -> int:
+    print(f"pinghue: error: {sanitize_display(str(exc))}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     if args.check:
         resolve_name = args.resolve_name or (args.targets[0] if args.targets else None)
         return run_check(quiet=args.quiet, resolve_name=resolve_name)
+
+    if args.output is not None:
+        # Refuse an unusable report path before the run starts, not after it:
+        # before the TUI warning below, the open-file limit change and probing.
+        # The check only inspects the path and holds no descriptor.
+        try:
+            check_output_path(args.output, overwrite=args.overwrite)
+        except OSError as exc:
+            return _report_error(exc)
 
     from pinghue.runner import run
 
@@ -383,13 +397,9 @@ def main(argv: list[str] | None = None) -> int:
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
     try:
-        if args.output is not None:
-            # Refuse an unusable report path before probing, not after the run.
-            check_output_path(args.output, overwrite=args.overwrite)
         return asyncio.run(run(args, mode=mode))
     except OSError as exc:
-        print(f"pinghue: error: {sanitize_display(str(exc))}", file=sys.stderr)
-        return 1
+        return _report_error(exc)
 
 
 if __name__ == "__main__":  # pragma: no cover
