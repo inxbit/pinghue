@@ -497,13 +497,7 @@ def record_probe_loop_failure(target: TargetRun, error: BaseException) -> None:
 
 
 def _cancel_requested() -> bool:
-    """Return whether the running task has a pending cancellation request.
-
-    ``Task.cancelling()`` is new in Python 3.11. On 3.10 this is always False
-    and loops rely on the stop event, which both modes set before cancelling.
-    """
-    if sys.version_info < (3, 11):
-        return False
+    """Return whether the running task has a pending cancellation request."""
     task = asyncio.current_task()
     return task is not None and task.cancelling() > 0
 

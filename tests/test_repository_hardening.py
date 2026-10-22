@@ -156,7 +156,7 @@ def test_dependency_audit_workflow_runs_pip_audit_weekly() -> None:
 
     assert "schedule:" in workflow
     assert "pip-audit" in workflow
-    assert 'python-version: ["3.10", "3.13"]' in workflow
+    assert 'python-version: ["3.11", "3.13"]' in workflow
     assert "python-version: ${{ matrix.python-version }}" in workflow
 
 
@@ -172,7 +172,7 @@ def test_dependency_audits_are_required_for_every_pull_request() -> None:
     assert "paths:" not in pull_request_trigger
     assert "name: Dependency audit / Python ${{ matrix.python-version }}" in workflow
     assert {
-        "Dependency audit / Python 3.10",
+        "Dependency audit / Python 3.11",
         "Dependency audit / Python 3.13",
     } <= contexts
 
@@ -211,29 +211,21 @@ def test_requirements_audit_is_hash_pinned() -> None:
 def test_requirements_audit_covers_supported_python_floor() -> None:
     requirements = read("requirements-audit.txt")
 
-    assert "--python-version 3.10" in requirements
+    assert "--python-version 3.11" in requirements
     assert "typing-extensions==" in requirements
 
 
 def test_development_requirements_cover_supported_python_floor() -> None:
     requirements = read("requirements.txt")
 
-    assert "--python-version 3.10" in requirements
+    assert "--python-version 3.11" in requirements
+    assert "python_full_version < '3.11'" not in requirements
     assert re.search(
         r"^backports-tarfile==\S+ ; .*python_full_version < '3\.12'",
         requirements,
         re.MULTILINE,
     )
-    assert re.search(
-        r"^rpds-py==\S+ ; python_full_version < '3\.11' \\$",
-        requirements,
-        re.MULTILINE,
-    )
-    assert re.search(
-        r"^rpds-py==\S+ ; python_full_version >= '3\.11' \\$",
-        requirements,
-        re.MULTILINE,
-    )
+    assert re.search(r"^rpds-py==\S+ \\$", requirements, re.MULTILINE)
 
 
 def test_requirements_build_is_hash_pinned() -> None:
@@ -381,7 +373,7 @@ def test_publish_workflow_rechecks_tag_and_audits_locks_before_pypi() -> None:
     audit_job = workflow.split("  audit:", 1)[1].split("  publish:", 1)[0]
     publish_job = workflow.split("  publish:", 1)[1].split("  release:", 1)[0]
 
-    assert 'python-version: ["3.10", "3.13"]' in audit_job
+    assert 'python-version: ["3.11", "3.13"]' in audit_job
     assert "python -m pip install --require-hashes -r requirements-audit.txt" in audit_job
     for lock in (
         "requirements.txt",
@@ -595,7 +587,7 @@ def test_ci_and_classifiers_cover_python_314() -> None:
 
     assert '"3.14"' in ci
     assert '"Programming Language :: Python :: 3.14"' in pyproject
-    assert "Python 3.10 through 3.14" in readme
+    assert "Python 3.11 through 3.14" in readme
 
 
 def test_homebrew_test_uses_fail_on_down_against_local_tcp_server() -> None:

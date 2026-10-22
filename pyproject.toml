@@ -7,7 +7,7 @@ name = "pinghue"
 version = "6.0.0"
 description = "Colored, concurrent ICMP/TCP ping monitor for the terminal"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "inxbit" }]
@@ -19,7 +19,6 @@ classifiers = [
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -74,7 +73,7 @@ target-version = "py310"
 select = ["E", "F", "I", "B", "UP", "ARG", "SIM"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 packages = ["pinghue"]
 strict = true
 

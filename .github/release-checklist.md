@@ -57,7 +57,7 @@ Re-verify hosted hardening before every release, even when no repository setting
 - `scripts/check-github-hardening.sh inxbit/pinghue` passes.
 - GitHub rulesets for `main` and `v*.*.*` release tags are active.
 - The `main` ruleset still requires pull requests, status checks, signed commits, and review-thread resolution.
-- The required status checks still include dependency audits under Python 3.10
+- The required status checks still include dependency audits under Python 3.11
   and 3.13 so both sides of supported dependency markers are evaluated.
 - The `main` ruleset still allows squash and rebase merges only.
 - The `pypi` environment still requires manual approval and is limited to `v*.*.*` tag deployments.
@@ -128,7 +128,7 @@ git push origin vX.Y.Z
 The tag push triggers `.github/workflows/publish.yml`, which independently
 requires a verified annotated tag whose commit is reachable from `origin/main`,
 reruns Ruff, Mypy, and the coverage-gated test suite against that exact commit,
-audits all three hash locks under Python 3.10 and 3.13, and revalidates the tag
+audits all three hash locks under Python 3.11 and 3.13, and revalidates the tag
 identity immediately before PyPI publication and again before creating the
 GitHub release. It also installs and runs both exact distributions and verifies
 the staged Homebrew formula SHA before publication.

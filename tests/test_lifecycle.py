@@ -122,8 +122,8 @@ async def test_run_no_tui_deadline_ends_a_loop_whose_probe_swallows_the_cancel(
     # was never written).
     installed = capture_stop_event(monkeypatch)
     if not task_cancelling:
-        # As on Python 3.10, where Task.cancelling() does not exist: only the
-        # stop event, set before the loops are cancelled, can end the loop.
+        # With no cancellation request visible to the loop, only the stop
+        # event, set before the loops are cancelled, can end the loop.
         monkeypatch.setattr(runner, "_cancel_requested", lambda: False)
     probes = 0
 
@@ -203,7 +203,6 @@ async def test_run_no_tui_interruption_ends_sibling_loops_that_swallow_the_cance
     assert exit_reason == "interrupted"
 
 
-@pytest.mark.skipif(sys.version_info < (3, 11), reason="Task.cancelling() is new in 3.11")
 async def test_probe_target_loop_ends_promptly_after_a_probe_swallows_its_cancel() -> None:
     # Without a stop event, only the task's own cancellation request can end
     # the loop; it must not sleep out another interval or probe again.

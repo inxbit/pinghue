@@ -307,7 +307,7 @@ def test_a_usage_error_prints_nothing_on_stdout_when_stderr_is_closed(
     arguments: tuple[str, ...],
 ) -> None:
     # argparse printed its usage synopsis on stdout, so a pipeline into a JSON
-    # reader got usage text; Python 3.10 also exited 1 instead of 2.
+    # reader got usage text.
     result = subprocess.run(
         _cli_command(*arguments),
         stdin=subprocess.DEVNULL,

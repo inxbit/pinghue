@@ -121,7 +121,7 @@ requires the next major release; it must not ship as a patch or minor version.
 | Release identity | Verifies signed annotated tag name, direct commit target, event SHA, protected-main ancestry, and package version before building. |
 | Exact-commit release validation | Reruns Ruff, Mypy, and coverage-gated tests against the exact tagged commit before publishing. |
 | Tag race | Revalidates tag name/signature/target after attestation immediately before PyPI and again before `gh release create --verify-tag`. |
-| Dependency integrity | Uses universal hash-pinned development/build/audit locks; required Python 3.10/3.13 jobs audit all three exact files before merge and publish. |
+| Dependency integrity | Uses universal hash-pinned development/build/audit locks; required Python 3.11/3.13 jobs audit all three exact files before merge and publish. |
 | Artifact reproducibility | Incrementally bounds/validates sdist members and canonicalizes bytes; required CI builds from two independent source trees with different mtimes and compares wheel/sdist bytes. |
 | Artifact execution | The tag workflow installs and runs both exact distributions against localhost TCP and blocks when the staged Homebrew version/SHA differs from the built sdist. |
 | Sdist smoke build | Installs the exact hash-pinned build backend before the no-build-isolation source-distribution smoke test. |
@@ -157,23 +157,24 @@ this section previously recorded is superseded):
 
 - Full tests: 697 passed and 8 skipped (Linux-only kernel features, a
   Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.15, with total branch-aware coverage of 93.93% against the 85% floor;
-  localhost TCP and Unix-socket cases executed. The same suite
-  passed under CPython 3.14.9.
+  3.12.15, with total branch-aware coverage of 93.97% against the 85% floor;
+  localhost TCP and Unix-socket cases executed. The same suite passed under
+  CPython 3.11.15, the new supported floor, and 3.14.9.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
 - Mypy strict mode: no issues across 16 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
 - Static site contract: 26 Node tests passed. The 6.0.0 site change adds the
   TUI's fleet summary to the hero title bar, shows a reset host as `pending`
-  like the TUI, and updates the version strings.
+  like the TUI, and updates the version strings and the supported Python
+  range.
 - Semgrep 1.182.0 Python, security-audit, and secrets rule packs: 0 findings
   across 85 scanned files.
 - Bandit 1.9.4 recursive runtime/script scan: one low-severity B311 note for
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 131-commit history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 132-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -193,7 +194,8 @@ this section previously recorded is superseded):
 ## Release decision
 
 The breaking target cap shipped in 5.0.0 and BP-001 is closed. 6.0.0 is a
-major release: `--output` refuses FIFOs and `--overwrite` targets that another
+major release: it drops Python 3.10, which reached end of life in October
+2026, `--output` refuses FIFOs and `--overwrite` targets that another
 local user controls, host files split lines only at `\n`, `\r\n`, or a lone
 `\r`, and `./-` names a file. Those changes invoke the documented security
 exception to the deprecation window. The release also closes DNS-sinkhole
