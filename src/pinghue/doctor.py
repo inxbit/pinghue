@@ -101,7 +101,10 @@ def _read_ping_group_range() -> tuple[int, int, str] | None:
 
 
 DEFAULT_DNS_PROBE_NAME = "example.com"
-DNS_PROBE_TIMEOUT_SECONDS = 5.0
+# Matches runner.DNS_LOOKUP_TIMEOUT_SECONDS: above glibc's default 5 s
+# per-nameserver timeout, so a resolver that fails over from a dead first
+# nameserver is not reported as broken.
+DNS_PROBE_TIMEOUT_SECONDS = 12.0
 
 
 def _dns_probe(

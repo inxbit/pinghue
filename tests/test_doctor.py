@@ -253,3 +253,12 @@ def test_dns_probe_times_out_when_resolver_hangs(
     assert address is None
     assert elapsed_ms is None
     assert error is not None and "timed out" in error
+
+
+def test_dns_probe_budget_matches_runner_lookup_budget() -> None:
+    # Both must outlast glibc's default 5 s wait on a silent first nameserver,
+    # so --check does not report a resolver that is merely failing over.
+    from pinghue import runner
+
+    assert doctor.DNS_PROBE_TIMEOUT_SECONDS == runner.DNS_LOOKUP_TIMEOUT_SECONDS
+    assert doctor.DNS_PROBE_TIMEOUT_SECONDS > 2 * 5.0

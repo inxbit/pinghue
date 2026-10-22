@@ -6,12 +6,9 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
-### Changed
+### Security
 
-- Each target now starts probing as soon as its own name resolves, in both modes, instead of waiting for every lookup in the run; IP literals start at once instead of queueing behind DNS names for a resolver slot.
-- No-TUI mode now spreads the targets' first probes across one interval like the TUI, instead of probing every target in the same instant on every cycle; with `--count`, a run with several targets can take up to one interval longer. When `--duration` is shorter than two intervals, first probes are spread across half the run so every target is still probed.
-- A resolved target whose first probe has not landed yet now shows and exports as `resolving` instead of `down`; such never-probed targets still count as down for `--fail-on-any-down` and `--fail-on-all-down`.
-- No-TUI per-probe lines now reach a pipe or file as soon as each result lands instead of sitting in an output buffer; when the reader goes away (for example `| head`), the run stops as `interrupted` and still writes `--output` instead of failing with a broken-pipe error. Any other failure to write a line, such as a full disk, stops the run the same way after a warning on stderr.
+- A DNS answer made only of unspecified addresses (`0.0.0.0`, `::`), which DNS filters and sinkholes return for blocked names, is now reported as `dns_failure` instead of probed; probing it reached the local host on Linux and reported the blocked name healthy. Unspecified addresses are also dropped from mixed answers, and answers are deduplicated in one pass that stops at the 8-address failover cap, so a huge answer cannot stall the event loop. Explicit IP-literal targets are unchanged.
 
 ### Fixed
 
@@ -20,6 +17,18 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - `SIGTERM` and `SIGHUP` now end a TUI run cleanly, restoring the terminal and writing `--output` with `exit_reason` `interrupted`, and `SIGHUP` now ends a no-TUI run the same way; a `SIGHUP` already ignored at startup (`nohup`) stays ignored. A closed terminal window or dropped SSH session ends the run this way too, with its normal exit status.
 - A probe loop that fails on an unexpected error now marks its target `error` instead of leaving it frozen on its last state, and no longer ends a no-TUI run without a report. In the TUI, a lookup that fails that way marks its own row instead of keeping the other rows from ever being probed.
 - With `--output -` and stderr closed, no-TUI per-probe lines are now dropped instead of being written into the JSON document on stdout.
+- Stuck DNS lookups no longer make other hostnames fail with `resolver worker limit reached`. A lookup that runs past its budget keeps its resolver thread until the OS resolver returns, other lookups wait for a free thread, and a retry of a name whose lookup is still running shares that lookup instead of starting another thread. A host that cannot get a resolver thread (all are busy, or the process or container thread limit is reached) keeps its current state (`resolving` before its first lookup) and retries on its next probe, with no new `dns_failure` verdict and no 10-second DNS cooldown. When a lookup finishes after its budget expired, the name's next retry uses that answer instead of starting a new lookup. Resolver threads are capped at 128 (previously 16) and lookup concurrency is 32 (previously 16).
+- Failed DNS lookups now retry with jitter so names that failed together do not retry in lockstep, and a name whose lookups keep timing out backs off to 30 and then 60 seconds; a one-off failure still retries after about 10 seconds.
+- Raised the DNS lookup budget from 5 to 12 seconds, above glibc's default 5-second per-nameserver timeout, so an unresponsive first nameserver in `/etc/resolv.conf` no longer turns every hostname into `dns_failure`; `pinghue --check` uses the same budget.
+- A hostname that resolves after an earlier DNS failure now shows `resolving` until its first probe result instead of `down`.
+- A host whose known addresses keep failing now has its name looked up again in the background while those addresses keep being probed, so a slow or unresponsive DNS server no longer pauses its probes or delays showing its recovery. The new answer is used only if the host is still failing, and IP-literal targets skip the lookup.
+
+### Changed
+
+- Each target now starts probing as soon as its own name resolves, in both modes, instead of waiting for every lookup in the run; IP literals start at once instead of queueing behind DNS names for a resolver slot.
+- No-TUI mode now spreads the targets' first probes across one interval like the TUI, instead of probing every target in the same instant on every cycle; with `--count`, a run with several targets can take up to one interval longer. When `--duration` is shorter than two intervals, first probes are spread across half the run so every target is still probed.
+- A resolved target whose first probe has not landed yet now shows and exports as `resolving` instead of `down`; such never-probed targets still count as down for `--fail-on-any-down` and `--fail-on-all-down`.
+- No-TUI per-probe lines now reach a pipe or file as soon as each result lands instead of sitting in an output buffer; when the reader goes away (for example `| head`), the run stops as `interrupted` and still writes `--output` instead of failing with a broken-pipe error. Any other failure to write a line, such as a full disk, stops the run the same way after a warning on stderr.
 
 ## 5.1.0 - 2026-08-18
 
