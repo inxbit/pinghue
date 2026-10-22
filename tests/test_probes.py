@@ -1,7 +1,10 @@
 import asyncio
 import errno
 import socket
+import struct
+import sys
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -79,6 +82,129 @@ async def test_tcp_probe_preserves_success_when_cancelled_during_close(
 
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms is not None
+
+
+class _TcpInfoSocket:
+    def __init__(self, *, rtt_us: int, total_retrans: int) -> None:
+        self.info = bytearray(104)
+        struct.pack_into("=I", self.info, 68, rtt_us)
+        struct.pack_into("=I", self.info, 100, total_retrans)
+
+    def getsockopt(self, level: int, option: int, buflen: int) -> bytes:
+        assert (level, option, buflen) == (socket.IPPROTO_TCP, 11, 104)
+        return bytes(self.info)
+
+
+class _TcpInfoWriter(FakeWriter):
+    def __init__(self, sock: object) -> None:
+        self._sock = sock
+
+    def get_extra_info(self, name: str, default: object = None) -> object:
+        return self._sock if name == "socket" else default
+
+
+def _slow_connect(writer: FakeWriter, delay_s: float = 0.05) -> Any:
+    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
+        await asyncio.sleep(delay_s)  # the connect completes but the loop is late
+        return object(), writer
+
+    return open_connection
+
+
+async def test_tcp_probe_reports_kernel_handshake_rtt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(probes, "_TCP_INFO", 11)
+    writer = _TcpInfoWriter(_TcpInfoSocket(rtt_us=1500, total_retrans=0))
+    monkeypatch.setattr(asyncio, "open_connection", _slow_connect(writer))
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms == 1.5
+
+
+@pytest.mark.parametrize(
+    "sock",
+    [
+        _TcpInfoSocket(rtt_us=1500, total_retrans=1),
+        _TcpInfoSocket(rtt_us=0, total_retrans=0),
+        None,
+    ],
+    ids=["syn-retransmitted", "no-rtt-sample", "no-socket"],
+)
+async def test_tcp_probe_keeps_connect_time_when_kernel_rtt_would_hide_it(
+    monkeypatch: pytest.MonkeyPatch, sock: object
+) -> None:
+    monkeypatch.setattr(probes, "_TCP_INFO", 11)
+    monkeypatch.setattr(asyncio, "open_connection", _slow_connect(_TcpInfoWriter(sock)))
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None and sample.latency_ms >= 45
+
+
+async def test_tcp_probe_ignores_tcp_info_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailingSocket:
+        def getsockopt(self, *_: object) -> bytes:
+            raise OSError(errno.ENOPROTOOPT, "Protocol not available")
+
+    monkeypatch.setattr(probes, "_TCP_INFO", 11)
+    monkeypatch.setattr(
+        asyncio, "open_connection", _slow_connect(_TcpInfoWriter(FailingSocket()), 0.0)
+    )
+
+    sample = await tcp_probe("127.0.0.1", 443, timeout_s=1.0)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None
+
+
+async def test_tcp_probe_bounds_slow_teardown(monkeypatch: pytest.MonkeyPatch) -> None:
+    class StuckWriter(FakeWriter):
+        async def wait_closed(self) -> None:
+            await asyncio.Event().wait()
+
+    async def open_connection(*_: object) -> tuple[object, FakeWriter]:
+        return object(), StuckWriter()
+
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+    monkeypatch.setattr(probes, "TCP_CLOSE_TIMEOUT_SECONDS", 0.05)
+
+    probe = asyncio.ensure_future(tcp_probe("127.0.0.1", 443, timeout_s=1.0))
+    done, _ = await asyncio.wait({probe}, timeout=2.0)
+
+    assert probe in done
+    sample = probe.result()
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None
+
+
+async def _accept_and_close(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    writer.close()
+
+
+async def test_tcp_probe_real_loopback_connect() -> None:
+    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        sample = await tcp_probe("127.0.0.1", port, timeout_s=2.0)
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None and 0 <= sample.latency_ms < 1000
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="TCP_INFO is read on Linux")
+async def test_tcp_probe_real_loopback_excludes_event_loop_stall() -> None:
+    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        probe = asyncio.create_task(tcp_probe("127.0.0.1", port, timeout_s=2.0))
+        await asyncio.sleep(0)
+        time.sleep(0.05)  # the loop stalls while the connect is in flight
+        sample = await probe
+
+    assert sample.status == SampleStatus.OK
+    assert sample.latency_ms is not None and sample.latency_ms < 25
 
 
 async def test_tcp_probe_reports_refused(monkeypatch: pytest.MonkeyPatch) -> None:

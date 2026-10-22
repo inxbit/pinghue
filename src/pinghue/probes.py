@@ -8,6 +8,8 @@ import errno
 import ipaddress
 import queue
 import socket
+import struct
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -23,6 +25,16 @@ MAX_DNS_DAEMON_THREADS = 16
 MAX_ICMP_DAEMON_THREADS = 1_024
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
 _T = TypeVar("_T")
+
+# A clean TCP close finishes on the next loop iteration; this only bounds a
+# teardown that stalls after the connect was already measured.
+TCP_CLOSE_TIMEOUT_SECONDS = 1.0
+# Linux struct tcp_info: tcpi_rtt (smoothed RTT, microseconds) at offset 68 and
+# tcpi_total_retrans at offset 100.
+_TCP_INFO = getattr(socket, "TCP_INFO", None) if sys.platform.startswith("linux") else None
+_TCP_INFO_SIZE = 104
+_TCP_INFO_RTT_OFFSET = 68
+_TCP_INFO_TOTAL_RETRANS_OFFSET = 100
 
 UNREACHABLE_ERRNOS = {
     value
@@ -302,18 +314,50 @@ async def resolve_target(
     )
 
 
+def _kernel_connect_rtt_ms(writer: asyncio.StreamWriter) -> float | None:
+    """Return the kernel's handshake RTT when it covers the whole connect.
+
+    tcpi_rtt only reflects the last SYN exchange, so after a SYN retransmission
+    it would hide the time spent waiting; None keeps the measured connect time.
+    """
+    if _TCP_INFO is None:
+        return None
+    try:
+        sock = writer.get_extra_info("socket")
+        if sock is None:
+            return None
+        info = sock.getsockopt(socket.IPPROTO_TCP, _TCP_INFO, _TCP_INFO_SIZE)
+        (rtt_us,) = struct.unpack_from("=I", info, _TCP_INFO_RTT_OFFSET)
+        (total_retrans,) = struct.unpack_from("=I", info, _TCP_INFO_TOTAL_RETRANS_OFFSET)
+    except (AttributeError, OSError, TypeError, struct.error):
+        return None
+    if total_retrans or rtt_us <= 0:
+        return None
+    return float(rtt_us) / 1000
+
+
 async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample:
-    """Probe a TCP port with asyncio.open_connection."""
+    """Probe a TCP port with asyncio.open_connection.
+
+    The connect time is measured on the event loop, so it also counts any
+    time the loop was busy elsewhere. On Linux the kernel's handshake RTT
+    replaces it when that is smaller and no SYN was retransmitted.
+    """
     timestamp = datetime.now(timezone.utc)
     start = time.perf_counter()
     writer: asyncio.StreamWriter | None = None
 
     try:
-        _, writer = await asyncio.wait_for(
+        _, connected = await asyncio.wait_for(
             asyncio.open_connection(address, port),
             timeout=timeout_s,
         )
-        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+        writer = connected
+        latency_ms = (time.perf_counter() - start) * 1000
+        kernel_rtt_ms = _kernel_connect_rtt_ms(connected)
+        if kernel_rtt_ms is not None:
+            latency_ms = min(latency_ms, kernel_rtt_ms)
+        latency_ms = round(latency_ms, 2)
     except asyncio.TimeoutError:
         return ProbeSample(timestamp=timestamp, latency_ms=None, status=SampleStatus.TIMEOUT)
     except ConnectionRefusedError as exc:
@@ -335,10 +379,11 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
         if writer is not None:
             writer.close()
             # Once connect() succeeds, teardown is no longer part of the probe
-            # result. Preserve the measured success when shutdown cancels a
-            # slow wait_closed(); cancellation before connect still propagates.
-            with contextlib.suppress(OSError, asyncio.CancelledError):
-                await writer.wait_closed()
+            # result. Preserve the measured success when shutdown cancels or a
+            # slow wait_closed() outlasts the bound; cancellation before connect
+            # still propagates.
+            with contextlib.suppress(OSError, asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(writer.wait_closed(), timeout=TCP_CLOSE_TIMEOUT_SECONDS)
 
     return ProbeSample(timestamp=timestamp, latency_ms=latency_ms, status=SampleStatus.OK)
 
