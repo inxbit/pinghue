@@ -118,7 +118,12 @@ Whole-run counters/statistics do not retain every sample.
 TCP probe concurrency never exceeds 1,024 or what the open-file limit can hold,
 because every in-flight TCP probe holds a socket: pinghue raises only its own
 soft limit, never past the hard limit, and lowers concurrency with a warning
-when the hard limit is too low. The automatic ICMP concurrency can give each of
+when the hard limit is too low. The descriptors kept in reserve beside the probe
+sockets cover every resolver thread holding its sockets (one per nameserver
+tried) while lookups hang during a DNS outage, so a DNS outage cannot exhaust
+the limit and fail healthy probes with `Too many open files`. Under a hard limit
+below 896 the reserve shrinks to half the limit to leave room for probes, and a
+long DNS outage can then still exhaust it. The automatic ICMP concurrency can give each of
 the 5,000 targets a slot, since an in-flight ICMP probe holds only a pending
 entry and a loop timer on the shared sockets; an explicit `--concurrency` stays
 within 1-1,024 in both modes.

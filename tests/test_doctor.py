@@ -405,9 +405,9 @@ def test_doctor_warns_when_hard_open_file_limit_caps_concurrency(
 
     # A low open-file limit only bounds TCP mode; ICMP probes share a few sockets.
     assert exit_code == 0
-    assert "[warn]  Open-file limit 256 (hard 512) caps --concurrency at 384 in TCP mode\n" in text
+    assert "[warn]  Open-file limit 256 (hard 512) caps --concurrency at 256 in TCP mode\n" in text
     assert (
-        "Raise the hard limit to at least 1152 to allow --concurrency 1024 in TCP mode.\n"
+        "Raise the hard limit to at least 1472 to allow --concurrency 1024 in TCP mode.\n"
         "          ICMP probes share a few sockets and are not limited by it.\n"
     ) in text
 

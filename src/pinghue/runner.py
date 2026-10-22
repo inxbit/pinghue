@@ -18,7 +18,7 @@ from typing import TextIO
 from pinghue.config import RunConfig
 from pinghue.display import sanitize_display
 from pinghue.export import write_output_json
-from pinghue.limits import fit_concurrency_to_fd_limit
+from pinghue.limits import ensure_fd_reserve, fit_concurrency_to_fd_limit
 from pinghue.models import (
     AddressFamily,
     ProbeConfig,
@@ -912,6 +912,9 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
         args.concurrency, fd_warning = fit_concurrency_to_fd_limit(args.concurrency)
         if fd_warning is not None:
             print(f"pinghue: warning: {fd_warning}", file=sys.stderr)
+    else:
+        # ICMP concurrency needs no descriptors, but stuck DNS lookups still do.
+        ensure_fd_reserve()
 
     if args.no_tui:
         targets, exit_reason, started_at, ended_at = await run_no_tui(args, mode)
