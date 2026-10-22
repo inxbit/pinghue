@@ -8,6 +8,7 @@ Textual upgrade that changes it fails here instead of on screen.
 
 from __future__ import annotations
 
+import asyncio
 import random
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -34,6 +35,8 @@ from pinghue.models import (
     TargetRun,
     TargetStatus,
 )
+from pinghue.probes import ResolvedTarget
+from pinghue.runner import target_run_from_resolution
 from pinghue.ui import (
     AMBER,
     COLUMN_KEYS,
@@ -707,18 +710,19 @@ def build_args(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**values)
 
 
+def _resolved(target: str, address: str = "127.0.253.1") -> TargetRun:
+    # Resolved but not probed yet, exactly as the runner reports it.
+    return target_run_from_resolution(
+        ResolvedTarget(target, address, AddressFamily.IPV4, addresses=(address,))
+    )
+
+
 @pytest.fixture
 def stub_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve every target to a loopback address; probes answer at once."""
 
     async def fake_resolve(target: str, _args: object) -> TargetRun:
-        return TargetRun(
-            target=target,
-            resolved_address="127.0.253.1",
-            resolved_family=AddressFamily.IPV4,
-            resolved_addresses=("127.0.253.1",),
-            status=TargetStatus.DOWN,
-        )
+        return _resolved(target)
 
     async def fake_probe_once(target: TargetRun, **_kwargs: Any) -> ProbeSample:
         sample = ok(5.0)
@@ -830,6 +834,117 @@ async def test_reset_selected_shows_pending_at_once() -> None:
 
         assert table.get_cell(target_row_key(0), "state").plain == PENDING_LABEL
         assert app.targets[0].status == TargetStatus.RESOLVING
+
+
+def _states(table: DataTable[Any], count: int) -> list[str]:
+    return [table.get_cell(target_row_key(index), "state").plain for index in range(count)]
+
+
+def _full_refresh(app: PinghueTextualApp) -> None:
+    app._last_full_refresh = float("-inf")
+    app._refresh_table()
+
+
+async def test_rows_and_fleet_summary_follow_every_way_a_run_changes_a_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The app replaces each placeholder TargetRun as its lookup completes and
+    # starts that target's probe loop at once; a resolved target stays
+    # RESOLVING until its first sample; a lookup that raises or a probe loop
+    # that dies marks its row error; and the probe loop re-resolves a name
+    # whose first lookup failed on the same TargetRun. Every change must reach
+    # the row and the header counts on the next refresh.
+    release_slow = asyncio.Event()
+    retry_dns = asyncio.Event()
+    probe_up = asyncio.Event()
+    probe_late = asyncio.Event()
+    real_probe_target_loop = runner_module.probe_target_loop
+
+    async def fake_resolve(target: str, _args: object) -> TargetRun:
+        if target == "bad.example":
+            raise RuntimeError("resolver bug")
+        if target == "late.example":
+            return target_run_from_resolution(
+                ResolvedTarget(target, None, None, error="Name or service not known")
+            )
+        if target == "slow.example":
+            await release_slow.wait()
+        return _resolved(target)
+
+    async def fake_probe_target_loop(
+        target: TargetRun, *, stop_event: asyncio.Event, **kwargs: Any
+    ) -> None:
+        if target.target == "dies.example":
+            raise RuntimeError("loop bug")
+        if target.target == "late.example":
+            await retry_dns.wait()
+            kwargs["initial_delay"] = 0.0
+            await real_probe_target_loop(target, stop_event=stop_event, **kwargs)
+            return
+        if target.target == "up.example":
+            await probe_up.wait()
+            add(target, ProbeSample(datetime.now(timezone.utc), 5.0, SampleStatus.OK))
+        await stop_event.wait()
+
+    async def fake_resolve_target_bounded(target: str, *_: Any, **__: Any) -> ResolvedTarget:
+        return ResolvedTarget(target, "127.0.253.7", AddressFamily.IPV4, addresses=("127.0.253.7",))
+
+    async def fake_probe_address(*_: Any, **__: Any) -> ProbeSample:
+        await probe_late.wait()
+        return ProbeSample(datetime.now(timezone.utc), 5.0, SampleStatus.OK)
+
+    monkeypatch.setattr(app_module, "resolve_run_target", fake_resolve)
+    monkeypatch.setattr(app_module, "probe_target_loop", fake_probe_target_loop)
+    monkeypatch.setattr(runner_module, "_resolve_target_bounded", fake_resolve_target_bounded)
+    monkeypatch.setattr(runner_module, "_probe_address", fake_probe_address)
+    names = ["up", "slow", "bad", "dies", "late", "idle"]
+    targets = [f"{name}.example" for name in names]
+    app = PinghueTextualApp(args=build_args(targets=targets, numeric=False), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(160, 20)) as pilot:
+        table = app.query_one("#targets", DataTable)
+        assert await _wait_until(
+            pilot,
+            lambda: (
+                len(app._probe_tasks) == 4
+                and app.targets[2].status == TargetStatus.ERROR
+                and app.targets[3].status == TargetStatus.ERROR
+            ),
+        )
+        placeholder = app.targets[1]
+        _full_refresh(app)
+
+        # Resolved but not probed shows "pending" while JSON keeps
+        # "resolving"; a lookup still running shows "resolving".
+        assert _states(table, 6) == ["pending", "resolving", "error", "error", "dns", "pending"]
+        assert app.targets[0].status == TargetStatus.RESOLVING
+        # No results yet, so no age; "resolving" counts as pending.
+        assert app.sub_title == "1 dns  2 error  3 pending"
+
+        release_slow.set()
+        retry_dns.set()
+        assert await _wait_until(
+            pilot,
+            lambda: app.targets[1] is not placeholder and app.targets[4].resolved_address,
+        )
+        _full_refresh(app)
+
+        assert _states(table, 6) == ["pending"] * 2 + ["error"] * 2 + ["pending"] * 2
+        assert app.targets[4].status == TargetStatus.RESOLVING
+        assert app.sub_title == "2 error  4 pending"
+
+        probe_up.set()
+        probe_late.set()
+        assert await _wait_until(pilot, lambda: app.targets[0].samples and app.targets[4].samples)
+        _full_refresh(app)
+
+        assert _states(table, 6) == ["healthy", "pending", "error", "error", "healthy", "pending"]
+        assert table.get_cell(target_row_key(4), "last").plain == "5.00"
+        assert app.sub_title.startswith("oldest ")
+        assert app.sub_title.endswith("  2 error  2 pending  2 healthy")
+
+        await pilot.press("a")
+        assert table.get_cell(target_row_key(4), "address").plain == "127.0.253.7"
+        assert table.get_cell(target_row_key(1), "address").plain == "127.0.253.1"
 
 
 @pytest.mark.usefixtures("stub_network")
