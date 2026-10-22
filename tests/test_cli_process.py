@@ -187,6 +187,25 @@ def test_tui_restores_the_terminal_and_writes_output_on_signal(
     assert _exit_reason(report) == "interrupted"
 
 
+def test_tui_exits_at_once_when_stderr_is_closed(tmp_path: Path) -> None:
+    # The TUI draws on stderr. With descriptor 2 closed, Textual's output
+    # thread died, the app hung before probing and ignored SIGTERM and SIGHUP.
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        _cli_command("-c", "1", "-i", "0.2", "--output", str(report)),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        env=_cli_env(),
+        preexec_fn=lambda: os.close(2),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == b""
+    assert not report.exists()
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"),
     reason="closing a pty's controller hangs up its session reliably only on Linux",
