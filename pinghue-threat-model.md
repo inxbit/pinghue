@@ -131,7 +131,7 @@ A symlink, FIFO, device, socket, oversized file, or invalid UTF-8 file could
 block or redirect parsing. The parser opens without following symlinks where
 supported, verifies the opened descriptor is a regular file, performs bounded
 reads, and reports encoding errors without a traceback. Lines end only at
-`\n` (optionally preceded by `\r`), so vertical tabs, form feeds, file/group/
+`\n`, `\r\n`, or a lone `\r`, so vertical tabs, form feeds, file/group/
 record separators, NEL, and Unicode line/paragraph separators cannot split one
 line into several targets or shift line numbers and the line limit; they stay
 in the value, where target validation rejects control characters and display

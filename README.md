@@ -99,7 +99,7 @@ Host files are plain text. Blank lines and `#` comments are ignored. Inline comm
 on host lines are also ignored (`host.example  # comment`).
 Host files must be non-symlink regular files, at most 1 MiB, and at most 5,000
 lines. A run accepts at most 5,000 unique targets in total, and each target string
-is capped at 253 characters. Lines end only at `\n` (`\r\n` also works). Other
+is capped at 253 characters. Lines end only at `\n`, `\r\n`, or a lone `\r`. Other
 line-break characters, such as form feeds or Unicode line separators, stay inside
 the line instead of splitting it into several targets: control characters make
 the target invalid, and anything else non-ASCII is shown escaped.
