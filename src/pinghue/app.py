@@ -119,6 +119,7 @@ class PinghueTextualApp(App[None]):
             history_style=args.history_style,
             jitter_threshold_ms=args.jitter_threshold,
             slow_latency_ms=SLOW_LATENCY_MS,
+            probe_count=args.count,
         )
         self._last_full_refresh = float("-inf")
         self._watching_scroll = False

@@ -535,6 +535,28 @@ def test_fleet_summary_without_results_has_no_age() -> None:
     assert fleet_summary_parts(summary, stale_after_s=1.0) == [("1", MUTED), (" pending", MUTED)]
 
 
+def test_result_age_leaves_out_targets_that_sent_their_count() -> None:
+    finished = healthy("finished.example", ok(5.0, at=1.0), ok(5.0, at=2.0))
+    probing = healthy("probing.example", ok(5.0, at=8.0))
+    table = RecordingTable()
+    renderer = make_renderer(probe_count=2)
+    now = T0 + timedelta(seconds=10)
+
+    # With --count 2, the first target is done and no longer ages.
+    summary = renderer.sync(table, [finished, probing], now=now)
+    assert summary is not None
+    assert summary.oldest_result_age_s == 2.0
+    unlimited = make_renderer().sync(RecordingTable(), [finished, probing], now=now)
+    assert unlimited is not None
+    assert unlimited.oldest_result_age_s == 8.0
+
+    add(probing, ok(5.0, at=9.0))
+    summary = renderer.sync(table, [finished, probing], now=now)
+    assert summary is not None
+    assert summary.oldest_result_age_s is None
+    assert summary.counts == {"healthy": 2}
+
+
 def test_format_age_stays_short() -> None:
     assert format_age(0.84) == "0.8s"
     assert format_age(12.4) == "12s"

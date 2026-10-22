@@ -653,8 +653,9 @@ class FleetSummary:
     """Host counts per displayed state, and how stale the stalest result is."""
 
     counts: dict[str, int]
-    # Among targets with at least one sample, the age of the oldest "newest
-    # sample". Well above the probe interval means probes are falling behind.
+    # Among targets still being probed (at least one sample, and with
+    # --count, probes left), the age of the oldest "newest sample". Well above
+    # the probe interval means probes are falling behind.
     oldest_result_age_s: float | None
 
 
@@ -798,6 +799,7 @@ class TargetTableRenderer:
         history_style: str,
         jitter_threshold_ms: float,
         slow_latency_ms: float,
+        probe_count: int | None = None,
         budget_s: float = ROW_REFRESH_BUDGET_S,
         full_sweep_passes: int = FULL_SWEEP_PASSES,
         min_rows_per_pass: int = MIN_ROWS_PER_PASS,
@@ -806,6 +808,8 @@ class TargetTableRenderer:
         self.history_style = history_style
         self.jitter_threshold_ms = jitter_threshold_ms
         self.slow_latency_ms = slow_latency_ms
+        # --count: a target that has sent this many probes is not probed again.
+        self.probe_count = probe_count
         self.budget_s = budget_s
         self.full_sweep_passes = max(1, full_sweep_passes)
         self.min_rows_per_pass = min_rows_per_pass
@@ -1005,7 +1009,17 @@ class TargetTableRenderer:
 
     def _remember_state(self, index: int, state: CellValue, samples: SampleWindow) -> None:
         self._categories[index] = _summary_category(state[0])
-        self._newest[index] = samples[-1].timestamp if samples else _NO_SAMPLE
+        self._newest[index] = (
+            samples[-1].timestamp if samples and not self._probes_done(samples) else _NO_SAMPLE
+        )
+
+    def _probes_done(self, samples: SampleWindow) -> bool:
+        """Whether a target has sent its --count probes: its newest result
+        then says nothing about the probe cadence."""
+        count = self.probe_count
+        # The window revision counts every sample ever added, so it bounds
+        # the sent count without building the summary for every row.
+        return count is not None and samples.revision >= count and samples.summary().sent >= count
 
     def _refresh_state(self, table: Any, index: int, target: TargetRun) -> bool:
         """Write a changed state label ahead of the rest of the row."""
