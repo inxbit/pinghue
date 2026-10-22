@@ -13,6 +13,13 @@ from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
+from pinghue.limits import (
+    FD_REQUEST_MAXIMUM,
+    FD_RESERVE,
+    concurrency_capacity,
+    fd_limit_label,
+    read_fd_limit,
+)
 from pinghue.models import SampleStatus
 from pinghue.probes import family_from_ip, icmp_probe
 
@@ -228,6 +235,52 @@ def _write_linux_fix(lines: list[str], *, egid: int) -> None:
     )
 
 
+def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
+    # Imported here because the CLI module imports this one at startup.
+    from pinghue.cli import CONCURRENCY_DEFAULT_MINIMUM, CONCURRENCY_MAXIMUM
+
+    lines.extend(["", "Open files"])
+    limit = read_fd_limit()
+    if limit is None:
+        lines.append(
+            f"  {_status(WARN, use_color=use_color)}  "
+            "Open-file limit not available on this platform"
+        )
+        return
+
+    needed = CONCURRENCY_MAXIMUM + FD_RESERVE
+    label = f"Open-file limit {fd_limit_label(limit.soft)} (hard {fd_limit_label(limit.hard)})"
+    if limit.soft is None or limit.soft >= needed:
+        lines.append(
+            f"  {_status(OK, use_color=use_color)}    "
+            f"{label} fits --concurrency up to {CONCURRENCY_MAXIMUM}"
+        )
+        return
+
+    raisable = FD_REQUEST_MAXIMUM if limit.hard is None else min(limit.hard, FD_REQUEST_MAXIMUM)
+    if raisable >= needed:
+        lines.append(
+            f"  {_status(OK, use_color=use_color)}    "
+            f"{label}; raised at startup to fit --concurrency up to {CONCURRENCY_MAXIMUM}"
+        )
+        return
+
+    capacity = concurrency_capacity(raisable)
+    below_default = (
+        f", below the default minimum of {CONCURRENCY_DEFAULT_MINIMUM}"
+        if capacity < CONCURRENCY_DEFAULT_MINIMUM
+        else ""
+    )
+    lines.extend(
+        [
+            f"  {_status(WARN, use_color=use_color)}  "
+            f"{label} caps --concurrency at {capacity}{below_default}",
+            f"          Raise the hard limit to at least {needed} to allow "
+            f"--concurrency {CONCURRENCY_MAXIMUM}.",
+        ]
+    )
+
+
 def run_check(
     *,
     stream: TextIO = sys.stdout,
@@ -334,6 +387,8 @@ def run_check(
             f'getaddrinfo("{display_dns_name}") → '
             f"{sanitize_display(address or '')} ({dns_ms:.0f} ms)"
         )
+
+    _write_fd_limit(lines, use_color=use_color)
 
     if icmp_ready and is_root:
         exit_code = 0

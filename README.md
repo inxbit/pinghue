@@ -216,7 +216,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file in place. The rewrite is type-safe but not crash-atomic. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
-| `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`. |
+| `--concurrency N` | automatic | Maximum concurrent probes, `1-1024`. A probe holds its slot until the reply or the timeout, so the default is sized from the run: enough slots for every target to time out once per probe cycle (`targets × timeout ÷ max(interval, timeout + 0.1)`, plus 25% headroom), at least `64`. TCP mode allows up to `1024`. In ICMP mode every in-flight probe also blocks a thread, and more than a few hundred threads lag the event loop and inflate RTTs, so the default stops at `256` (about 280 silent targets when the timeout equals the interval), and stays at `64` on macOS, where every ICMP socket wakes for every echo reply. Past what the default can carry, silent targets stretch every target's cadence; a shorter `--timeout` restores it, as does a higher `--concurrency` at that thread cost. Each in-flight probe holds a socket, so pinghue raises its soft open-file limit to fit, never past the hard limit, and otherwise lowers the concurrency with a warning on stderr. |
 | `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
 | `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
 | `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
@@ -328,6 +328,8 @@ echo "net.ipv4.ping_group_range=${gid} ${gid}" \
 The broader range `0 2147483647` also works, but enables unprivileged ICMP for every local group on the system.
 
 `setcap cap_net_raw` does not work for pip or Homebrew installs: the `pinghue` command is a Python launcher script, and Linux ignores file capabilities on interpreter scripts. Use the `ping_group_range` fix above, or TCP mode. Do not set capabilities on a shared Python interpreter.
+
+The doctor also reports the open-file limit. Every in-flight probe holds a socket, and pinghue keeps 128 descriptors in reserve (half the limit, but at least 32, when the limit is below 256), so `--concurrency 1024` needs a limit of at least 1152. pinghue raises its own soft limit at startup to fit the concurrency, never past the hard limit; when `--check` warns that the hard limit caps concurrency, raise the hard limit (for example `LimitNOFILE=` in a systemd unit or `/etc/security/limits.conf`).
 
 ## JSON Output
 

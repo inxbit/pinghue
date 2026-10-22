@@ -115,6 +115,9 @@ at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP probes
 share a few event-loop sockets per address family instead of a thread and a
 socket each, and retained history is limited to 100,000 samples across the run.
 Whole-run counters/statistics do not retain every sample.
+Probe concurrency never exceeds 1,024 or what the open-file limit can hold:
+pinghue raises only its own soft limit, never past the hard limit, and lowers
+concurrency with a warning when the hard limit is too low.
 
 ### 3. Host-file path confusion
 
