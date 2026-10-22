@@ -270,14 +270,27 @@ async def probe_once(
     return sample
 
 
-def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup:
-    """Install SIGINT/SIGTERM handlers that let no-TUI mode write final output."""
+def stop_signals() -> tuple[signal.Signals, ...]:
+    """Return the signals that end a run cleanly: SIGINT, SIGTERM and SIGHUP.
+
+    SIGHUP (closed terminal, dropped SSH session) is left alone when it was
+    already ignored at startup, so a ``nohup`` run keeps going after logout.
+    """
+    signals = [signal.SIGINT, signal.SIGTERM]
+    hangup = getattr(signal, "SIGHUP", None)
+    if hangup is not None and signal.getsignal(hangup) is not signal.SIG_IGN:
+        signals.append(hangup)
+    return tuple(signals)
+
+
+def install_stop_signal_callback(callback: Callable[[], object]) -> StopSignalCleanup:
+    """Run ``callback`` on the event loop for each of ``stop_signals()``."""
     loop = asyncio.get_running_loop()
     installed: list[signal.Signals] = []
 
-    for signal_number in (signal.SIGINT, signal.SIGTERM):
+    for signal_number in stop_signals():
         try:
-            loop.add_signal_handler(signal_number, stop_event.set)
+            loop.add_signal_handler(signal_number, callback)
         except (NotImplementedError, RuntimeError, ValueError):
             continue
         installed.append(signal_number)
@@ -287,6 +300,11 @@ def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup
             loop.remove_signal_handler(signal_number)
 
     return cleanup
+
+
+def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup:
+    """Install SIGINT/SIGTERM/SIGHUP handlers that let no-TUI mode write final output."""
+    return install_stop_signal_callback(stop_event.set)
 
 
 def stagger_delay(*, index: int, count: int, interval: float) -> float:

@@ -1,4 +1,6 @@
 import asyncio
+import os
+import signal
 from collections.abc import Callable
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -7,7 +9,7 @@ from typing import Any
 import pytest
 
 import pinghue.app as app_module
-from pinghue.app import PinghueTextualApp
+from pinghue.app import PinghueApp, PinghueTextualApp
 from pinghue.models import (
     MAX_TOTAL_RETAINED_SAMPLES,
     AddressFamily,
@@ -579,3 +581,47 @@ async def test_tui_marks_a_row_whose_probe_loop_dies(monkeypatch) -> None:
     assert app.targets[0].error == "Unexpected probe loop error: loop bug"
     assert app.targets[1].status == TargetStatus.RESOLVING
     await app.on_unmount()
+
+
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP", "SIGINT"])
+async def test_tui_finishes_as_interrupted_on_termination_signals(
+    monkeypatch, signal_name: str
+) -> None:
+    # Textual handles only job-control signals, so SIGTERM/SIGHUP used to
+    # kill the TUI without restoring the terminal or writing --output.
+    signal_number = getattr(signal, signal_name, None)
+    if signal_number is None:
+        pytest.skip(f"{signal_name} is not available on this platform")
+    finished = asyncio.Event()
+    original_finish = PinghueTextualApp._finish
+
+    async def fake_run_async(_app: PinghueTextualApp) -> None:
+        os.kill(os.getpid(), signal_number)
+        await asyncio.wait({asyncio.ensure_future(finished.wait())}, timeout=2.0)
+
+    async def recording_finish(self: PinghueTextualApp, exit_reason: str) -> None:
+        await original_finish(self, exit_reason)
+        finished.set()
+
+    monkeypatch.setattr(PinghueTextualApp, "run_async", fake_run_async)
+    monkeypatch.setattr(PinghueTextualApp, "_finish", recording_finish)
+    monkeypatch.setattr(PinghueTextualApp, "exit", lambda *_args, **_kwargs: None)
+    # Safety net: a missing handler fails the assertions below instead of
+    # letting the signal's default action end the test process.
+    previous = signal.signal(signal_number, lambda *_: None)
+    try:
+        targets, exit_reason, started_at, ended_at = await PinghueApp(
+            args=build_args(targets=["a.example", "b.example"]),
+            mode=ProbeMode.ICMP,
+        ).run_async()
+        handler_after_run = signal.getsignal(signal_number)
+    finally:
+        signal.signal(signal_number, previous)
+
+    assert exit_reason == "interrupted"
+    assert ended_at >= started_at
+    # The app never mounted, so the report still lists every requested target.
+    assert [target.target for target in targets] == ["a.example", "b.example"]
+    assert [target.status for target in targets] == [TargetStatus.RESOLVING] * 2
+    # The handlers are removed once the app has exited.
+    assert handler_after_run in (signal.SIG_DFL, signal.default_int_handler)

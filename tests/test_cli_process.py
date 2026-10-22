@@ -13,12 +13,13 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX pipes and signals")
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals and ptys")
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 STARTUP_TIMEOUT = 20.0
@@ -123,4 +124,64 @@ def test_no_tui_stops_cleanly_when_the_pipe_reader_exits(tmp_path: Path) -> None
     assert returncode == 0, stderr
     assert b"Traceback" not in stderr
     assert b"Exception ignored" not in stderr
+    assert _exit_reason(report) == "interrupted"
+
+
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_tui_restores_the_terminal_and_writes_output_on_signal(
+    tmp_path: Path, signal_name: str
+) -> None:
+    # SIGTERM/SIGHUP used to kill the TUI in the alternate screen with raw
+    # mode left on and without writing --output.
+    pty = pytest.importorskip("pty")
+    termios = pytest.importorskip("termios")
+    fcntl = pytest.importorskip("fcntl")
+    signal_number = getattr(signal, signal_name)
+    if signal.getsignal(signal_number) is signal.SIG_IGN:
+        pytest.skip(f"{signal_name} is ignored by the test runner and its children")
+
+    report = tmp_path / "report.json"
+    controller, terminal = pty.openpty()
+    fcntl.ioctl(terminal, termios.TIOCSWINSZ, bytes([30, 0, 120, 0, 0, 0, 0, 0]))
+    proc = subprocess.Popen(
+        _cli_command("-i", "0.2", "--output", str(report)),
+        stdin=terminal,
+        stdout=terminal,
+        stderr=terminal,
+        env=_cli_env(TERM="xterm-256color"),
+        start_new_session=True,
+    )
+    os.close(terminal)
+    screen = bytearray()
+
+    def drain() -> None:
+        while True:
+            try:
+                chunk = os.read(controller, 65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            screen.extend(chunk)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        deadline = time.monotonic() + STARTUP_TIMEOUT
+        while b"127.0.0.1" not in screen and time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        assert b"\x1b[?1049h" in screen, "the TUI never entered the alternate screen"
+        assert b"127.0.0.1" in screen, "the TUI never rendered its target row"
+
+        proc.send_signal(signal_number)
+        returncode = proc.wait(timeout=EXIT_TIMEOUT)
+        reader.join(timeout=5.0)
+    finally:
+        _stop(proc)
+        os.close(controller)
+
+    assert returncode == 0
+    assert b"\x1b[?1049l" in screen, "the TUI did not leave the alternate screen"
     assert _exit_reason(report) == "interrupted"

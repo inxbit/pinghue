@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import errno
 import io
+import os
+import signal
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -498,6 +500,68 @@ async def test_run_no_tui_keeps_running_when_one_target_loop_fails(
     assert exit_reason == "completed"
     assert [target.status for target in targets] == [TargetStatus.ERROR, TargetStatus.HEALTHY]
     assert targets[0].error == "Unexpected probe loop error: loop bug"
+
+
+# SIGHUP ends a no-TUI run cleanly, unless it was ignored at startup.
+
+
+def test_stop_signals_include_hangup_unless_it_is_ignored() -> None:
+    hangup = getattr(signal, "SIGHUP", None)
+    if hangup is None:
+        pytest.skip("SIGHUP is not available on this platform")
+    previous = signal.signal(hangup, signal.SIG_DFL)
+    try:
+        assert set(runner.stop_signals()) == {signal.SIGINT, signal.SIGTERM, hangup}
+        signal.signal(hangup, signal.SIG_IGN)
+        assert set(runner.stop_signals()) == {signal.SIGINT, signal.SIGTERM}
+    finally:
+        signal.signal(hangup, previous)
+
+
+async def test_stop_signal_handlers_leave_an_ignored_hangup_ignored() -> None:
+    # nohup: the run must keep going after the terminal goes away.
+    hangup = getattr(signal, "SIGHUP", None)
+    if hangup is None:
+        pytest.skip("SIGHUP is not available on this platform")
+    previous = signal.signal(hangup, signal.SIG_IGN)
+    try:
+        cleanup = runner.install_stop_signal_handlers(asyncio.Event())
+        installed_handler = signal.getsignal(hangup)
+        cleanup()
+        restored_handler = signal.getsignal(hangup)
+    finally:
+        signal.signal(hangup, previous)
+
+    assert installed_handler is signal.SIG_IGN
+    assert restored_handler is signal.SIG_IGN
+
+
+async def test_run_no_tui_stops_cleanly_on_sighup(monkeypatch: pytest.MonkeyPatch) -> None:
+    hangup = getattr(signal, "SIGHUP", None)
+    if hangup is None:
+        pytest.skip("SIGHUP is not available on this platform")
+    probe_started = asyncio.Event()
+
+    async def blocked_probe(*_: object, **__: object) -> ProbeSample:
+        probe_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(runner, "probe_once", blocked_probe)
+    # Safety net: without the handler the signal is caught here and the run
+    # times out below, instead of the default action ending the test process.
+    previous = signal.signal(hangup, lambda *_: None)
+    try:
+        run_task = asyncio.create_task(run_no_tui(no_tui_args(timeout=30.0), ProbeMode.ICMP))
+        await asyncio.wait_for(probe_started.wait(), timeout=1.0)
+        os.kill(os.getpid(), hangup)
+        stopped = await settle(run_task, [])
+    finally:
+        signal.signal(hangup, previous)
+
+    assert stopped, "SIGHUP did not stop the no-TUI run"
+    _, exit_reason, _, _ = run_task.result()
+    assert exit_reason == "interrupted"
 
 
 # Per-probe lines reach a pipe promptly; a closed reader stops the run.

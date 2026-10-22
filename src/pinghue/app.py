@@ -18,8 +18,10 @@ from pinghue.config import RunConfig
 from pinghue.models import ProbeMode, SampleWindow, TargetRun, TargetStatus
 from pinghue.runner import (
     _monotonic_time,
+    _pending_target_runs,
     apply_retained_sample_budget,
     first_probe_delay,
+    install_stop_signal_callback,
     probe_target_loop,
     record_probe_loop_failure,
     resolve_run_target,
@@ -158,7 +160,9 @@ class PinghueTextualApp(App[None]):
         # One "probe now" event per row from the start, so b/B address rows by
         # index even while some targets are still resolving.
         self._immediate_events = [asyncio.Event() for _ in self.targets]
-        self._resolution_task = asyncio.create_task(self._resolve_targets())
+        # A stop signal that arrived during startup may have finished the app.
+        if not self._finishing:
+            self._resolution_task = asyncio.create_task(self._resolve_targets())
 
     async def _resolve_one_target(self, index: int, target: str) -> tuple[int, TargetRun]:
         return index, await resolve_run_target(target, self.args_config)
@@ -404,6 +408,23 @@ class PinghueApp:
 
     async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
         app = PinghueTextualApp(args=self.args, mode=self.mode)
-        await app.run_async()
+        finish_tasks: list[asyncio.Task[None]] = []
+
+        def interrupt() -> None:
+            # Textual handles only job-control signals itself; finishing through
+            # the app restores the terminal and lets run() write --output.
+            if not finish_tasks:
+                finish_tasks.append(asyncio.create_task(app._finish("interrupted")))
+
+        # Installed around the whole app run, so a signal that arrives during
+        # startup is handled too, and removed again once the app has exited.
+        cleanup_signal_handlers = install_stop_signal_callback(interrupt)
+        try:
+            await app.run_async()
+            await asyncio.gather(*finish_tasks, return_exceptions=True)
+        finally:
+            cleanup_signal_handlers()
+        # A signal before mount ends the app before it builds its target list.
+        targets = app.targets or _pending_target_runs(self.args.targets)
         ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)
-        return app.targets, app.exit_reason, app.started_at, ended_at
+        return targets, app.exit_reason, app.started_at, ended_at
