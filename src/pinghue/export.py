@@ -339,12 +339,20 @@ def _install_output_file(tmp_path: Path, output_path: Path, *, overwrite: bool, 
 def _require_writable_directory(output_path: Path) -> None:
     # The report is staged in a temporary file beside output_path and missing
     # parents are created at write time, so check the nearest existing one.
+    # lexists stops at a dangling symlink, which mkdir cannot create through.
     for directory in (output_path.parent, *output_path.parent.parents):
-        if not os.path.exists(directory):
+        if not os.path.lexists(directory):
             continue
+        if not os.path.isdir(directory):
+            raise NotADirectoryError(f"output directory is not a directory: {directory}")
         if not os.access(directory, os.W_OK | os.X_OK):
             raise PermissionError(f"output directory is not writable: {directory}")
         return
+
+
+def _require_writable_node(output_path: Path) -> None:
+    if not os.access(output_path, os.W_OK):
+        raise PermissionError(f"output path is not writable: {output_path}")
 
 
 def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
@@ -367,6 +375,7 @@ def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
     if stat.S_ISCHR(observed.st_mode) or stat.S_ISFIFO(observed.st_mode):
         _require_fifo_owner(output_path, observed)
         _refuse_whiteout_device(output_path, observed)
+        _require_writable_node(output_path)
         return
     if not stat.S_ISREG(observed.st_mode):
         raise _not_regular_file_error(output_path)
@@ -375,6 +384,7 @@ def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
     if observed.st_nlink != 1:
         raise _multiple_hard_links_error(output_path)
     _require_regular_file_owner(output_path, observed)
+    _require_writable_node(output_path)
     _require_writable_directory(output_path)
 
 

@@ -15,7 +15,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Changed
 
-- An `--output` path that would be refused is now reported before probing starts, with the same message and exit status `1`, instead of after the run. This covers an existing file without `--overwrite`, a symlink or other unsupported node, a multiply linked or foreign-owned file, a foreign-owned FIFO, a whiteout device, and an unwritable directory. A long `--duration` run no longer ends with a lost report. The write at exit still repeats every check, so a path that changes during the run is still refused.
+- An `--output` path that would be refused is now reported before probing starts, with the same message and exit status `1`, instead of after the run. This covers an existing file without `--overwrite`, a symlink or other unsupported node, a multiply linked or foreign-owned file, a foreign-owned FIFO, a whiteout device, an existing file, FIFO, or device without write permission, an unwritable directory, and a parent path that is a dangling symlink. A long `--duration` run no longer ends with a lost report. The write at exit still repeats every check, so a path that changes during the run is still refused.
 
 ### Fixed
 

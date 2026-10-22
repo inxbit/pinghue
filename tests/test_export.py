@@ -495,18 +495,77 @@ def test_check_output_path_refuses_unwritable_directory(
     existing.write_text("previous\n", encoding="utf-8")
     checked: list[Path] = []
 
-    def deny_access(path: Path, _mode: int) -> bool:
+    def deny_directories(path: Path, _mode: int) -> bool:
         checked.append(Path(path))
-        return False
+        return not os.path.isdir(path)
 
-    monkeypatch.setattr(os, "access", deny_access)
+    monkeypatch.setattr(os, "access", deny_directories)
 
     with pytest.raises(PermissionError, match="output directory is not writable"):
         check_output_path(tmp_path / "missing" / "out.json")
     with pytest.raises(PermissionError, match="output directory is not writable"):
         check_output_path(existing, overwrite=True)
 
-    assert checked == [tmp_path, tmp_path]
+    assert checked == [tmp_path, existing, tmp_path]
+
+
+def test_check_output_path_refuses_existing_node_it_cannot_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A report the operator made read-only, or a FIFO or device without write
+    # permission, would otherwise fail with EACCES only after the run.
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    fifo = tmp_path / "out.fifo"
+    os.mkfifo(fifo)
+    denied = {existing, fifo, Path("/dev/null")}
+    real_access = os.access
+    monkeypatch.setattr(
+        os, "access", lambda path, mode: Path(path) not in denied and real_access(path, mode)
+    )
+
+    for path in sorted(denied):
+        with pytest.raises(PermissionError, match="output path is not writable"):
+            check_output_path(path, overwrite=True)
+
+    assert existing.read_text(encoding="utf-8") == "previous\n"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permission bits")
+def test_check_output_path_refuses_read_only_report_before_overwrite(tmp_path: Path) -> None:
+    existing = tmp_path / "existing.json"
+    existing.write_text("previous\n", encoding="utf-8")
+    existing.chmod(0o444)
+
+    with pytest.raises(PermissionError, match="output path is not writable"):
+        check_output_path(existing, overwrite=True)
+
+
+def test_check_output_path_refuses_dangling_symlink_in_parent_chain(tmp_path: Path) -> None:
+    # A dangling symlink is not a missing directory: mkdir cannot create
+    # through it, so the write at exit would fail after the whole run.
+    (tmp_path / "logs").symlink_to(tmp_path / "missing-target")
+    regular = tmp_path / "regular"
+    regular.write_text("", encoding="utf-8")
+    regular.chmod(0o755)
+
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        check_output_path(tmp_path / "logs" / "out.json")
+    with pytest.raises(NotADirectoryError, match="not a directory"):
+        check_output_path(tmp_path / "logs" / "nested" / "out.json")
+    with pytest.raises(NotADirectoryError):
+        check_output_path(regular / "nested" / "out.json")
+
+    assert not (tmp_path / "missing-target").exists()
+
+
+def test_check_output_path_follows_symlinked_directory(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "logs").symlink_to(tmp_path / "real")
+
+    check_output_path(tmp_path / "logs" / "out.json")
+    check_output_path(tmp_path / "logs" / "nested" / "out.json")
 
 
 def test_existing_output_rejects_unsupported_socket_node(

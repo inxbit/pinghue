@@ -146,12 +146,14 @@ reader. Character devices remain accepted regardless of owner because the
 only one an unprivileged user can create is the Linux `0:0` whiteout device,
 which has no driver and is refused. These refusals exit with status 1,
 write nothing, and leave no temporary file behind. The CLI runs the
-same type, link-count, and ownership checks, plus a parent-directory
-writability check, before probing starts so a refused path does not discard a
-completed run; the write-time checks remain authoritative. The containing
-directory itself is not judged: a user who owns it, or can write to it without
-the sticky bit, can still rename, replace, or remove a finished report, so
-evidence belongs in a directory only the operator controls.
+same type, link-count, and ownership checks, plus write-permission checks on
+an existing node and on the nearest existing parent directory (which must be
+a directory, not a dangling symlink), before probing starts so a refused path
+does not discard a completed run; the write-time checks remain authoritative.
+The containing directory itself is not judged: a user who owns it, or can
+write to it without the sticky bit, can still rename, replace, or remove a
+finished report, so evidence belongs in a directory only the operator
+controls.
 
 Explicit `--overwrite` of an existing single-link regular file keeps the
 verified inode and rewrites it in place. The file must be owned by the
