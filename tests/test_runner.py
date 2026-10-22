@@ -711,7 +711,7 @@ async def test_probe_once_handles_unexpected_exceptions_gracefully(
     assert "Severe socket failure" in sample.error
 
 
-async def test_resolve_runs_limits_concurrency_with_semaphore(
+async def test_run_no_tui_limits_lookup_concurrency_with_semaphore(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_resolutions = 0
@@ -737,11 +737,13 @@ async def test_resolve_runs_limits_concurrency_with_semaphore(
     monkeypatch.setattr(runner, "_dns_semaphore", test_semaphore)
     monkeypatch.setattr(runner, "_get_dns_semaphore", lambda: test_semaphore)
 
-    args = build_args(targets=["a", "b", "c", "d"])
+    monkeypatch.setattr(runner, "probe_target_loop", _no_probe_loop)
+    args = build_args(targets=["a", "b", "c", "d"], count=1, duration=None)
 
-    await runner.resolve_runs(args)
+    runs, _, _, _ = await runner.run_no_tui(args, ProbeMode.ICMP)
 
     assert max_active_resolutions == 2
+    assert [run.resolved_address for run in runs] == ["192.0.2.1"] * 4
 
 
 async def test_resolve_run_target_converts_unexpected_exception_to_target_failure(
@@ -788,6 +790,10 @@ async def test_resolve_run_target_converts_slow_dns_to_target_failure(
     assert resolved.status == TargetStatus.DNS_FAILURE
     assert resolved.resolved_address is None
     assert resolved.error == "getaddrinfo timed out after 0.01s"
+
+
+async def _no_probe_loop(*_: object, **__: object) -> None:
+    return None
 
 
 async def _ok_probe(*_: object, **__: object) -> ProbeSample:
@@ -938,7 +944,7 @@ async def test_resolver_thread_start_failure_leaves_target_pending(
     assert stream.getvalue() == ""
 
 
-async def test_resolve_runs_resolves_healthy_names_listed_after_hung_ones(
+async def test_run_no_tui_resolves_healthy_names_listed_after_hung_ones(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Host list with a blackholed zone first, as many names as the old
@@ -946,13 +952,17 @@ async def test_resolve_runs_resolves_healthy_names_listed_after_hung_ones(
     # name with "resolver worker limit reached".
     release = threading.Event()
     monkeypatch.setattr(socket, "getaddrinfo", _blackholed_zone_getaddrinfo(release))
-    monkeypatch.setattr(runner, "DNS_LOOKUP_TIMEOUT_SECONDS", 0.05)
+    # Well above thread start and scheduling latency on a loaded machine, so
+    # healthy lookups never race the budget; the hung ones time out together.
+    monkeypatch.setattr(runner, "DNS_LOOKUP_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(runner, "probe_target_loop", _no_probe_loop)
     hung_names = [f"hang-{index}.runs.test" for index in range(16)]
     good_names = [f"ok-{index}.runs.test" for index in range(200)]
+    args = build_args(targets=hung_names + good_names, count=1, duration=None)
 
     try:
-        runs = await asyncio.wait_for(
-            runner.resolve_runs(build_args(targets=hung_names + good_names)), timeout=5.0
+        runs, _, _, _ = await asyncio.wait_for(
+            runner.run_no_tui(args, ProbeMode.ICMP), timeout=10.0
         )
     finally:
         release.set()
@@ -978,7 +988,10 @@ async def test_exhausted_resolver_threads_leave_targets_pending_until_one_frees(
     args = build_args(targets=hung_names + good_names)
 
     try:
-        runs = await asyncio.wait_for(runner.resolve_runs(args), timeout=5.0)
+        runs = await asyncio.wait_for(
+            asyncio.gather(*(runner.resolve_run_target(name, args) for name in args.targets)),
+            timeout=5.0,
+        )
         good_runs = runs[len(hung_names) :]
 
         # Every thread is held by a stuck lookup, so no lookup ran for the

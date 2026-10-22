@@ -271,18 +271,6 @@ def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
     return runs
 
 
-async def resolve_runs(args: RunConfig) -> list[TargetRun]:
-    """Resolve every target before returning, in requested order.
-
-    Neither run mode uses this: both resolve each target with
-    ``resolve_run_target`` and start probing it as soon as it resolves. It
-    remains for callers that want every lookup settled up front.
-    """
-    runs = await asyncio.gather(*(resolve_run_target(target, args) for target in args.targets))
-    apply_retained_sample_budget(runs)
-    return runs
-
-
 async def _probe_address(address: str, *, args: RunConfig, mode: ProbeMode) -> ProbeSample:
     if mode == ProbeMode.TCP:
         return await tcp_probe(address, args.port or 0, timeout_s=args.timeout)
