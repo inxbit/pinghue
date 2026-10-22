@@ -213,6 +213,48 @@ def test_main_refuses_fifo_owned_by_another_user_before_probing(
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    ("extra", "refused"),
+    [([], True), (["--output-mode", "private"], True), (["--output-mode", "umask"], False)],
+)
+def test_main_checks_fifo_permissions_against_the_output_mode_before_probing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra: list[str],
+    refused: bool,
+) -> None:
+    # The early check uses the run's --output-mode, so a private run does not
+    # probe for its whole --duration only to refuse a 0644 FIFO at exit.
+    output_path = tmp_path / "report\x1b[2J.fifo"
+    os.mkfifo(output_path)
+    output_path.chmod(0o644)
+    calls: list[object] = []
+
+    async def fake_run(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 0
+
+    import pinghue.runner as runner
+
+    monkeypatch.setattr(runner, "run", fake_run)
+
+    exit_code = main(["--no-tui", "--output", str(output_path), *extra, "127.0.0.1"])
+
+    err = capsys.readouterr().err
+    if refused:
+        assert exit_code == 1
+        assert calls == []
+        assert err.startswith("pinghue: error: refusing to write to a FIFO that other users ")
+        assert "(mode 0644); chmod 600 it or use --output-mode umask: " in err
+        assert "\x1b" not in err
+        assert "report\\x1b[2J.fifo" in err
+    else:
+        assert exit_code == 0
+        assert len(calls) == 1
+        assert err == ""
+
+
 def test_main_drops_its_messages_when_stderr_is_closed(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

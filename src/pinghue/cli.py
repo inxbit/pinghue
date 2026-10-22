@@ -89,7 +89,8 @@ def _parser() -> argparse.ArgumentParser:
         choices=("private", "umask"),
         default="private",
         help=(
-            "permissions for the --output file: 'private' (0600, owner only; default) "
+            "permissions for the --output file: 'private' (0600, owner only; default; "
+            "also refuses an existing FIFO that other users can open) "
             "or 'umask' (honor the process umask)"
         ),
     )
@@ -387,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         # before the TUI warning below, the open-file limit change and probing.
         # The check only inspects the path and holds no descriptor.
         try:
-            check_output_path(args.output, overwrite=args.overwrite)
+            check_output_path(args.output, overwrite=args.overwrite, output_mode=args.output_mode)
         except OSError as exc:
             return _report_error(exc)
 

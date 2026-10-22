@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import stat
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,12 @@ def build_target() -> TargetRun:
     )
 
 
+def _private_fifo(path: Path, mode: int = 0o600) -> None:
+    # mkfifo applies the umask, which usually leaves 0644; set the exact bits.
+    os.mkfifo(path)
+    os.chmod(path, mode)
+
+
 def _write(output_path: Path, **overrides: Any) -> None:
     kwargs: dict[str, Any] = dict(
         started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
@@ -80,7 +87,7 @@ def test_write_output_json_does_not_follow_symlink_to_device(tmp_path: Path) -> 
 
 def test_write_output_json_refuses_fifo_without_hanging(tmp_path: Path) -> None:
     output_path = tmp_path / "out.fifo"
-    os.mkfifo(output_path)
+    _private_fifo(output_path)
 
     with pytest.raises(OSError):
         _write(output_path)
@@ -92,7 +99,7 @@ def test_write_output_json_does_not_replace_fifo_when_overwrite_is_enabled(
     tmp_path: Path,
 ) -> None:
     output_path = tmp_path / "out.fifo"
-    os.mkfifo(output_path)
+    _private_fifo(output_path)
 
     with pytest.raises(OSError):
         _write(output_path, overwrite=True)
@@ -104,7 +111,7 @@ def test_existing_fifo_fd_is_blocking_after_safe_nonblocking_open(
     tmp_path: Path,
 ) -> None:
     output_path = tmp_path / "out.fifo"
-    os.mkfifo(output_path)
+    _private_fifo(output_path)
     reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
     writer_fd = -1
     try:
@@ -258,7 +265,7 @@ def test_write_output_json_refuses_fifo_owned_by_another_user(
 
 def test_write_output_json_writes_owned_fifo_with_reader(tmp_path: Path) -> None:
     output_path = tmp_path / "out.fifo"
-    os.mkfifo(output_path)
+    _private_fifo(output_path)
     reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
     try:
         _write(output_path)
@@ -285,6 +292,124 @@ def test_existing_special_device_rejects_fifo_owner_change_after_open(
         export_module._existing_special_device_fd(Path("out.fifo"))
 
     assert closed == [99]
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o620], ids=oct)
+def test_private_mode_refuses_fifo_that_other_users_can_open(tmp_path: Path, mode: int) -> None:
+    # mkfifo under the usual umask 022 makes 0644, so any local user can open
+    # the FIFO and read the report. Write access is refused too: another user
+    # could mix their own bytes into what the reader receives.
+    output_path = tmp_path / "out.fifo"
+    _private_fifo(output_path, mode)
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    message = rf"FIFO that other users can open \(mode {mode:04o}\); chmod 600 it"
+    try:
+        with pytest.raises(PermissionError, match=message):
+            check_output_path(output_path)
+        with pytest.raises(PermissionError, match=message):
+            _write(output_path)
+
+        assert os.read(reader_fd, 4096) == b""
+    finally:
+        os.close(reader_fd)
+    assert stat.S_IMODE(output_path.lstat().st_mode) == mode
+    assert _leftover_temp_files(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "output_mode"),
+    [(0o600, "private"), (0o644, "umask"), (0o666, "umask")],
+    ids=["0600-private", "0644-umask", "0666-umask"],
+)
+def test_fifo_is_written_when_its_mode_fits_the_output_mode(
+    tmp_path: Path,
+    mode: int,
+    output_mode: str,
+) -> None:
+    output_path = tmp_path / "out.fifo"
+    _private_fifo(output_path, mode)
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        check_output_path(output_path, output_mode=output_mode)
+        _write(output_path, output_mode=output_mode)
+
+        document = json.loads(os.read(reader_fd, 1 << 16).decode("utf-8"))
+    finally:
+        os.close(reader_fd)
+    assert document["run"]["host"] == "ops-laptop-04"
+    assert stat.S_IMODE(output_path.lstat().st_mode) == mode
+
+
+def test_fifo_opened_up_after_the_early_check_is_refused_when_writing(tmp_path: Path) -> None:
+    # The pre-run check is advisory; the write at exit judges the node again.
+    output_path = tmp_path / "out.fifo"
+    _private_fifo(output_path)
+    check_output_path(output_path)
+    output_path.chmod(0o644)
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(PermissionError, match="FIFO that other users can open"):
+            _write(output_path)
+
+        assert os.read(reader_fd, 4096) == b""
+    finally:
+        os.close(reader_fd)
+
+
+def test_existing_special_device_rechecks_fifo_mode_on_the_opened_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_dev=1, st_ino=10, st_uid=os.geteuid())
+    after = SimpleNamespace(st_mode=stat.S_IFIFO | 0o644, st_dev=1, st_ino=10, st_uid=os.geteuid())
+    closed: list[int] = []
+
+    monkeypatch.setattr(os, "lstat", lambda _path: before)
+    monkeypatch.setattr(os, "open", lambda _path, _flags: 99)
+    monkeypatch.setattr(os, "fstat", lambda _fd: after)
+    monkeypatch.setattr(os, "close", closed.append)
+
+    with pytest.raises(PermissionError, match=r"other users can open \(mode 0644\)"):
+        export_module._existing_special_device_fd(Path("out.fifo"))
+
+    assert closed == [99]
+
+
+def test_private_mode_accepts_a_pipe_named_in_the_descriptor_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On macOS /dev/fd/N (what process substitution passes) stats as the run's
+    # own descriptor, and a pipe there always reports mode 0660; no other user
+    # can open it through that path, so its bits are not judged.
+    descriptors = tmp_path / "fd"
+    descriptors.mkdir()
+    output_path = descriptors / "63"
+    _private_fifo(output_path, 0o660)
+    monkeypatch.setattr(export_module, "_DESCRIPTOR_DIRECTORY", str(descriptors))
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        check_output_path(output_path)
+        _write(output_path)
+
+        document = json.loads(os.read(reader_fd, 1 << 16).decode("utf-8"))
+    finally:
+        os.close(reader_fd)
+    assert document["run"]["host"] == "ops-laptop-04"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="/dev/fd entries are symlinks on Linux")
+def test_private_mode_writes_a_pipe_through_dev_fd_on_macos() -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+        output_path = Path(f"/dev/fd/{write_fd}")
+        check_output_path(output_path)
+        _write(output_path)
+
+        document = json.loads(os.read(read_fd, 1 << 16).decode("utf-8"))
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+    assert document["run"]["host"] == "ops-laptop-04"
 
 
 def test_write_output_json_allows_character_device_owned_by_another_user(
@@ -442,7 +567,7 @@ def test_check_output_path_accepts_new_and_writable_destinations(tmp_path: Path)
     check_output_path(existing, overwrite=True)
 
     fifo = tmp_path / "out.fifo"
-    os.mkfifo(fifo)
+    _private_fifo(fifo)
     check_output_path(fifo)
 
 
@@ -518,7 +643,7 @@ def test_check_output_path_refuses_existing_node_it_cannot_write(
     existing = tmp_path / "existing.json"
     existing.write_text("previous\n", encoding="utf-8")
     fifo = tmp_path / "out.fifo"
-    os.mkfifo(fifo)
+    _private_fifo(fifo)
     denied = {existing, fifo, Path("/dev/null")}
     real_access = os.access
     monkeypatch.setattr(

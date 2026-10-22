@@ -27,6 +27,12 @@ _LINUX = sys.platform.startswith("linux")
 _TEMP_NAME_EXTRA_BYTES = 8 + len(".tmp")
 _DEFAULT_NAME_MAX = 255
 
+# Read or write access for anyone but the owner: who else can open a FIFO.
+_SHARED_ACCESS_BITS = stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH
+
+# The directory whose entries name the process's own open descriptors.
+_DESCRIPTOR_DIRECTORY = "/dev/fd"
+
 
 def format_timestamp(value: datetime) -> str:
     """Return UTC RFC 3339 timestamp with millisecond precision."""
@@ -141,6 +147,34 @@ def _require_fifo_owner(output_path: Path, observed: os.stat_result) -> None:
         raise PermissionError(f"refusing to write to a FIFO owned by another user: {output_path}")
 
 
+def _is_descriptor_path(output_path: Path) -> bool:
+    # On macOS /dev/fd/N is not a symlink: it stats as the run's own open
+    # descriptor N, with mode bits that describe the descriptor rather than a
+    # node (a pipe reports 0660), and no other user can open that descriptor
+    # through the path. Process substitution hands over a pipe this way. On
+    # Linux the entries are symlinks, which are refused before this is asked.
+    try:
+        return os.path.samestat(os.stat(output_path.parent), os.stat(_DESCRIPTOR_DIRECTORY))
+    except OSError:
+        return False
+
+
+def _require_private_fifo(output_path: Path, observed: os.stat_result, output_mode: str) -> None:
+    # In private mode only the owner may read the report. A FIFO's own
+    # permission bits decide who else can open it (mkfifo under the usual
+    # umask 022 makes it 0644, readable by every local user), so a FIFO that
+    # grants group or other users read or write access is refused instead of
+    # being handed the report. --output-mode umask leaves that to the operator.
+    if output_mode != "private" or not stat.S_ISFIFO(observed.st_mode):
+        return
+    permissions = stat.S_IMODE(observed.st_mode)
+    if permissions & _SHARED_ACCESS_BITS and not _is_descriptor_path(output_path):
+        raise PermissionError(
+            f"refusing to write to a FIFO that other users can open (mode {permissions:04o}); "
+            f"chmod 600 it or use --output-mode umask: {output_path}"
+        )
+
+
 def _refuse_whiteout_device(output_path: Path, observed: os.stat_result) -> None:
     # Since Linux 5.8 any user may create the 0:0 "whiteout" character device
     # that overlay filesystems use. It has no driver, so a report written to it
@@ -158,12 +192,13 @@ def _require_regular_file_owner(output_path: Path, observed: os.stat_result) -> 
         raise PermissionError(f"refusing to overwrite a file owned by another user: {output_path}")
 
 
-def _existing_special_device_fd(output_path: Path) -> int | None:
+def _existing_special_device_fd(output_path: Path, *, output_mode: str = "private") -> int | None:
     """Return a write fd if output_path is an existing char device or FIFO.
 
-    Symlinks, unsupported special nodes, whiteout devices, and FIFOs owned by
-    another user are rejected. An opened character device or FIFO must match
-    the identity observed by lstat, closing the lstat/open replacement race.
+    Symlinks, unsupported special nodes, whiteout devices, FIFOs owned by
+    another user, and in private mode FIFOs that other users can open are
+    rejected. An opened character device or FIFO must match the identity
+    observed by lstat, closing the lstat/open replacement race.
     """
     try:
         pre = os.lstat(output_path)
@@ -174,6 +209,7 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
     if stat.S_ISLNK(pre.st_mode) or not (stat.S_ISCHR(pre.st_mode) or stat.S_ISFIFO(pre.st_mode)):
         raise _not_regular_file_error(output_path)
     _require_fifo_owner(output_path, pre)
+    _require_private_fifo(output_path, pre, output_mode)
     _refuse_whiteout_device(output_path, pre)
 
     flags = os.O_WRONLY
@@ -191,6 +227,7 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
         ):
             raise _output_changed_error(output_path)
         _require_fifo_owner(output_path, post)
+        _require_private_fifo(output_path, post, output_mode)
         if stat.S_ISFIFO(post.st_mode) and hasattr(os, "O_NONBLOCK"):
             # The nonblocking flag is needed only for the race-safe open. Once a
             # reader is present, restore normal FIFO semantics so a large report
@@ -374,7 +411,9 @@ def _temp_prefix(output_path: Path) -> str:
     return prefix
 
 
-def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
+def check_output_path(
+    path: str | Path, *, overwrite: bool = False, output_mode: str = "private"
+) -> None:
     """Raise OSError early when write_output_json would refuse path.
 
     This lets a run fail before probing instead of losing its report at exit.
@@ -393,6 +432,7 @@ def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
 
     if stat.S_ISCHR(observed.st_mode) or stat.S_ISFIFO(observed.st_mode):
         _require_fifo_owner(output_path, observed)
+        _require_private_fifo(output_path, observed, output_mode)
         _refuse_whiteout_device(output_path, observed)
         _require_writable_node(output_path)
         return
@@ -424,7 +464,7 @@ def write_output_json(
 
     output_path = Path(path)
 
-    device_fd = _existing_special_device_fd(output_path)
+    device_fd = _existing_special_device_fd(output_path, output_mode=output_mode)
     if device_fd is not None:
         with os.fdopen(device_fd, "w", encoding="utf-8") as device_file:
             device_file.write(output_text)
