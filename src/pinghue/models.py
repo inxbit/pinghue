@@ -182,6 +182,9 @@ class SampleWindow(Sequence[ProbeSample]):
         maxlen: int = MAX_TARGET_SAMPLES,
     ) -> None:
         self.maxlen = maxlen
+        # Bumped on every append and clear so the TUI can skip unchanged rows
+        # without rebuilding their cells.
+        self.revision = 0
         self._items: deque[ProbeSample] = deque()
         self._stats = _RunningSampleStats()
         for sample in samples:
@@ -192,10 +195,12 @@ class SampleWindow(Sequence[ProbeSample]):
             self._items.popleft()
         self._items.append(sample)
         self._stats.add(sample)
+        self.revision += 1
 
     def clear(self) -> None:
         self._items.clear()
         self._stats.clear()
+        self.revision += 1
 
     def summary(self) -> SummaryStats:
         return self._stats.summary()

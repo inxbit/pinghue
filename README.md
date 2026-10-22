@@ -253,6 +253,12 @@ count it as down.
 | `b` | Probe the selected host immediately. |
 | `B` | Probe all hosts immediately. |
 
+The header shows a fleet summary next to the title: how long ago the stalest host's newest result arrived (`oldest 1.2s`), then how many hosts are in each state, problems first and healthy last, so a narrow terminal cuts the least useful part. That age turns amber once it falls well behind `--interval` and `--timeout`, which means probes are not keeping up. Hosts that have sent all their `--count` probes no longer count toward it.
+
+Columns follow the terminal width so the newest history glyphs stay on screen without horizontal scrolling. On narrow terminals the history column shrinks first, then the hidden address placeholder and the mode column collapse before host names are shortened, then the host column shrinks down to 12 characters; below that the min and max columns collapse instead of squeezing host names further. Host names longer than their column keep their start and the part that tells them apart from the other hosts, with a `…` at each cut: `db-primary-001.dc1.exam…`, or `db-primar…001…` on a narrow terminal.
+
+With thousands of hosts, rows on screen refresh every half second, state changes reach every row and the header summary on the next refresh, and other values in rows scrolled out of view catch up within a few seconds, or as soon as they scroll into view. That catch-up runs in short chunks, so redrawing the table never holds up probes for long.
+
 ## History Legend
 
 The default history style is a fixed-scale colored bar:
@@ -284,6 +290,8 @@ Use `--history-style dots` or `--history-style none` when a terminal font or wor
 `pinghue` classifies each host from the **whole run**, not just the most recent probes. Once a host has replied successfully, `down` requires `--fail-threshold` consecutive failures. A run with no successful replies is `down` immediately, even if it ends before the threshold. Any packet loss, or any observed jitter above `--jitter-threshold`, latches the host as `intermittent` until you reset it (`r` or `R` in the TUI). The reported `jitter_ms` remains the current decaying RFC 3550 estimate, so it can later fall below the threshold while the whole-run status stays `intermittent`. This is intentional: a maintenance-window report should reflect everything that happened, not only the final moments.
 
 Hostnames are resolved with the operating system resolver, up to 32 lookups at a time. Each lookup gets 12 seconds, enough for the resolver to fail over from an unresponsive first nameserver (glibc waits 5 seconds per nameserver by default). A name that does not resolve shows `dns_failure` and is retried after about 10 seconds; a name whose lookups keep timing out backs off to about 30 and then 60 seconds, with jitter so failed names do not retry together. A lookup that runs out of time keeps its resolver thread until the OS resolver returns (at most 128 threads); if every thread is busy, a host waiting for one keeps its current state (`resolving` before its first lookup) and retries on its next probe instead of being reported as a DNS failure. When a resolved host keeps failing, its name is looked up again in the background, at most once per retry interval, while its known addresses keep being probed; the new answer is used only if the host is still failing. A name that resolves only to `0.0.0.0` or `::`, which DNS filters return for blocked names, is reported as `dns_failure` rather than probed.
+
+In the TUI, a host whose address is known but that has no probe result yet (just resolved, or just reset) shows `pending` rather than `resolving` or `down`; JSON output keeps the underlying status.
 
 ## Slate + Signal Palette
 

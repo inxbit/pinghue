@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.content import Content
 from textual.css.query import NoMatches
-from textual.events import Click, Key
+from textual.events import Click, Key, Resize
 from textual.widgets import DataTable, Footer, Header, Static
 
 from pinghue import __version__
@@ -30,12 +32,18 @@ from pinghue.runner import (
     stagger_window,
 )
 from pinghue.ui import (
+    CELL_PADDING,
     COLUMN_KEYS,
+    ROW_CATCH_UP_DELAY_S,
+    SCROLLBAR_WIDTH,
+    VIEWPORT_MARGIN_ROWS,
+    TargetTable,
+    TargetTableRenderer,
     apply_column_widths,
     compute_table_layout,
+    fleet_summary_parts,
     focus_table,
     format_history_legend,
-    sync_target_table,
 )
 
 SLOW_LATENCY_MS = 100.0
@@ -124,14 +132,23 @@ class PinghueTextualApp(App[None]):
         self._deadline_task: asyncio.Task[None] | None = None
         self._completion_task: asyncio.Task[None] | None = None
         self._immediate_events: list[asyncio.Event] = []
-        self._table_initialized = False
-        self._cell_cache: dict[tuple[str, str], object] = {}
+        self._table_renderer = TargetTableRenderer(
+            mode=mode.value,
+            history_style=args.history_style,
+            jitter_threshold_ms=args.jitter_threshold,
+            slow_latency_ms=SLOW_LATENCY_MS,
+            probe_count=args.count,
+        )
+        self._last_full_refresh = float("-inf")
+        self._catching_up = False
+        self._watching_scroll = False
+        self._summary_parts: list[tuple[str, str]] = []
         self._column_widths: dict[str, int] = {}
         self._finishing = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield DataTable(id="targets")
+        yield TargetTable(id="targets")
         if self.args_config.history_style != "none":
             yield Static(
                 format_history_legend(self.args_config.history_style),
@@ -179,7 +196,9 @@ class PinghueTextualApp(App[None]):
         """Resolve targets and start each probe loop as soon as its target resolves.
 
         Rows are redrawn by the UI_REFRESH_INTERVAL timer rather than once per
-        resolved target, which would rebuild the whole table N times.
+        resolved target. A resolved TargetRun replaces its placeholder in
+        ``self.targets``; the table renderer tracks rows by object identity, so
+        the next refresh re-renders exactly the rows that changed.
         """
         run_start = _monotonic_time()
         window = stagger_window(
@@ -319,32 +338,99 @@ class PinghueTextualApp(App[None]):
         await self._stop_background_task(self._deadline_task)
         await self._stop_background_task(self._completion_task)
 
-    def _refresh_table(self) -> None:
+    def _table_layout(self, table: DataTable[Any], width: int) -> dict[str, int]:
+        styles = getattr(table, "styles", None)
+        return compute_table_layout(
+            width=max(width, 1),
+            targets=self.targets,
+            show_address=self.show_address,
+            cell_padding=getattr(table, "cell_padding", CELL_PADDING),
+            scrollbar_width=getattr(styles, "scrollbar_size_vertical", SCROLLBAR_WIDTH),
+        )
+
+    def _priority_rows(self, table: DataTable[Any]) -> range:
+        """Return the rows on screen plus a small margin, refreshed every pass."""
+        if not isinstance(table, DataTable):
+            return range(len(self.targets))
+        top = int(table.scroll_y)
+        return range(
+            max(0, top - VIEWPORT_MARGIN_ROWS),
+            top + table.size.height + VIEWPORT_MARGIN_ROWS,
+        )
+
+    def _refresh_table(self, width: int | None = None) -> None:
         try:
             table = self.query_one("#targets", DataTable)
         except NoMatches:
             return
-        column_widths = compute_table_layout(
-            width=max(self.size.width, 1),
-            targets=self.targets,
-            show_address=self.show_address,
-        )
+        column_widths = self._table_layout(table, self.size.width if width is None else width)
         if column_widths != self._column_widths:
             apply_column_widths(table, column_widths)
             self._column_widths = column_widths
+        self._table_renderer.set_layout(show_address=self.show_address, widths=column_widths)
+        if not self._watching_scroll and isinstance(table, DataTable):
+            # Rows scrolled into view are refreshed before they are painted.
+            self.watch(table, "scroll_y", self._refresh_visible_rows, init=False)
+            self._watching_scroll = True
 
-        self._table_initialized = sync_target_table(
+        # Back-to-back calls (key actions, resizes) refresh only the
+        # viewport; the timer pass does the rest.
+        now = time.perf_counter()
+        full = now - self._last_full_refresh >= UI_REFRESH_INTERVAL / 2
+        if full:
+            self._last_full_refresh = now
+        summary = self._table_renderer.sync(
             table,
             self.targets,
-            initialized=self._table_initialized,
-            show_address=self.show_address,
-            mode=self.mode.value,
-            history_width=self._column_widths["history"],
-            history_style=self.args_config.history_style,
-            jitter_threshold_ms=self.args_config.jitter_threshold,
-            slow_latency_ms=SLOW_LATENCY_MS,
-            cell_cache=self._cell_cache,
+            priority=self._priority_rows(table),
+            full=full,
         )
+        if summary is not None:
+            stale_after = 2 * (
+                max(self.args_config.interval, self.args_config.timeout) + self.args_config.timeout
+            )
+            self._summary_parts = fleet_summary_parts(summary, stale_after_s=stale_after)
+            self.sub_title = "".join(text for text, _style in self._summary_parts)
+        self._schedule_row_catch_up()
+
+    def _schedule_row_catch_up(self) -> None:
+        # Rows a full pass owes beyond its time budget are refreshed in short
+        # chunks with the event loop free in between, not in one long block.
+        if self._table_renderer.behind and not self._catching_up:
+            self._catching_up = True
+            self.set_timer(ROW_CATCH_UP_DELAY_S, self._catch_up_rows)
+
+    def _catch_up_rows(self) -> None:
+        self._catching_up = False
+        try:
+            table = self.query_one("#targets", DataTable)
+        except NoMatches:
+            return
+        self._table_renderer.catch_up(table, self.targets)
+        self._schedule_row_catch_up()
+
+    def _refresh_visible_rows(self) -> None:
+        try:
+            table = self.query_one("#targets", DataTable)
+        except NoMatches:
+            return
+        self._table_renderer.sync(
+            table,
+            self.targets,
+            priority=self._priority_rows(table),
+            full=False,
+        )
+
+    def format_title(self, title: str, sub_title: str) -> Content:
+        # The header shows the fleet summary in color after the title.
+        if not sub_title or not self._summary_parts:
+            return super().format_title(title, sub_title)
+        return Content.assemble(Content(title), ("  ", ""), *self._summary_parts)
+
+    def on_resize(self, event: Resize) -> None:
+        # Runs before App._on_resize records the new size: lay the columns out
+        # for the new width now instead of up to one refresh interval later.
+        self._refresh_table(width=event.size.width)
 
     def on_click(self, event: Click) -> None:
         event.prevent_default()
