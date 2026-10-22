@@ -148,11 +148,11 @@ def _require_fifo_owner(output_path: Path, observed: os.stat_result) -> None:
 
 
 def _is_descriptor_path(output_path: Path) -> bool:
-    # On macOS /dev/fd/N is not a symlink: it stats as the run's own open
-    # descriptor N, with mode bits that describe the descriptor rather than a
-    # node (a pipe reports 0660), and no other user can open that descriptor
-    # through the path. Process substitution hands over a pipe this way. On
-    # Linux the entries are symlinks, which are refused before this is asked.
+    # On macOS /dev/fd/N is not a symlink: it names the run's own open
+    # descriptor N, and opening it duplicates that descriptor, so no other
+    # process can change what the path opens. Process substitution hands over
+    # a pipe this way. On Linux the entries are symlinks, which are refused
+    # before this is asked.
     try:
         return os.path.samestat(os.stat(output_path.parent), os.stat(_DESCRIPTOR_DIRECTORY))
     except OSError:
@@ -226,8 +226,14 @@ def _existing_special_device_fd(output_path: Path, *, output_mode: str = "privat
 
     try:
         post = os.fstat(fd)
-        if (post.st_dev, post.st_ino) != (pre.st_dev, pre.st_ino) or not (
-            stat.S_ISCHR(post.st_mode) or stat.S_ISFIFO(post.st_mode)
+        # On macOS lstat of /dev/fd/N reports the device of /dev itself (and,
+        # for a pipe, a truncated inode number) rather than the open file's,
+        # so it never matches fstat there. Opening /dev/fd/N duplicates the
+        # run's own descriptor, which no other process can replace, so that
+        # descriptor is judged as opened by the checks below instead.
+        if not (stat.S_ISCHR(post.st_mode) or stat.S_ISFIFO(post.st_mode)) or (
+            (post.st_dev, post.st_ino) != (pre.st_dev, pre.st_ino)
+            and not _is_descriptor_path(output_path)
         ):
             raise _output_changed_error(output_path)
         _require_fifo_owner(output_path, post)

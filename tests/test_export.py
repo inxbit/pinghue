@@ -377,18 +377,93 @@ def test_existing_special_device_rechecks_fifo_mode_on_the_opened_node(
     assert closed == [99]
 
 
+def _descriptor_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int) -> Path:
+    # Stand in for a macOS /dev/fd/N entry: a FIFO in a directory that the
+    # export module takes for the descriptor directory.
+    descriptors = tmp_path / "fd"
+    descriptors.mkdir()
+    entry = descriptors / "63"
+    _private_fifo(entry, mode)
+    monkeypatch.setattr(export_module, "_DESCRIPTOR_DIRECTORY", str(descriptors))
+    return entry
+
+
+def _stat_entry_as(
+    monkeypatch: pytest.MonkeyPatch,
+    entry: Path,
+    *,
+    listed: dict[str, int],
+    opened: dict[str, int] | None = None,
+) -> None:
+    # Report the fields macOS gives for entry: `listed` replaces fields of its
+    # lstat, `opened` fields of fstat on a descriptor opened on it.
+    real_lstat = os.lstat
+    real_fstat = os.fstat
+    node = real_lstat(entry)
+
+    def replaced(result: os.stat_result, fields: dict[str, int]) -> SimpleNamespace:
+        names = ("st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_rdev")
+        return SimpleNamespace(**{**{name: getattr(result, name) for name in names}, **fields})
+
+    def entry_lstat(path: Any, *args: Any, **kwargs: Any) -> object:
+        result = real_lstat(path, *args, **kwargs)
+        return replaced(result, listed) if os.fspath(path) == os.fspath(entry) else result
+
+    def entry_fstat(fd: int) -> object:
+        result = real_fstat(fd)
+        if opened is None or (result.st_dev, result.st_ino) != (node.st_dev, node.st_ino):
+            return result
+        return replaced(result, opened)
+
+    monkeypatch.setattr(os, "lstat", entry_lstat)
+    monkeypatch.setattr(os, "fstat", entry_fstat)
+
+
 def test_private_mode_accepts_a_pipe_named_in_the_descriptor_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # On macOS /dev/fd/N (what process substitution passes) stats as the run's
-    # own descriptor, and a pipe there always reports mode 0660; no other user
-    # can open it through that path, so its bits are not judged.
-    descriptors = tmp_path / "fd"
-    descriptors.mkdir()
-    output_path = descriptors / "63"
-    _private_fifo(output_path, 0o660)
-    monkeypatch.setattr(export_module, "_DESCRIPTOR_DIRECTORY", str(descriptors))
+    # On macOS /dev/fd/N (what process substitution passes) names the run's
+    # own descriptor. For a pipe, lstat reports no links, mode 0660 less the
+    # access the descriptor lacks (0220 for a write end) and the device of
+    # /dev, and fstat of the opened descriptor reports no links, mode 0660 and
+    # device 0. No other user can open a pipe, so its bits are not judged,
+    # and the two identities never match, so the opened descriptor is judged
+    # on its own. The stand-in FIFO really is 0660 with one link: only the
+    # pipe's stat lets it through.
+    output_path = _descriptor_entry(tmp_path, monkeypatch, 0o660)
+    device = output_path.lstat().st_dev
+    _stat_entry_as(
+        monkeypatch,
+        output_path,
+        listed={"st_mode": stat.S_IFIFO | 0o220, "st_nlink": 0, "st_dev": device},
+        opened={"st_mode": stat.S_IFIFO | 0o660, "st_nlink": 0, "st_dev": 0},
+    )
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        check_output_path(output_path)
+        _write(output_path)
+
+        document = json.loads(os.read(reader_fd, 1 << 16).decode("utf-8"))
+    finally:
+        os.close(reader_fd)
+    assert document["run"]["host"] == "ops-laptop-04"
+
+
+def test_private_fifo_named_in_the_descriptor_directory_is_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A named FIFO reached through macOS /dev/fd/N keeps its link count, and
+    # lstat reports the device of /dev rather than the FIFO's: a 0600 FIFO
+    # passes as opened even though the two identities differ.
+    output_path = _descriptor_entry(tmp_path, monkeypatch, 0o600)
+    device = output_path.lstat().st_dev
+    _stat_entry_as(
+        monkeypatch,
+        output_path,
+        listed={"st_mode": stat.S_IFIFO | 0o200, "st_dev": device + 1},
+    )
     reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
     try:
         check_output_path(output_path)
