@@ -113,7 +113,9 @@ def test_parse_host_file_rejects_invalid_utf8(tmp_path: Path) -> None:
     "separator",
     ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"],
 )
-def test_parse_host_file_splits_lines_only_on_newline(tmp_path: Path, separator: str) -> None:
+def test_parse_host_file_keeps_other_line_breaks_inside_the_line(
+    tmp_path: Path, separator: str
+) -> None:
     # str.splitlines() also breaks on these characters; one host-file line must
     # stay one target so target validation sees the character.
     path = tmp_path / "hosts.txt"
@@ -140,7 +142,7 @@ def test_parse_host_file_line_numbers_ignore_unicode_separators(tmp_path: Path) 
         parse_host_file(path)
 
 
-def test_parse_host_file_line_limit_counts_newlines_only(tmp_path: Path) -> None:
+def test_parse_host_file_line_limit_counts_only_real_line_ends(tmp_path: Path) -> None:
     path = tmp_path / "hosts.txt"
     lines = [f"host-{index}" for index in range(MAX_HOST_FILE_LINES)]
     lines[0] = "host-a\u2028host-b\x85host-c"
