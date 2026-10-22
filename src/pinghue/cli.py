@@ -24,6 +24,18 @@ HOST_LABEL_MAXIMUM = 128
 HISTORY_STYLES = ("bar", "dots", "sparkline", "none")
 
 
+def _output_path(value: str) -> Path:
+    path = Path(value)
+    if value == "-" or str(path) != "-":
+        return path
+    # pathlib collapses "./-" to "-", the stdout marker; an explicit relative
+    # spelling names a file called "-" in the current directory instead.
+    try:
+        return Path.cwd() / path
+    except OSError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pinghue",
@@ -59,7 +71,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        type=Path,
+        type=_output_path,
         help="write a JSON run summary to PATH on exit ('-' for stdout)",
     )
     parser.add_argument(

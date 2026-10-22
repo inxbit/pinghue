@@ -295,6 +295,36 @@ def test_parse_args_accepts_output_dash_with_no_tui() -> None:
     assert args.no_tui is True
 
 
+def test_parse_args_keeps_dot_slash_dash_as_a_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # pathlib collapses "./-" to "-"; the explicit spelling must still name a
+    # file instead of selecting stdout (or failing the TUI's stdout rule).
+    monkeypatch.chdir(tmp_path)
+
+    for argv in (["--no-tui"], []):
+        args = parse_args(["--output", "./-", *argv, "1.1.1.1"])
+        assert args.output == tmp_path / "-"
+        assert str(args.output) != "-"
+
+
+def test_parse_args_reports_unreadable_working_directory_for_dot_slash_dash(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def missing_cwd() -> Path:
+        raise FileNotFoundError("current directory was removed")
+
+    monkeypatch.setattr(Path, "cwd", staticmethod(missing_cwd))
+
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--output", "./-", "--no-tui", "1.1.1.1"])
+
+    assert excinfo.value.code == 2
+    assert "argument --output" in capsys.readouterr().err
+
+
 def test_parse_args_allows_check_with_output_dash() -> None:
     # --check ignores --output entirely; the --no-tui requirement only
     # applies to probe runs.

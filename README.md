@@ -201,7 +201,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `-c, --count N` | continuous | Stop after `N` probes per target. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
-| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. A path that would be refused is reported before probing starts. |
+| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document; `./-` names a file. Existing regular files are not replaced unless `--overwrite` is set. A path that would be refused is reported before probing starts. |
 | `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file owned by the current user in place. The rewrite is type-safe but not crash-atomic. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
