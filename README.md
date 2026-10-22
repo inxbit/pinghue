@@ -150,7 +150,7 @@ Starting with `1.0.0`, release versions follow semantic versioning: patch releas
 
 `2.0.0` changes the default `--output` behavior: existing regular files are preserved unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
 
-The next major release uses the security exception above for `--output` paths through which another local user could read the report: it refuses an existing FIFO owned by another user, an existing FIFO that group or other users can open in the default `private` output mode, and an `--overwrite` target owned by another user (see [JSON Output](#json-output)).
+The next major release uses the security exception above for `--output` paths through which another local user could read the report: it refuses an existing FIFO owned by another user, an existing FIFO that group or other users can open in the default `private` output mode, and an `--overwrite` target owned by another user (see [JSON Output](#json-output)). It uses the same exception for host files, whose lines end only at `\n`, `\r\n`, or a lone `\r`: a host file that separates targets with vertical tabs, form feeds, file/group/record separators, or NEL is refused as an invalid target, and Unicode line and paragraph separators no longer split a line (see [Quick Start](#quick-start)). The same release treats `--output ./-` as a file named `-` in the current directory; only a bare `-` writes the report to stdout.
 
 ## Modes
 
