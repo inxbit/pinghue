@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
-from typing import Any, TypeVar
+from typing import Any
 
 from pinghue.icmp import UNREACHABLE_ERRNOS as UNREACHABLE_ERRNOS
 from pinghue.icmp import engine_for_running_loop
@@ -23,7 +23,6 @@ from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 MAX_FAILOVER_ADDRESSES = 8
 MAX_DNS_DAEMON_THREADS = 128
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
-_T = TypeVar("_T")
 
 # A clean TCP close finishes on the next loop iteration; this only bounds a
 # teardown that stalls after the connect was already measured.
