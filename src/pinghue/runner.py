@@ -279,6 +279,18 @@ def stagger_delay(*, index: int, count: int, interval: float) -> float:
     return round((interval / count) * index, 6)
 
 
+def _cancel_requested() -> bool:
+    """Return whether the running task has a pending cancellation request.
+
+    ``Task.cancelling()`` is new in Python 3.11. On 3.10 this is always False
+    and loops rely on the stop event, which both modes set before cancelling.
+    """
+    if sys.version_info < (3, 11):
+        return False
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 async def probe_target_loop(
     target: TargetRun,
     *,
@@ -294,7 +306,10 @@ async def probe_target_loop(
     """Run one target's probe loop without blocking other targets or UI refresh.
 
     Both the TUI and no-TUI mode drive their probes through this loop; no-TUI
-    mode passes ``on_sample`` to print each result as it lands.
+    mode passes ``on_sample`` to print each result as it lands. Shutdown sets
+    ``stop_event`` before cancelling the task, so the loop ends even when a
+    probe swallows its cancellation; a result such a probe returns was
+    measured before the stop and is still reported.
     """
     if initial_delay > 0:
         stop_wait = asyncio.create_task(stop_event.wait())
@@ -328,7 +343,10 @@ async def probe_target_loop(
         if probe_limit is not None and probes_completed >= probe_limit:
             return
 
-        if stop_event.is_set():
+        # A probe may swallow the cancellation that shutdown sends it (TCP
+        # close teardown keeps a success measured before the stop), so check
+        # for a stop here rather than waiting out another interval.
+        if stop_event.is_set() or _cancel_requested():
             return
 
         # Subtract the probe's own duration so cadence tracks the interval even
@@ -440,6 +458,10 @@ async def _run_probe_loops_until_shutdown(
                 raise error
         return None
     finally:
+        # Set the stop event before cancelling: a probe that swallows its
+        # cancellation (TCP close teardown) then ends its loop instead of
+        # probing on past the deadline and keeping the run alive.
+        stop_event.set()
         for task in tasks:
             task.cancel()
         all_loops.cancel()
