@@ -74,7 +74,9 @@ def _check_dgram_icmp_socket(
     except PermissionError as exc:
         return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}")
     except OSError as exc:
-        return IcmpSocketCheck(False, f"{descriptor} → {type(exc).__name__}: {exc}")
+        return IcmpSocketCheck(
+            False, f"{descriptor} → {type(exc).__name__}: {sanitize_display(str(exc))}"
+        )
 
     probe_socket.close()
     return IcmpSocketCheck(True, f"{descriptor} succeeded")
@@ -151,7 +153,7 @@ def _loopback_icmp_probe(address: str = "127.0.0.1") -> tuple[float | None, str 
 
         result = ping(address, count=1, timeout=1, privileged=False)
     except Exception as exc:  # noqa: BLE001 - doctor reports exact environment failures
-        return None, f"{type(exc).__name__}: {exc}"
+        return None, sanitize_display(f"{type(exc).__name__}: {exc}")
 
     if not result.is_alive:
         return None, "timeout"
@@ -165,8 +167,10 @@ def _write_header(lines: list[str]) -> None:
             f"pinghue {__version__} — environment check",
             "",
             "System",
-            f"  OS              {_os_label()}",
-            f"  Python          {platform.python_version()} ({sys.executable})",
+            # OS metadata (for example os-release in a container image) and the
+            # interpreter path are not PingHue-controlled text.
+            f"  OS              {sanitize_display(_os_label())}",
+            f"  Python          {platform.python_version()} ({sanitize_display(sys.executable)})",
             f"  Effective UID   {_uid_label()}",
             "",
         ]
