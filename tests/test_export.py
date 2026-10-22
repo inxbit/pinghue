@@ -362,8 +362,12 @@ def test_fifo_opened_up_after_the_early_check_is_refused_when_writing(tmp_path: 
 def test_existing_special_device_rechecks_fifo_mode_on_the_opened_node(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    before = SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_dev=1, st_ino=10, st_uid=os.geteuid())
-    after = SimpleNamespace(st_mode=stat.S_IFIFO | 0o644, st_dev=1, st_ino=10, st_uid=os.geteuid())
+    before = SimpleNamespace(
+        st_mode=stat.S_IFIFO | 0o600, st_dev=1, st_ino=10, st_nlink=1, st_uid=os.geteuid()
+    )
+    after = SimpleNamespace(
+        st_mode=stat.S_IFIFO | 0o644, st_dev=1, st_ino=10, st_nlink=1, st_uid=os.geteuid()
+    )
     closed: list[int] = []
 
     monkeypatch.setattr(os, "lstat", lambda _path: before)
@@ -475,6 +479,55 @@ def test_private_fifo_named_in_the_descriptor_directory_is_written(
     assert document["run"]["host"] == "ops-laptop-04"
 
 
+@pytest.mark.parametrize(
+    "listed_mode",
+    [0o200, 0o644],
+    ids=["write-only-descriptor", "read-write-descriptor"],
+)
+def test_private_mode_refuses_a_shared_fifo_named_in_the_descriptor_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    listed_mode: int,
+) -> None:
+    # pinghue --output /dev/fd/3 3>report.fifo on macOS: descriptor 3 names a
+    # 0644 FIFO that every local user can open, so it is refused like
+    # --output report.fifo, before probing starts and again when writing.
+    # lstat of /dev/fd/3 drops the access the descriptor lacks, so a
+    # write-only descriptor lists 0200 and only the opened descriptor shows
+    # 0644; the FIFO's link count keeps it from passing as a pipe either way.
+    output_path = _descriptor_entry(tmp_path, monkeypatch, 0o644)
+    device = output_path.lstat().st_dev
+    _stat_entry_as(
+        monkeypatch,
+        output_path,
+        listed={"st_mode": stat.S_IFIFO | listed_mode, "st_dev": device + 1},
+    )
+    reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
+    message = r"FIFO that other users can open \(mode 0644\)"
+    try:
+        with pytest.raises(PermissionError, match=message):
+            check_output_path(output_path)
+        with pytest.raises(PermissionError, match=message):
+            _write(output_path)
+
+        assert os.read(reader_fd, 4096) == b""
+    finally:
+        os.close(reader_fd)
+
+
+def test_unlinked_shared_fifo_outside_the_descriptor_directory_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Only the descriptor directory makes a link count of 0 mean a pipe.
+    shared = SimpleNamespace(
+        st_mode=stat.S_IFIFO | 0o644, st_dev=1, st_ino=10, st_nlink=0, st_uid=os.geteuid()
+    )
+    monkeypatch.setattr(os, "lstat", lambda _path: shared)
+
+    with pytest.raises(PermissionError, match=r"other users can open \(mode 0644\)"):
+        check_output_path(Path("out.fifo"))
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="/dev/fd entries are symlinks on Linux")
 def test_private_mode_writes_a_pipe_through_dev_fd_on_macos() -> None:
     read_fd, write_fd = os.pipe()
@@ -488,6 +541,40 @@ def test_private_mode_writes_a_pipe_through_dev_fd_on_macos() -> None:
         os.close(read_fd)
         os.close(write_fd)
     assert document["run"]["host"] == "ops-laptop-04"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="/dev/fd entries are symlinks on Linux")
+@pytest.mark.parametrize("mode", [0o600, 0o644], ids=["0600", "0644"])
+def test_private_mode_judges_a_named_fifo_through_dev_fd_on_macos(
+    tmp_path: Path, mode: int
+) -> None:
+    fifo_path = tmp_path / "report.fifo"
+    _private_fifo(fifo_path, mode)
+    reader_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+    writer_fd = os.open(fifo_path, os.O_WRONLY | os.O_NONBLOCK)
+    output_path = Path(f"/dev/fd/{writer_fd}")
+    try:
+        if mode == 0o600:
+            check_output_path(output_path)
+            _write(output_path)
+        else:
+            message = r"FIFO that other users can open \(mode 0644\)"
+            with pytest.raises(PermissionError, match=message):
+                check_output_path(output_path)
+            with pytest.raises(PermissionError, match=message):
+                _write(output_path)
+        os.close(writer_fd)
+        writer_fd = -1
+
+        received = os.read(reader_fd, 1 << 16)
+    finally:
+        if writer_fd >= 0:
+            os.close(writer_fd)
+        os.close(reader_fd)
+    if mode == 0o600:
+        assert json.loads(received.decode("utf-8"))["run"]["host"] == "ops-laptop-04"
+    else:
+        assert received == b""
 
 
 def test_write_output_json_allows_character_device_owned_by_another_user(

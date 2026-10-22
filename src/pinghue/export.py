@@ -159,6 +159,18 @@ def _is_descriptor_path(output_path: Path) -> bool:
         return False
 
 
+def _is_anonymous_pipe(output_path: Path, observed: os.stat_result) -> bool:
+    # A pipe has no name, so it reports no links: on macOS lstat of /dev/fd/N
+    # and fstat of the opened descriptor both give st_nlink 0 for a pipe. Its
+    # mode bits are fixed rather than the pipe's own (fstat reports 0660, and
+    # lstat reports 0660 less the access the descriptor lacks, 0220 for a
+    # write end), and only processes holding one of its descriptors can use
+    # it, so the bits are not judged. A named FIFO reached through /dev/fd/N
+    # keeps its link count, at least 1 while it has a name, and fstat reports
+    # its own mode, so it is judged like any other FIFO.
+    return observed.st_nlink == 0 and _is_descriptor_path(output_path)
+
+
 def _require_private_fifo(output_path: Path, observed: os.stat_result, output_mode: str) -> None:
     # In private mode only the owner may read the report. A FIFO's own
     # permission bits decide who else can open it (mkfifo under the usual
@@ -171,7 +183,7 @@ def _require_private_fifo(output_path: Path, observed: os.stat_result, output_mo
     if output_mode != "private" or not stat.S_ISFIFO(observed.st_mode):
         return
     permissions = stat.S_IMODE(observed.st_mode)
-    if permissions & _SHARED_ACCESS_BITS and not _is_descriptor_path(output_path):
+    if permissions & _SHARED_ACCESS_BITS and not _is_anonymous_pipe(output_path, observed):
         raise PermissionError(
             f"refusing to write to a FIFO that other users can open (mode {permissions:04o}); "
             f"remove it and recreate it with mkfifo -m 600, or use --output-mode umask: "
@@ -445,6 +457,15 @@ def check_output_path(
         _require_private_fifo(output_path, observed, output_mode)
         _refuse_whiteout_device(output_path, observed)
         _require_writable_node(output_path)
+        if _is_descriptor_path(output_path):
+            # On macOS lstat of /dev/fd/N drops the access the descriptor
+            # lacks (a write-only descriptor to a 0644 FIFO reports 0200), so
+            # judge the open file as the write will. Opening /dev/fd/N only
+            # duplicates the run's own descriptor, so the FIFO's reader sees
+            # nothing of it.
+            descriptor_fd = _existing_special_device_fd(output_path, output_mode=output_mode)
+            if descriptor_fd is not None:
+                os.close(descriptor_fd)
         return
     if not stat.S_ISREG(observed.st_mode):
         raise _not_regular_file_error(output_path)
