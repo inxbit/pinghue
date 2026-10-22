@@ -12,6 +12,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - Failed DNS lookups now retry with jitter so names that failed together do not retry in lockstep, and a name whose lookups keep timing out backs off to 30 and then 60 seconds; a one-off failure still retries after about 10 seconds.
 - Raised the DNS lookup budget from 5 to 12 seconds, above glibc's default 5-second per-nameserver timeout, so an unresponsive first nameserver in `/etc/resolv.conf` no longer turns every hostname into `dns_failure`; `pinghue --check` uses the same budget.
 - A hostname that resolves after an earlier DNS failure now shows `resolving` until its first probe result instead of `down`.
+- A host whose known addresses keep failing now has its name looked up again in the background while those addresses keep being probed, so a slow or unresponsive DNS server no longer pauses its probes or delays showing its recovery. The new answer is used only if the host is still failing, and IP-literal targets skip the lookup.
 
 ### Security
 

@@ -70,6 +70,13 @@ class _DnsRetry:
 _dns_retries: dict[str, _DnsRetry] = {}
 _dns_retries_loop: asyncio.AbstractEventLoop | None = None
 
+# Stale-address refreshes running beside their targets' probes, at most one per
+# target. Keyed by id(target); the entry holds the target, so the id stays its
+# own until a later probe takes the finished lookup.
+_DnsRefreshes = dict[int, tuple[TargetRun, asyncio.Task[ResolvedTarget | None]]]
+_dns_refreshes: _DnsRefreshes = {}
+_dns_refreshes_loop: asyncio.AbstractEventLoop | None = None
+
 
 def _monotonic_time() -> float:
     return time.monotonic()
@@ -95,10 +102,24 @@ def _get_dns_retries() -> dict[str, _DnsRetry]:
     return _dns_retries
 
 
+def _get_dns_refreshes() -> _DnsRefreshes:
+    global _dns_refreshes, _dns_refreshes_loop
+    loop = asyncio.get_running_loop()
+    if _dns_refreshes_loop is not loop:
+        _dns_refreshes = {}
+        _dns_refreshes_loop = loop
+    return _dns_refreshes
+
+
 def _dns_retry_delay(target: str) -> float:
     """Return how long after its last finished lookup a name may be looked up again."""
     retry = _get_dns_retries().get(target)
     return DNS_RETRY_INTERVAL_SECONDS if retry is None else retry.delay_s
+
+
+def _resolve_cooldown_elapsed(target: TargetRun, now: float) -> bool:
+    last_resolve_time = target._last_resolve_time
+    return last_resolve_time is None or now - last_resolve_time >= _dns_retry_delay(target.target)
 
 
 def _record_dns_outcome(target: str, *, failed: bool, timed_out: bool) -> None:
@@ -247,6 +268,60 @@ async def _probe_address(address: str, *, args: RunConfig, mode: ProbeMode) -> P
     )
 
 
+def _is_ip_literal(target: str) -> bool:
+    try:
+        family_from_ip(target)
+    except ValueError:
+        return False
+    return True
+
+
+async def _refresh_lookup(target: TargetRun, family: AddressFamily) -> ResolvedTarget | None:
+    try:
+        return await _resolve_target_bounded(target.target, family, numeric=False)
+    except Exception:
+        # A refresh only ever replaces addresses; a failed one keeps them.
+        return None
+    finally:
+        # Anchor the cooldown to completion, capacity misses included, so a
+        # refresh queued behind the resolver bound is not reissued at once.
+        target._last_resolve_time = _monotonic_time()
+
+
+def _refresh_stale_resolution(target: TargetRun, *, args: RunConfig, now: float) -> None:
+    """Look a failing target's name up again without delaying its probes.
+
+    The lookup runs as a background task, at most one per target, while the
+    known addresses keep being probed: a slow or hung lookup (a dead
+    nameserver, a blackholed zone) or a busy resolver must not hide a recovery.
+    The first probe after the lookup finishes applies a new answer if the
+    target is still failing. IP-literal targets have nothing to look up.
+    """
+    refreshes = _get_dns_refreshes()
+    stale = (
+        not args.numeric
+        and target.status != TargetStatus.PERMISSION_DENIED
+        and target.samples.consecutive_failures >= args.fail_threshold
+    )
+    running = refreshes.get(id(target))
+    if running is not None:
+        task = running[1]
+        if not task.done():
+            return
+        del refreshes[id(target)]
+        resolved = None if task.cancelled() else task.result()
+        if stale and resolved is not None and not resolved.error and resolved.address:
+            target.resolved_address = resolved.address
+            target.resolved_family = resolved.family
+            target.resolved_addresses = resolved.addresses
+
+    if not stale or _is_ip_literal(target.target) or not _resolve_cooldown_elapsed(target, now):
+        return
+    target._last_resolve_time = now
+    task = asyncio.create_task(_refresh_lookup(target, AddressFamily(args.address_family)))
+    refreshes[id(target)] = (target, task)
+
+
 async def probe_once(
     target: TargetRun,
     *,
@@ -255,29 +330,18 @@ async def probe_once(
     semaphore: asyncio.Semaphore,
 ) -> ProbeSample | None:
     now = _monotonic_time()
-    last_resolve_time = target._last_resolve_time
-    needs_resolution = not target.resolved_address
-    wants_refresh = (
-        not needs_resolution
-        and not args.numeric
-        and target.status != TargetStatus.PERMISSION_DENIED
-        and target.samples.consecutive_failures >= args.fail_threshold
-    )
-    resolve_cooldown_elapsed = (needs_resolution or wants_refresh) and (
-        last_resolve_time is None or now - last_resolve_time >= _dns_retry_delay(target.target)
-    )
-    refresh_stale_resolution = wants_refresh and resolve_cooldown_elapsed
-
-    if needs_resolution or refresh_stale_resolution:
-        if needs_resolution and not resolve_cooldown_elapsed:
+    if target.resolved_address:
+        _refresh_stale_resolution(target, args=args, now=now)
+    else:
+        if not _resolve_cooldown_elapsed(target, now):
             return None
+        last_resolve_time = target._last_resolve_time
         target._last_resolve_time = now
-        family = AddressFamily(args.address_family)
         resolved: ResolvedTarget | None
         try:
             resolved = await _resolve_target_bounded(
                 target.target,
-                family,
+                AddressFamily(args.address_family),
                 numeric=args.numeric,
             )
         except Exception as exc:
@@ -288,26 +352,22 @@ async def probe_once(
             # DNS verdict: keep the target's state and retry on the next
             # iteration rather than after the DNS cooldown.
             target._last_resolve_time = last_resolve_time
-            if needs_resolution:
-                return None
-        else:
-            # Anchor the cooldown to completion so targets queued behind the
-            # resolver semaphore do not immediately issue another lookup.
-            target._last_resolve_time = _monotonic_time()
-            if resolved.error:
-                if needs_resolution:
-                    target.status = TargetStatus.DNS_FAILURE
-                    target.error = resolved.error
-                    return None
-            elif resolved.address is not None:
-                target.resolved_address = resolved.address
-                target.resolved_family = resolved.family
-                target.resolved_addresses = resolved.addresses
-                if needs_resolution:
-                    # Resolved but not probed yet: stay pending, not DOWN,
-                    # until the first sample lands.
-                    target.status = TargetStatus.RESOLVING
-                    target.error = None
+            return None
+        # Anchor the cooldown to completion so targets queued behind the
+        # resolver semaphore do not immediately issue another lookup.
+        target._last_resolve_time = _monotonic_time()
+        if resolved.error:
+            target.status = TargetStatus.DNS_FAILURE
+            target.error = resolved.error
+            return None
+        if resolved.address is not None:
+            target.resolved_address = resolved.address
+            target.resolved_family = resolved.family
+            target.resolved_addresses = resolved.addresses
+            # Resolved but not probed yet: stay pending, not DOWN, until the
+            # first sample lands.
+            target.status = TargetStatus.RESOLVING
+            target.error = None
 
     primary = target.resolved_address
     if not primary:

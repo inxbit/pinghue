@@ -361,26 +361,44 @@ async def test_initial_resolution_starts_cooldown_and_prevents_immediate_retry(
     assert retry_calls == 0
 
 
+def _timeout_sample() -> ProbeSample:
+    return ProbeSample(
+        timestamp=datetime.now(timezone.utc),
+        latency_ms=None,
+        status=SampleStatus.TIMEOUT,
+    )
+
+
+async def _timeout_probe(*_: object, **__: object) -> ProbeSample:
+    return _timeout_sample()
+
+
+def _down_target(name: str, address: str = "192.0.2.10", *, fail_threshold: int = 2) -> TargetRun:
+    target = TargetRun(
+        target=name,
+        resolved_address=address,
+        resolved_family=probes.family_from_ip(address),
+        resolved_addresses=(address,),
+    )
+    for _ in range(fail_threshold):
+        target.apply_sample(
+            _timeout_sample(),
+            fail_threshold=fail_threshold,
+            jitter_threshold_ms=50.0,
+        )
+    return target
+
+
+async def _finish_dns_refreshes() -> None:
+    refreshes = [task for _target, task in runner._get_dns_refreshes().values()]
+    await asyncio.wait_for(asyncio.gather(*refreshes), timeout=2.0)
+
+
 async def test_probe_once_refreshes_stale_dns_after_repeated_address_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    target = TargetRun(
-        target="service.example",
-        resolved_address="192.0.2.10",
-        resolved_family=AddressFamily.IPV4,
-        resolved_addresses=("192.0.2.10",),
-    )
+    target = _down_target("service.example")
     target._last_resolve_time = 0.0
-    for _ in range(2):
-        target.apply_sample(
-            ProbeSample(
-                timestamp=datetime.now(timezone.utc),
-                latency_ms=None,
-                status=SampleStatus.TIMEOUT,
-            ),
-            fail_threshold=2,
-            jitter_threshold_ms=50.0,
-        )
 
     resolution_calls = 0
 
@@ -396,8 +414,10 @@ async def test_probe_once_refreshes_stale_dns_after_repeated_address_failures(
 
     probed_addresses: list[str] = []
 
-    async def successful_probe(address: str, **_: object) -> ProbeSample:
+    async def new_address_answers(address: str, **_: object) -> ProbeSample:
         probed_addresses.append(address)
+        if address != "192.0.2.20":
+            return _timeout_sample()
         return ProbeSample(
             timestamp=datetime.now(timezone.utc),
             latency_ms=2.0,
@@ -406,43 +426,41 @@ async def test_probe_once_refreshes_stale_dns_after_repeated_address_failures(
 
     monkeypatch.setattr(runner, "_monotonic_time", lambda: 11.0, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", refreshed_resolution)
-    monkeypatch.setattr(runner, "_probe_address", successful_probe)
+    monkeypatch.setattr(runner, "_probe_address", new_address_answers)
     args = build_args(fail_threshold=2, targets=["service.example"])
 
-    sample_result = await runner.probe_once(
+    # The lookup runs beside the probe, so the known address is probed at once.
+    first = await runner.probe_once(
+        target,
+        args=args,
+        mode=ProbeMode.ICMP,
+        semaphore=asyncio.Semaphore(1),
+    )
+    assert first is not None
+    assert first.status == SampleStatus.TIMEOUT
+    assert probed_addresses == ["192.0.2.10"]
+
+    # The first probe after the lookup finishes uses the new answer.
+    await _finish_dns_refreshes()
+    second = await runner.probe_once(
         target,
         args=args,
         mode=ProbeMode.ICMP,
         semaphore=asyncio.Semaphore(1),
     )
 
-    assert sample_result is not None
-    assert sample_result.status == SampleStatus.OK
+    assert second is not None
+    assert second.status == SampleStatus.OK
     assert resolution_calls == 1
-    assert probed_addresses == ["192.0.2.20"]
+    assert probed_addresses == ["192.0.2.10", "192.0.2.20"]
     assert target.resolved_address == "192.0.2.20"
 
 
 async def test_failed_stale_dns_refresh_is_rate_limited(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    target = TargetRun(
-        target="service.example",
-        resolved_address="192.0.2.10",
-        resolved_family=AddressFamily.IPV4,
-        resolved_addresses=("192.0.2.10",),
-    )
+    target = _down_target("service.example")
     target._last_resolve_time = 0.0
-    for _ in range(2):
-        target.apply_sample(
-            ProbeSample(
-                timestamp=datetime.now(timezone.utc),
-                latency_ms=None,
-                status=SampleStatus.TIMEOUT,
-            ),
-            fail_threshold=2,
-            jitter_threshold_ms=50.0,
-        )
 
     resolution_calls = 0
 
@@ -451,27 +469,13 @@ async def test_failed_stale_dns_refresh_is_rate_limited(
         resolution_calls += 1
         return ResolvedTarget("service.example", None, None, "temporary DNS failure")
 
-    async def failed_probe(*_: object, **__: object) -> ProbeSample:
-        return ProbeSample(
-            timestamp=datetime.now(timezone.utc),
-            latency_ms=None,
-            status=SampleStatus.TIMEOUT,
-        )
-
-    # The lookup itself may spend a long time queued behind the resolver bound.
-    # Cooldown starts when that attempt completes, not when it entered the queue.
-    monotonic_times = iter([11.0, 30.0, 35.0])
-    monkeypatch.setattr(
-        runner,
-        "_monotonic_time",
-        lambda: next(monotonic_times),
-        raising=False,
-    )
+    clock = 11.0
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: clock, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", failed_resolution)
-    monkeypatch.setattr(runner, "_probe_address", failed_probe)
+    monkeypatch.setattr(runner, "_probe_address", _timeout_probe)
     args = build_args(fail_threshold=2, targets=["service.example"])
 
-    for _ in range(2):
+    async def probe() -> None:
         await runner.probe_once(
             target,
             args=args,
@@ -479,7 +483,205 @@ async def test_failed_stale_dns_refresh_is_rate_limited(
             semaphore=asyncio.Semaphore(1),
         )
 
+    await probe()
+    # The lookup itself may spend a long time queued behind the resolver bound.
+    # Cooldown starts when that attempt completes, not when it entered the queue.
+    clock = 30.0
+    await _finish_dns_refreshes()
+    assert target._last_resolve_time == 30.0
+
+    clock = 35.0
+    for _ in range(2):
+        await probe()
     assert resolution_calls == 1
+    assert target.resolved_address == "192.0.2.10"
+
+    clock = 41.0
+    await probe()
+    await _finish_dns_refreshes()
+    assert resolution_calls == 2
+
+
+async def test_stale_dns_refresh_skips_ip_literal_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lookups: list[str] = []
+
+    async def counting_resolver(name: str, *_: object, **__: object) -> ResolvedTarget:
+        lookups.append(name)
+        return ResolvedTarget(name, name, probes.family_from_ip(name), addresses=(name,))
+
+    monkeypatch.setattr(runner, "resolve_target", counting_resolver)
+    monkeypatch.setattr(runner, "_probe_address", _timeout_probe)
+    targets = [_down_target(address, address) for address in ("192.0.2.81", "2001:db8::81")]
+
+    for target in targets:
+        await runner.probe_once(
+            target,
+            args=build_args(fail_threshold=2),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+        )
+
+    # Looking a literal up again cannot change it; it would only queue for DNS.
+    assert lookups == []
+    assert runner._get_dns_refreshes() == {}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ResolverBusyError("all resolver threads are busy"), RuntimeError("resolver exploded")],
+)
+async def test_stale_dns_refresh_without_an_answer_keeps_the_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    attempts = 0
+
+    async def busy_resolver(*_: object, **__: object) -> ResolvedTarget:
+        nonlocal attempts
+        attempts += 1
+        raise error
+
+    clock = 11.0
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: clock, raising=False)
+    monkeypatch.setattr(runner, "resolve_target", busy_resolver)
+    monkeypatch.setattr(runner, "_probe_address", _timeout_probe)
+    target = _down_target("busy-refresh.example")
+    target._last_resolve_time = 0.0
+    args = build_args(fail_threshold=2)
+
+    async def probe() -> ProbeSample | None:
+        return await runner.probe_once(
+            target, args=args, mode=ProbeMode.ICMP, semaphore=asyncio.Semaphore(1)
+        )
+
+    assert await probe() is not None
+    await _finish_dns_refreshes()
+    # Only a target with nothing to probe retries a capacity miss at once; this
+    # one keeps probing its known address and waits out the usual delay.
+    assert target._last_resolve_time == 11.0
+
+    clock = 15.0
+    for _ in range(2):
+        assert await probe() is not None
+    assert attempts == 1
+    assert target.resolved_address == "192.0.2.10"
+    assert target.status == TargetStatus.DOWN
+
+
+async def test_stale_dns_refresh_is_dropped_once_the_known_address_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lookup_may_finish = asyncio.Event()
+
+    async def moved_resolution(*_: object, **__: object) -> ResolvedTarget:
+        await lookup_may_finish.wait()
+        return ResolvedTarget(
+            "recovering.example", "192.0.2.20", AddressFamily.IPV4, addresses=("192.0.2.20",)
+        )
+
+    recovered = False
+
+    async def recovering_probe(*_: object, **__: object) -> ProbeSample:
+        return await _ok_probe() if recovered else _timeout_sample()
+
+    monkeypatch.setattr(runner, "_monotonic_time", lambda: 11.0, raising=False)
+    monkeypatch.setattr(runner, "_resolve_target_bounded", moved_resolution)
+    monkeypatch.setattr(runner, "_probe_address", recovering_probe)
+    target = _down_target("recovering.example")
+    target._last_resolve_time = 0.0
+    args = build_args(fail_threshold=2)
+
+    async def probe() -> ProbeSample | None:
+        # Bounded: a refresh that held up the probe would wait on the event forever.
+        return await asyncio.wait_for(
+            runner.probe_once(
+                target, args=args, mode=ProbeMode.ICMP, semaphore=asyncio.Semaphore(1)
+            ),
+            timeout=2.0,
+        )
+
+    await probe()
+    recovered = True
+    sample = await probe()
+    assert sample is not None
+    assert sample.status == SampleStatus.OK
+
+    lookup_may_finish.set()
+    await _finish_dns_refreshes()
+    await probe()
+
+    # The known address answers again, so the late answer does not replace it.
+    assert target.resolved_address == "192.0.2.10"
+    assert runner._get_dns_refreshes() == {}
+
+
+async def test_slow_dns_refreshes_do_not_delay_probes_of_down_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Down targets whose names hang in DNS (listed first) and down targets in a
+    # healthy zone. Their refreshes hang for the whole lookup budget or queue
+    # behind the DNS bound; neither may stop probes or hide a recovery.
+    release = threading.Event()
+    monkeypatch.setattr(socket, "getaddrinfo", _blackholed_zone_getaddrinfo(release))
+    monkeypatch.setattr(runner, "DNS_RESOLVE_CONCURRENCY", 2)
+    recovered = False
+
+    async def recovering_probe(*_: object, **__: object) -> ProbeSample:
+        return await _ok_probe() if recovered else _timeout_sample()
+
+    monkeypatch.setattr(runner, "_probe_address", recovering_probe)
+    names = [f"hang-{index}.refresh.test" for index in range(6)]
+    names += [f"ok-{index}.refresh.test" for index in range(6)]
+    targets = [_down_target(name, "192.0.2.70", fail_threshold=3) for name in names]
+    args = build_args(count=None, fail_threshold=3, interval=0.05, targets=names)
+    stop_event = asyncio.Event()
+    probe_counts = dict.fromkeys(names, 0)
+    recovered_names: set[str] = set()
+
+    def on_sample(target: TargetRun, sample: ProbeSample | None) -> None:
+        if sample is None:
+            return
+        probe_counts[target.target] += 1
+        if sample.status == SampleStatus.OK:
+            recovered_names.add(target.target)
+
+    loops = [
+        asyncio.create_task(
+            runner.probe_target_loop(
+                target,
+                args=args,
+                mode=ProbeMode.ICMP,
+                semaphore=asyncio.Semaphore(len(targets)),
+                stop_event=stop_event,
+                immediate_event=asyncio.Event(),
+                initial_delay=0.0,
+                on_sample=on_sample,
+            )
+        )
+        for target in targets
+    ]
+    loop = asyncio.get_running_loop()
+    try:
+        await asyncio.sleep(0.5)
+        assert len(runner._get_dns_refreshes()) == len(targets)
+        # About ten intervals passed: every target kept probing its address.
+        assert min(probe_counts.values()) >= 4
+
+        recovered = True
+        recovered_at = loop.time()
+        while len(recovered_names) < len(names) and loop.time() - recovered_at < 1.0:
+            await asyncio.sleep(0.01)
+        assert recovered_names == set(names)
+        assert loop.time() - recovered_at < 0.5
+    finally:
+        stop_event.set()
+        release.set()
+        refreshes = [task for _target, task in runner._get_dns_refreshes().values()]
+        for task in [*loops, *refreshes]:
+            task.cancel()
+        await asyncio.gather(*loops, *refreshes, return_exceptions=True)
 
 
 async def test_probe_once_handles_unexpected_exceptions_gracefully(
