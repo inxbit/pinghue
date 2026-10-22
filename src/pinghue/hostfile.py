@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -11,6 +12,7 @@ MAX_HOST_FILE_BYTES = 1024 * 1024
 TARGET_COUNT_MAXIMUM = 5_000
 MAX_HOST_FILE_LINES = TARGET_COUNT_MAXIMUM
 TARGET_MAXIMUM = 253
+LINE_BREAK_PATTERN = re.compile(r"\r\n|\r|\n")
 
 
 def _read_regular_file(path: Path) -> bytes:
@@ -63,11 +65,11 @@ def parse_host_file(path: str | Path) -> list[str]:
 
     targets: list[str] = []
 
-    # Only "\n" (optionally preceded by "\r") ends a line. str.splitlines() also
-    # splits on \v, \f, \x1c-\x1e, \x85, U+2028 and U+2029, which would turn one
-    # line into several targets and skew line numbers and the line limit; such
+    # Only "\n", "\r\n" and a lone "\r" end a line. str.splitlines() also splits
+    # on \v, \f, \x1c-\x1e, \x85, U+2028 and U+2029, which would turn one line
+    # into several targets and skew line numbers and the line limit; such
     # characters stay inside the value for target validation instead.
-    lines = content.split("\n")
+    lines = LINE_BREAK_PATTERN.split(content)
     if lines[-1] == "":
         lines.pop()
 
@@ -77,7 +79,7 @@ def parse_host_file(path: str | Path) -> list[str]:
                 f"host file has too many lines; maximum is {MAX_HOST_FILE_LINES}: {host_path}"
             )
 
-        value = line.removesuffix("\r").split("#", 1)[0].strip()
+        value = line.split("#", 1)[0].strip()
 
         if not value:
             continue

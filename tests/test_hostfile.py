@@ -122,11 +122,11 @@ def test_parse_host_file_splits_lines_only_on_newline(tmp_path: Path, separator:
     assert parse_host_file(path) == [f"127.0.0.1{separator}127.0.0.2", "127.0.0.3"]
 
 
-def test_parse_host_file_accepts_crlf_and_keeps_lone_carriage_return(tmp_path: Path) -> None:
+def test_parse_host_file_accepts_crlf_and_lone_carriage_return(tmp_path: Path) -> None:
     path = tmp_path / "hosts.txt"
     path.write_bytes(b"127.0.0.1\r\n# comment\r\n127.0.0.2 # inline\r\n127.0.0.3\r127.0.0.4\r\n")
 
-    assert parse_host_file(path) == ["127.0.0.1", "127.0.0.2", "127.0.0.3\r127.0.0.4"]
+    assert parse_host_file(path) == ["127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"]
 
 
 def test_parse_host_file_line_numbers_ignore_unicode_separators(tmp_path: Path) -> None:

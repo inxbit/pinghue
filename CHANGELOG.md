@@ -9,8 +9,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 ### Breaking
 
 - `--output` now refuses an existing FIFO owned by another user, and `--overwrite` refuses an existing regular file owned by another user, including when PingHue runs as root (for example `sudo pinghue --output ~/report.json --overwrite`). Run as the owner of the path or write a new report instead.
-- Host files whose lines end with a lone `\r` (classic Mac OS line endings) are now read as one line, which is rejected as an invalid target. Convert such files to `\n` or `\r\n` line endings.
-- Both changes invoke the documented security exception to the deprecation window and require the next major release.
+- This change invokes the documented security exception to the deprecation window and requires the next major release.
 
 ### Security
 
@@ -25,7 +24,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Fixed
 
-- Host files now end lines only at `\n`, with an optional `\r` before it. Vertical tabs, form feeds, file/group/record separators, NEL, and Unicode line and paragraph separators stay inside their line. They no longer split one line into several targets or skew line numbers and the 5,000-line limit, and a line containing a control character is rejected as an invalid target. A lone `\r` (classic Mac OS line ending) no longer ends a line.
+- Host files now end lines only at `\n`, `\r\n`, or a lone `\r`. Vertical tabs, form feeds, file/group/record separators, NEL, and Unicode line and paragraph separators stay inside their line. They no longer split one line into several targets or skew line numbers and the 5,000-line limit, and a line containing a control character is rejected as an invalid target.
 - `--output ./-` now writes a file named `-` in the current directory; only a bare `-` selects stdout.
 - A report name within a few bytes of the file-name limit no longer fails at exit because its temporary staging name was too long.
 
