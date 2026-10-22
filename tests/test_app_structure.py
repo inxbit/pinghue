@@ -2,6 +2,8 @@ import asyncio
 import gc
 import os
 import signal
+import socket
+import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -10,6 +12,8 @@ from typing import Any
 import pytest
 
 import pinghue.app as app_module
+import pinghue.probes as probes_module
+import pinghue.runner as runner_module
 from pinghue.app import PinghueApp, PinghueTextualApp
 from pinghue.models import (
     MAX_TOTAL_RETAINED_SAMPLES,
@@ -115,13 +119,18 @@ async def test_tui_preserves_aggregate_budget_during_partial_resolution(
 
     async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
         if target == "host-0":
-            return TargetRun(target, resolved_address="192.0.2.1")
+            return TargetRun(target, resolved_address="127.0.253.1")
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
+
+    async def fake_probe_target_loop(*_: Any, stop_event: asyncio.Event, **__: Any) -> None:
+        # host-0's loop starts as soon as it resolves; it must not send a probe.
+        await stop_event.wait()
 
     monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: table)
     monkeypatch.setattr(app, "set_interval", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app_module, "resolve_run_target", fake_resolve_run_target)
+    monkeypatch.setattr(app_module, "probe_target_loop", fake_probe_target_loop)
 
     await app.on_mount()
     for _ in range(100):
@@ -130,7 +139,7 @@ async def test_tui_preserves_aggregate_budget_during_partial_resolution(
         await asyncio.sleep(0)
 
     expected_window = MAX_TOTAL_RETAINED_SAMPLES // target_count
-    assert app.targets[0].resolved_address == "192.0.2.1"
+    assert app.targets[0].resolved_address == "127.0.253.1"
     assert {target.samples.maxlen for target in app.targets} == {expected_window}
     await app.on_unmount()
 
@@ -702,6 +711,52 @@ async def test_tui_stopped_during_resolution_freezes_nothing(monkeypatch) -> Non
         await app.on_unmount()
     finally:
         gc.unfreeze()
+
+
+async def test_tui_count_waits_for_a_free_resolver_thread(monkeypatch) -> None:
+    # Every resolver thread is held (lookups stuck elsewhere) when the run
+    # starts. Those iterations used to use up -c 1, so the TUI finished
+    # "completed" with the host never looked up or probed.
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(probes_module, "_dns_thread_slots", slots)
+    monkeypatch.setattr(probes_module, "DNS_THREAD_WAIT_SECONDS", 0.02)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))],
+    )
+
+    async def ok_probe(*_: Any, **__: Any) -> ProbeSample:
+        return ProbeSample(
+            timestamp=datetime.now(timezone.utc),
+            latency_ms=1.0,
+            status=SampleStatus.OK,
+        )
+
+    monkeypatch.setattr(runner_module, "_probe_address", ok_probe)
+    app = PinghueTextualApp(
+        args=build_args(targets=["busy.tui-count.test"], count=1, interval=0.05),
+        mode=ProbeMode.ICMP,
+    )
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=app_module.resolve_run_target,
+        probe_loop=app_module.probe_target_loop,
+    )
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.3, slots.release)
+
+    await app.on_mount()
+    deadline = loop.time() + 5.0
+    while app.exit_reason != "completed" and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+
+    assert app.exit_reason == "completed"
+    assert app.targets[0].status == TargetStatus.HEALTHY
+    assert app.targets[0].stats.sent == 1
+    await app.on_unmount()
 
 
 @pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP", "SIGINT"])

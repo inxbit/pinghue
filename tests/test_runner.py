@@ -1,6 +1,7 @@
 import asyncio
 import io
 import socket
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -70,6 +71,18 @@ def test_print_sample_routes_both_branches_to_given_stream() -> None:
     assert len(lines) == 2
     assert "1.1.1.1 ok latency=2.00ms" in lines[0]
     assert "bad.example dns_failure error=resolution failed" in lines[1]
+
+
+def test_warn_drops_the_message_when_stderr_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # print(file=None) writes to stdout, which may carry a `--output -` document.
+    monkeypatch.setattr(sys, "stderr", None)
+
+    runner._warn("could not write probe lines")
+
+    assert capsys.readouterr().out == ""
 
 
 async def test_run_writes_configured_host_label(
@@ -711,7 +724,7 @@ async def test_probe_once_handles_unexpected_exceptions_gracefully(
     assert "Severe socket failure" in sample.error
 
 
-async def test_resolve_runs_limits_concurrency_with_semaphore(
+async def test_run_no_tui_limits_lookup_concurrency_with_semaphore(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_resolutions = 0
@@ -737,11 +750,13 @@ async def test_resolve_runs_limits_concurrency_with_semaphore(
     monkeypatch.setattr(runner, "_dns_semaphore", test_semaphore)
     monkeypatch.setattr(runner, "_get_dns_semaphore", lambda: test_semaphore)
 
-    args = build_args(targets=["a", "b", "c", "d"])
+    monkeypatch.setattr(runner, "probe_target_loop", _no_probe_loop)
+    args = build_args(targets=["a", "b", "c", "d"], count=1, duration=None)
 
-    await runner.resolve_runs(args)
+    runs, _, _, _ = await runner.run_no_tui(args, ProbeMode.ICMP)
 
     assert max_active_resolutions == 2
+    assert [run.resolved_address for run in runs] == ["192.0.2.1"] * 4
 
 
 async def test_resolve_run_target_converts_unexpected_exception_to_target_failure(
@@ -788,6 +803,10 @@ async def test_resolve_run_target_converts_slow_dns_to_target_failure(
     assert resolved.status == TargetStatus.DNS_FAILURE
     assert resolved.resolved_address is None
     assert resolved.error == "getaddrinfo timed out after 0.01s"
+
+
+async def _no_probe_loop(*_: object, **__: object) -> None:
+    return None
 
 
 async def _ok_probe(*_: object, **__: object) -> ProbeSample:
@@ -917,6 +936,7 @@ async def test_resolver_thread_start_failure_leaves_target_pending(
             raise RuntimeError("can't start new thread")
 
     monkeypatch.setattr(threading, "Thread", FailingThread)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 0.02)
     args = build_args(targets=["no-thread.example"])
 
     pending = await runner.resolve_run_target("no-thread.example", args)
@@ -937,7 +957,7 @@ async def test_resolver_thread_start_failure_leaves_target_pending(
     assert stream.getvalue() == ""
 
 
-async def test_resolve_runs_resolves_healthy_names_listed_after_hung_ones(
+async def test_run_no_tui_resolves_healthy_names_listed_after_hung_ones(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Host list with a blackholed zone first, as many names as the old
@@ -945,13 +965,17 @@ async def test_resolve_runs_resolves_healthy_names_listed_after_hung_ones(
     # name with "resolver worker limit reached".
     release = threading.Event()
     monkeypatch.setattr(socket, "getaddrinfo", _blackholed_zone_getaddrinfo(release))
-    monkeypatch.setattr(runner, "DNS_LOOKUP_TIMEOUT_SECONDS", 0.05)
+    # Well above thread start and scheduling latency on a loaded machine, so
+    # healthy lookups never race the budget; the hung ones time out together.
+    monkeypatch.setattr(runner, "DNS_LOOKUP_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(runner, "probe_target_loop", _no_probe_loop)
     hung_names = [f"hang-{index}.runs.test" for index in range(16)]
     good_names = [f"ok-{index}.runs.test" for index in range(200)]
+    args = build_args(targets=hung_names + good_names, count=1, duration=None)
 
     try:
-        runs = await asyncio.wait_for(
-            runner.resolve_runs(build_args(targets=hung_names + good_names)), timeout=5.0
+        runs, _, _, _ = await asyncio.wait_for(
+            runner.run_no_tui(args, ProbeMode.ICMP), timeout=10.0
         )
     finally:
         release.set()
@@ -977,7 +1001,10 @@ async def test_exhausted_resolver_threads_leave_targets_pending_until_one_frees(
     args = build_args(targets=hung_names + good_names)
 
     try:
-        runs = await asyncio.wait_for(runner.resolve_runs(args), timeout=5.0)
+        runs = await asyncio.wait_for(
+            asyncio.gather(*(runner.resolve_run_target(name, args) for name in args.targets)),
+            timeout=5.0,
+        )
         good_runs = runs[len(hung_names) :]
 
         # Every thread is held by a stuck lookup, so no lookup ran for the
@@ -1047,6 +1074,152 @@ async def test_probe_loop_retries_resolver_capacity_miss_without_dns_cooldown(
     assert attempts == 3
     assert target.status == TargetStatus.HEALTHY
     assert target.resolved_address == "192.0.2.60"
+
+
+async def test_count_does_not_spend_probes_on_resolver_capacity_misses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def busy_then_resolved(name: str, *_: object, **__: object) -> ResolvedTarget:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ResolverBusyError("all resolver threads are busy")
+        return ResolvedTarget(name, "192.0.2.61", AddressFamily.IPV4, addresses=("192.0.2.61",))
+
+    monkeypatch.setattr(runner, "resolve_target", busy_then_resolved)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    target = TargetRun(target="count.example", status=TargetStatus.RESOLVING)
+    seen: list[ProbeSample | None] = []
+
+    await asyncio.wait_for(
+        runner.probe_target_loop(
+            target,
+            args=build_args(count=1, interval=0.05, targets=["count.example"]),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=asyncio.Event(),
+            immediate_event=asyncio.Event(),
+            initial_delay=0.0,
+            on_sample=lambda _target, sample: seen.append(sample),
+        ),
+        timeout=5.0,
+    )
+
+    # Two iterations found no resolver thread and ran no lookup; only the
+    # probe after the third lookup counts toward -c 1.
+    assert attempts == 3
+    assert seen[:2] == [None, None]
+    assert [sample.status for sample in seen[2:] if sample is not None] == [SampleStatus.OK]
+    assert len(seen) == 3
+    assert target.status == TargetStatus.HEALTHY
+    assert len(target.samples) == 1
+
+
+async def test_count_still_counts_dns_failure_verdicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unresolvable(name: str, *_: object, **__: object) -> ResolvedTarget:
+        return ResolvedTarget(name, None, None, "getaddrinfo: Name or service not known")
+
+    monkeypatch.setattr(runner, "resolve_target", unresolvable)
+    target = TargetRun(target="nx.example", status=TargetStatus.RESOLVING)
+    seen: list[ProbeSample | None] = []
+
+    # A verdict, and the cooldown iterations after it, still count, so -c ends
+    # for a name that does not resolve.
+    await asyncio.wait_for(
+        runner.probe_target_loop(
+            target,
+            args=build_args(count=2, interval=0.05, targets=["nx.example"]),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=asyncio.Event(),
+            immediate_event=asyncio.Event(),
+            initial_delay=0.0,
+            on_sample=lambda _target, sample: seen.append(sample),
+        ),
+        timeout=5.0,
+    )
+
+    assert seen == [None, None]
+    assert target.status == TargetStatus.DNS_FAILURE
+
+
+def _loopback_getaddrinfo(*_: object, **__: object) -> list[object]:
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+
+
+async def test_run_no_tui_count_waits_for_a_free_resolver_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Every resolver thread is held (lookups stuck elsewhere) when the run
+    # starts. Those iterations used to use up -c 1, so the run ended
+    # "completed" with the host never looked up, probed or printed.
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(probes, "_dns_thread_slots", slots)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", 0.02)
+    monkeypatch.setattr(socket, "getaddrinfo", _loopback_getaddrinfo)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    asyncio.get_running_loop().call_later(0.3, slots.release)
+    args = build_args(targets=["busy.count.test"], count=1, duration=None, interval=0.05)
+
+    runs, exit_reason, _, _ = await asyncio.wait_for(
+        runner.run_no_tui(args, ProbeMode.ICMP), timeout=5.0
+    )
+
+    assert exit_reason == "completed"
+    assert runs[0].status == TargetStatus.HEALTHY
+    assert runs[0].stats.sent == 1
+    assert capsys.readouterr().out.count("busy.count.test ok") == 1
+
+
+async def test_resolver_thread_start_failures_retry_at_a_bounded_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A pids cgroup or RLIMIT_NPROC cap fails every thread start at once.
+    # Without a wait, each pending name tried to start a thread on every probe
+    # iteration, which flooded the event loop and starved healthy targets.
+    attempts = 0
+
+    class FailingThread:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("can't start new thread")
+
+    wait_s = 0.1
+    duration = 0.6
+    lookup_concurrency = 4
+    monkeypatch.setattr(threading, "Thread", FailingThread)
+    monkeypatch.setattr(probes, "DNS_THREAD_WAIT_SECONDS", wait_s)
+    monkeypatch.setattr(runner, "DNS_RESOLVE_CONCURRENCY", lookup_concurrency)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    names = [f"name-{index}.no-thread.test" for index in range(50)]
+    literals = ["127.0.0.1", "127.0.0.2", "127.0.0.3"]
+    args = build_args(
+        targets=names + literals,
+        count=None,
+        duration=duration,
+        interval=0.05,
+        concurrency=8,
+    )
+
+    runs, exit_reason, _, _ = await runner.run_no_tui(args, ProbeMode.ICMP)
+
+    assert exit_reason == "deadline"
+    # At most one attempt per lookup slot per wait (about 24 here), instead of
+    # one per pending name per iteration (about 600).
+    assert attempts <= lookup_concurrency * (duration / wait_s + 2)
+    assert {run.status for run in runs[: len(names)]} == {TargetStatus.RESOLVING}
+    assert {run.status for run in runs[len(names) :]} == {TargetStatus.HEALTHY}
+    assert min(run.stats.sent for run in runs[len(names) :]) >= 3
 
 
 async def test_late_resolution_stays_resolving_until_first_sample(

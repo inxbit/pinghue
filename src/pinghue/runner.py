@@ -18,7 +18,7 @@ from typing import TextIO
 from pinghue.config import RunConfig
 from pinghue.display import sanitize_display
 from pinghue.export import write_output_json
-from pinghue.limits import fit_concurrency_to_fd_limit
+from pinghue.limits import ensure_fd_reserve, fit_concurrency_to_fd_limit
 from pinghue.models import (
     AddressFamily,
     ProbeConfig,
@@ -268,18 +268,6 @@ def apply_retained_sample_budget(runs: list[TargetRun]) -> None:
 def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
     """Return ordered unresolved targets for interrupted/deadline output."""
     runs = [TargetRun(target=target, status=TargetStatus.RESOLVING) for target in targets]
-    apply_retained_sample_budget(runs)
-    return runs
-
-
-async def resolve_runs(args: RunConfig) -> list[TargetRun]:
-    """Resolve every target before returning, in requested order.
-
-    Neither run mode uses this: both resolve each target with
-    ``resolve_run_target`` and start probing it as soon as it resolves. It
-    remains for callers that want every lookup settled up front.
-    """
-    runs = await asyncio.gather(*(resolve_run_target(target, args) for target in args.targets))
     apply_retained_sample_budget(runs)
     return runs
 
@@ -585,7 +573,12 @@ async def probe_target_loop(
         if on_sample is not None:
             on_sample(target, sample)
 
-        probes_completed += 1
+        # An iteration in which no lookup could run (every resolver thread
+        # busy) leaves the target pending with no verdict and does not count
+        # toward --count, so the host is still looked up and probed. A DNS
+        # verdict (dns_failure) and a probe result both count.
+        if sample is not None or target.status != TargetStatus.RESOLVING:
+            probes_completed += 1
         if probe_limit is not None and probes_completed >= probe_limit:
             return
 
@@ -784,8 +777,12 @@ def _reader_is_gone(error: BaseException) -> bool:
 
 
 def _warn(message: str) -> None:
-    # print() to a stderr of None (closed at startup) is a no-op. The message
-    # carries OS error text, escaped like every other operator-visible string.
+    # A stderr closed at startup is None, and print(file=None) would write to
+    # stdout, into the line output or a `--output -` JSON document: drop it.
+    # The message carries OS error text, escaped like every other
+    # operator-visible string.
+    if sys.stderr is None:
+        return
     with contextlib.suppress(OSError, ValueError):
         print(f"pinghue: warning: {sanitize_display(message)}", file=sys.stderr, flush=True)
 
@@ -916,7 +913,10 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
         # limit first. ICMP probes share the ICMP engine's few sockets instead.
         args.concurrency, fd_warning = fit_concurrency_to_fd_limit(args.concurrency)
         if fd_warning is not None:
-            print(f"pinghue: warning: {fd_warning}", file=sys.stderr)
+            _warn(fd_warning)
+    else:
+        # ICMP concurrency needs no descriptors, but stuck DNS lookups still do.
+        ensure_fd_reserve()
 
     if args.no_tui:
         targets, exit_reason, started_at, ended_at = await run_no_tui(args, mode)

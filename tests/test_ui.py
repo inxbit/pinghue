@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from rich.text import Text
 
+from pinghue.history import render_history_parts
 from pinghue.models import (
     ProbeSample,
     SampleStatus,
@@ -25,14 +26,11 @@ from pinghue.ui import (
     compact_ms,
     compute_table_layout,
     focus_table,
-    format_history_cell,
     format_history_legend,
-    format_state_cell,
-    format_text_cell,
+    history_text,
     issue_styles,
     restore_cursor_row,
-    sync_target_table,
-    target_row_key,
+    target_state,
 )
 
 
@@ -45,9 +43,10 @@ def sample(status: SampleStatus, latency_ms: float | None = None) -> ProbeSample
     )
 
 
-def plain_and_style(value: Text) -> tuple[str, str]:
-    spans = value.spans
-    return value.plain, spans[0].style if spans else str(value.style or "")
+def history_cell(samples: list[ProbeSample], *, slow_latency_ms: float) -> Text:
+    return history_text(
+        *render_history_parts(samples, width=10, style="bar", slow_latency_ms=slow_latency_ms)
+    )
 
 
 def test_issue_styles_marks_latency_jitter_and_loss_independently() -> None:
@@ -89,12 +88,6 @@ def test_issue_styles_marks_loss_when_percentage_rounds_to_zero() -> None:
     assert styles["loss"] == RED
 
 
-def test_format_text_cell_colors_only_affected_values() -> None:
-    assert plain_and_style(format_text_cell("12.30", GREEN)) == ("12.30", GREEN)
-    assert plain_and_style(format_text_cell("450.00", AMBER)) == ("450.00", AMBER)
-    assert plain_and_style(format_text_cell("5.00%", RED)) == ("5.00%", RED)
-
-
 def test_compact_metric_formats_keep_columns_readable() -> None:
     assert compact_ms(None) == "-"
     assert compact_ms(4.3) == "4.30"
@@ -106,24 +99,22 @@ def test_compact_metric_formats_keep_columns_readable() -> None:
     assert compact_loss(100.0) == "100.00%"
 
 
-def test_format_state_cell_colors_health_state() -> None:
-    assert plain_and_style(format_state_cell(TargetStatus.HEALTHY)) == ("healthy", GREEN)
-    assert plain_and_style(format_state_cell(TargetStatus.INTERMITTENT)) == (
-        "intermittent",
-        AMBER,
-    )
-    assert plain_and_style(format_state_cell(TargetStatus.DOWN)) == ("down", RED)
+def test_target_state_colors_health_state() -> None:
+    def state(status: TargetStatus) -> tuple[str, str]:
+        return target_state(TargetRun("a.example", resolved_address="127.0.253.1", status=status))
+
+    assert state(TargetStatus.HEALTHY) == ("healthy", GREEN)
+    assert state(TargetStatus.INTERMITTENT) == ("intermittent", AMBER)
+    assert state(TargetStatus.DOWN) == ("down", RED)
 
 
-def test_format_history_cell_colors_each_probe_segment() -> None:
-    history = format_history_cell(
+def test_history_cell_colors_each_probe_segment() -> None:
+    history = history_cell(
         [
             sample(SampleStatus.OK, 5.0),
             sample(SampleStatus.OK, 350.0),
             sample(SampleStatus.TIMEOUT),
         ],
-        width=10,
-        style="bar",
         slow_latency_ms=300.0,
     )
 
@@ -132,13 +123,11 @@ def test_format_history_cell_colors_each_probe_segment() -> None:
 
 
 def test_slow_latency_boundary_matches_the_fixed_glyph_scale() -> None:
-    history = format_history_cell(
+    history = history_cell(
         [
             sample(SampleStatus.OK, 100.0),
             sample(SampleStatus.OK, 100.01),
         ],
-        width=10,
-        style="bar",
         slow_latency_ms=100.0,
     )
 
@@ -146,15 +135,10 @@ def test_slow_latency_boundary_matches_the_fixed_glyph_scale() -> None:
     assert [span.style for span in history.spans] == [GREEN, AMBER]
 
 
-def test_format_history_cell_marks_refused_amber() -> None:
+def test_history_cell_marks_refused_amber() -> None:
     # A refusal is distinct from timeout/loss and uses the documented warning
     # color even when repeated refusals eventually classify the target DOWN.
-    history = format_history_cell(
-        [sample(SampleStatus.REFUSED)],
-        width=10,
-        style="bar",
-        slow_latency_ms=300.0,
-    )
+    history = history_cell([sample(SampleStatus.REFUSED)], slow_latency_ms=300.0)
 
     assert history.plain == "!"
     assert [span.style for span in history.spans] == [AMBER]
@@ -363,135 +347,3 @@ def test_apply_column_widths_only_updates_changed_widths() -> None:
     assert table.columns["host"].width == 12
     assert table.columns["history"].width == 10
     assert apply_column_widths(table, {"host": 12, "history": 10}) is False
-
-
-def test_sync_target_table_updates_existing_rows_without_clearing() -> None:
-    class FakeTable:
-        def __init__(self) -> None:
-            self.added_rows: list[tuple[str, tuple[object, ...]]] = []
-            self.updated_cells: list[tuple[str, str, object, bool]] = []
-
-        @property
-        def row_count(self) -> int:
-            return len(self.added_rows)
-
-        def add_row(self, *cells: object, key: str) -> None:
-            self.added_rows.append((key, cells))
-
-        def update_cell(
-            self,
-            row_key: str,
-            column_key: str,
-            value: object,
-            *,
-            update_width: bool = False,
-        ) -> None:
-            self.updated_cells.append((row_key, column_key, value, update_width))
-
-        def clear(self) -> None:
-            raise AssertionError("refresh must not clear and rebuild rows")
-
-    targets = [
-        TargetRun("1.1.1.1", samples=[sample(SampleStatus.OK, 5.0)]),
-        TargetRun("8.8.8.8", samples=[sample(SampleStatus.OK, 6.0)]),
-    ]
-    table = FakeTable()
-
-    assert (
-        sync_target_table(
-            table,
-            targets,
-            initialized=False,
-            show_address=False,
-            mode="icmp",
-            history_width=24,
-            history_style="bar",
-            jitter_threshold_ms=50.0,
-            slow_latency_ms=300.0,
-        )
-        is True
-    )
-    assert [row[0] for row in table.added_rows] == [target_row_key(0), target_row_key(1)]
-
-    sync_target_table(
-        table,
-        targets,
-        initialized=True,
-        show_address=False,
-        mode="icmp",
-        history_width=24,
-        history_style="bar",
-        jitter_threshold_ms=50.0,
-        slow_latency_ms=300.0,
-    )
-
-    assert len(table.updated_cells) == len(targets) * len(COLUMN_KEYS)
-    assert table.updated_cells[0][0] == target_row_key(0)
-    assert table.updated_cells[0][1] == "host"
-
-
-def test_sync_target_table_skips_unchanged_cached_cells() -> None:
-    class FakeTable:
-        def __init__(self) -> None:
-            self.added_rows: list[tuple[str, tuple[object, ...]]] = []
-            self.updated_cells: list[tuple[str, str, object, bool]] = []
-
-        def add_row(self, *cells: object, key: str) -> None:
-            self.added_rows.append((key, cells))
-
-        def update_cell(
-            self,
-            row_key: str,
-            column_key: str,
-            value: object,
-            *,
-            update_width: bool = False,
-        ) -> None:
-            self.updated_cells.append((row_key, column_key, value, update_width))
-
-    targets = [TargetRun("1.1.1.1", samples=[sample(SampleStatus.OK, 5.0)])]
-    cache: dict[tuple[str, str], object] = {}
-    table = FakeTable()
-
-    sync_target_table(
-        table,
-        targets,
-        initialized=False,
-        show_address=False,
-        mode="icmp",
-        history_width=24,
-        history_style="bar",
-        jitter_threshold_ms=50.0,
-        slow_latency_ms=300.0,
-        cell_cache=cache,
-    )
-    sync_target_table(
-        table,
-        targets,
-        initialized=True,
-        show_address=False,
-        mode="icmp",
-        history_width=24,
-        history_style="bar",
-        jitter_threshold_ms=50.0,
-        slow_latency_ms=300.0,
-        cell_cache=cache,
-    )
-
-    assert table.updated_cells == []
-
-    targets[0].samples.append(sample(SampleStatus.OK, 6.0))
-    sync_target_table(
-        table,
-        targets,
-        initialized=True,
-        show_address=False,
-        mode="icmp",
-        history_width=24,
-        history_style="bar",
-        jitter_threshold_ms=50.0,
-        slow_latency_ms=300.0,
-        cell_cache=cache,
-    )
-
-    assert 0 < len(table.updated_cells) < len(COLUMN_KEYS)

@@ -87,7 +87,12 @@ _RECEIVE_BUFFER_BYTES_PER_PROBE = 2048
 _MIN_PROBES_PER_SOCKET = 32
 _MAX_PROBES_PER_SOCKET = 512
 _MAX_SOCKETS_PER_FAMILY = 16
+# A socket holds at most _MAX_PROBES_PER_SOCKET of the 65,536 sequence numbers,
+# so a random draw almost always finds a free one; a scan backs it up.
+_RANDOM_SEQUENCE_ATTEMPTS = 16
 
+# Longer waits are cut to this (about 68 years), far beyond any useful timeout.
+_MAX_ECHO_TIMEOUT_SECONDS = float(2**31)
 _SEND_RETRY_DELAY_SECONDS = 0.001
 _SEND_RETRY_MAX_DELAY_SECONDS = 0.05
 # Bounds the immediate retries of a send that failed while ICMP errors for
@@ -332,7 +337,6 @@ class _IcmpSocket:
         "ipv6",
         "pending",
         "recverr",
-        "sequence",
         "sock",
         "timestamps",
     )
@@ -345,17 +349,27 @@ class _IcmpSocket:
         # Linux replaces the identifier with the socket's port; elsewhere it is
         # the only thing that tells this socket's replies from other sockets'.
         self.ident = int.from_bytes(os.urandom(2), "big")
-        self.sequence = int.from_bytes(os.urandom(2), "big")
         self.pending: dict[int, _PendingEcho] = {}
         self.recverr = False
         self.timestamps = False
 
     def next_sequence(self) -> int:
-        """Return the next sequence number that no in-flight probe uses."""
-        for _ in range(0x10000):
-            self.sequence = (self.sequence + 1) & 0xFFFF
-            if self.sequence not in self.pending:
-                return self.sequence
+        """Return a random sequence number that no in-flight probe uses.
+
+        Random rather than counting up: every target sees the sequence numbers
+        of its own probes, and must not learn from them those of the probes in
+        flight to other targets on this socket, which an ICMP error with a
+        short quote is matched on (see IcmpEngine._match).
+        """
+        for _ in range(_RANDOM_SEQUENCE_ATTEMPTS):
+            sequence = int.from_bytes(os.urandom(2), "big")
+            if sequence not in self.pending:
+                return sequence
+        start = int.from_bytes(os.urandom(2), "big")
+        for offset in range(0x10000):
+            sequence = (start + offset) & 0xFFFF
+            if sequence not in self.pending:
+                return sequence
         raise OSError(errno.ENOBUFS, "no free ICMP sequence number")
 
 
@@ -420,6 +434,9 @@ class IcmpEngine:
     async def echo(self, destination: str, *, ipv6: bool, timeout_s: float) -> EchoResult:
         """Send one echo request to an IP literal and wait for its outcome."""
         loop = asyncio.get_running_loop()
+        # The CLI accepts any finite timeout; one near the float maximum would
+        # overflow the nanosecond conversions below and fail every probe.
+        timeout_s = min(timeout_s, _MAX_ECHO_TIMEOUT_SECONDS)
         deadline = loop.time() + timeout_s
         try:
             icmp_socket = self._socket_for(loop, ipv6=ipv6)
@@ -433,7 +450,7 @@ class IcmpEngine:
             entry = self._register(
                 icmp_socket, destination=destination, loop=loop, timeout_s=timeout_s
             )
-        except (OSError, ValueError) as exc:
+        except (OSError, OverflowError, ValueError) as exc:
             return EchoResult(SampleStatus.ERROR, error=str(exc))
 
         packet = echo_request(

@@ -94,7 +94,7 @@ Absent; do not fabricate:
 
 - Testimonials, quotes, reviews, named users or customers, and customer or partner logos. The only marks are the GitHub link icon and the README's shields.io badges.
 - Download, install, star or usage counts. None are on hand and nothing collects them: the CLI sends nothing home and the site loads no analytics.
-- Benchmarks or performance data. 1,024 concurrent probes and 5,000 targets are limits, not measurements.
+- Benchmarks or performance data. 1,024 concurrent TCP probes, 5,000 concurrent ICMP probes and 5,000 targets are limits, not measurements.
 - Feature or performance comparisons with other tools.
 - A capture, report or log from a real production maintenance window.
 - Rights or license terms for the generated hero footage: do not call it licensed, stock or real footage.
