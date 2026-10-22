@@ -549,3 +549,33 @@ async def test_tui_finish_cancels_pending_lookups_and_started_loops(monkeypatch)
     assert [target.target for target in app.targets] == ["slow.example", "192.0.2.1"]
     assert [target.resolved_address for target in app.targets] == [None, "192.0.2.1"]
     await app.on_unmount()
+
+
+async def test_tui_marks_a_row_whose_probe_loop_dies(monkeypatch) -> None:
+    # A loop that ends on an unexpected error must not leave its row frozen on
+    # its last state while the other rows keep updating.
+    app = PinghueTextualApp(
+        args=build_args(targets=["192.0.2.1", "192.0.2.2"]),
+        mode=ProbeMode.ICMP,
+    )
+
+    async def fake_probe_target_loop(
+        target: TargetRun, *, stop_event: asyncio.Event, **_: Any
+    ) -> None:
+        if target.target == "192.0.2.1":
+            raise RuntimeError("loop bug")
+        await stop_event.wait()
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=app_module.resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+
+    await app.on_mount()
+    assert await _eventually(lambda: app.targets[0].status == TargetStatus.ERROR)
+
+    assert app.targets[0].error == "Unexpected probe loop error: loop bug"
+    assert app.targets[1].status == TargetStatus.RESOLVING
+    await app.on_unmount()

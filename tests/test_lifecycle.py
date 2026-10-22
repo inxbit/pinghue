@@ -431,3 +431,68 @@ async def test_run_no_tui_reports_a_never_probed_target_as_pending(
         runner.exit_code_for_targets(targets, fail_on_any_down=True, fail_on_all_down=False)
         == runner.EXIT_TARGETS_DOWN
     )
+
+
+# Defensive handling: one target's failure neither freezes it nor ends the run.
+
+
+async def test_probe_target_loop_records_an_unexpected_probe_error_and_keeps_probing() -> None:
+    target = TargetRun("192.0.2.1", resolved_address="192.0.2.1")
+    reported: list[ProbeSample | None] = []
+    calls = 0
+
+    async def flaky_probe() -> ProbeSample:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("socket layer exploded")
+        return ok_sample()
+
+    await asyncio.wait_for(
+        probe_target_loop(
+            target,
+            args=SimpleNamespace(count=2, interval=0.01, fail_threshold=3, jitter_threshold=50.0),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=asyncio.Event(),
+            immediate_event=asyncio.Event(),
+            initial_delay=0,
+            on_sample=lambda _target, sample: reported.append(sample),
+            probe_once_fn=flaky_probe,
+        ),
+        timeout=1.0,
+    )
+
+    assert calls == 2
+    first = reported[0]
+    assert first is not None
+    assert first.status == SampleStatus.ERROR
+    assert first.error == "Unexpected probe error: socket layer exploded"
+    # Recorded like any failed probe, so the row shows the failure and its text.
+    assert list(target.samples) == [first]
+    assert target.error == first.error
+
+
+async def test_run_no_tui_keeps_running_when_one_target_loop_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed = capture_stop_event(monkeypatch)
+    real_probe_target_loop = runner.probe_target_loop
+
+    async def failing_loop(target: TargetRun, **kwargs: Any) -> None:
+        if target.target == "192.0.2.1":
+            raise RuntimeError("loop bug")
+        await real_probe_target_loop(target, **kwargs)
+
+    monkeypatch.setattr(runner, "probe_target_loop", failing_loop)
+    monkeypatch.setattr(runner, "probe_once", applying_probe)
+
+    run_task = asyncio.create_task(
+        run_no_tui(no_tui_args(targets=["192.0.2.1", "192.0.2.2"], count=1), ProbeMode.ICMP)
+    )
+
+    assert await settle(run_task, installed)
+    targets, exit_reason, _, _ = run_task.result()
+    assert exit_reason == "completed"
+    assert [target.status for target in targets] == [TargetStatus.ERROR, TargetStatus.HEALTHY]
+    assert targets[0].error == "Unexpected probe loop error: loop bug"

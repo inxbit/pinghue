@@ -318,6 +318,16 @@ def first_probe_delay(*, index: int, count: int, window: float, elapsed: float) 
     return max(0.0, stagger_delay(index=index, count=count, interval=window) - elapsed)
 
 
+def record_probe_loop_failure(target: TargetRun, error: BaseException) -> None:
+    """Mark a target whose probe loop ended on an unexpected error.
+
+    The target then reports the failure instead of keeping its last state as
+    if it were still being probed.
+    """
+    target.status = TargetStatus.ERROR
+    target.error = f"Unexpected probe loop error: {error}"
+
+
 def _cancel_requested() -> bool:
     """Return whether the running task has a pending cancellation request.
 
@@ -373,10 +383,25 @@ async def probe_target_loop(
     probe_limit = args.count
     while not stop_event.is_set():
         probe_started = _monotonic_time()
-        if probe_once_fn is None:
-            sample = await probe_once(target, args=args, mode=mode, semaphore=semaphore)
-        else:
-            sample = await probe_once_fn()
+        try:
+            if probe_once_fn is None:
+                sample = await probe_once(target, args=args, mode=mode, semaphore=semaphore)
+            else:
+                sample = await probe_once_fn()
+        except Exception as exc:
+            # Record an unexpected failure like any failed probe so the row
+            # keeps updating and the run carries on instead of losing the loop.
+            sample = ProbeSample(
+                timestamp=datetime.now(timezone.utc),
+                latency_ms=None,
+                status=SampleStatus.ERROR,
+                error=f"Unexpected probe error: {exc}",
+            )
+            target.apply_sample(
+                sample,
+                fail_threshold=args.fail_threshold,
+                jitter_threshold_ms=args.jitter_threshold,
+            )
         if on_sample is not None:
             on_sample(target, sample)
 
@@ -474,26 +499,32 @@ async def _run_probe_loops_until_shutdown(
     immediate_event = asyncio.Event()
 
     async def resolve_and_probe(index: int) -> None:
-        resolved = await resolve_run_target(targets[index].target, args)
-        resolved.samples = SampleWindow(resolved.samples, maxlen=targets[index].samples.maxlen)
-        targets[index] = resolved
-        if stop_event.is_set():
-            return
-        await probe_target_loop(
-            resolved,
-            args=args,
-            mode=mode,
-            semaphore=semaphore,
-            stop_event=stop_event,
-            immediate_event=immediate_event,
-            initial_delay=first_probe_delay(
-                index=index,
-                count=len(targets),
-                window=window,
-                elapsed=loop.time() - run_start,
-            ),
-            on_sample=on_sample,
-        )
+        run = targets[index]
+        try:
+            resolved = await resolve_run_target(run.target, args)
+            resolved.samples = SampleWindow(resolved.samples, maxlen=run.samples.maxlen)
+            targets[index] = run = resolved
+            if stop_event.is_set():
+                return
+            await probe_target_loop(
+                resolved,
+                args=args,
+                mode=mode,
+                semaphore=semaphore,
+                stop_event=stop_event,
+                immediate_event=immediate_event,
+                initial_delay=first_probe_delay(
+                    index=index,
+                    count=len(targets),
+                    window=window,
+                    elapsed=loop.time() - run_start,
+                ),
+                on_sample=on_sample,
+            )
+        except Exception as exc:
+            # One target's unexpected failure must not end the whole run
+            # without a report; record it on that target instead.
+            record_probe_loop_failure(run, exc)
 
     tasks = [asyncio.create_task(resolve_and_probe(index)) for index in range(len(targets))]
     all_loops = asyncio.gather(*tasks)
@@ -511,16 +542,10 @@ async def _run_probe_loops_until_shutdown(
             return "deadline"
         if not all_loops.done():
             return "deadline"
-        # gather() settles on the first failure, so sibling loops may still be
-        # running here; the finally block cancels them.
-        for task in tasks:
-            if not task.done():
-                continue
-            if task.cancelled():
-                return "interrupted"
-            error = task.exception()
-            if error is not None:
-                raise error
+        # gather() settles as soon as one loop is cancelled, so sibling loops
+        # may still be running here; the finally block cancels them.
+        if any(task.cancelled() for task in tasks):
+            return "interrupted"
         return None
     finally:
         # Set the stop event before cancelling: a probe that swallows its

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any
 
 from textual.app import App, ComposeResult
@@ -20,6 +21,7 @@ from pinghue.runner import (
     apply_retained_sample_budget,
     first_probe_delay,
     probe_target_loop,
+    record_probe_loop_failure,
     resolve_run_target,
     stagger_window,
 )
@@ -37,6 +39,13 @@ UI_REFRESH_INTERVAL = 0.5
 # Lookups that are already done (IP literals) drain without suspending; give
 # input and rendering a turn this often while starting their probe loops.
 RESOLUTION_YIELD_EVERY = 256
+
+
+def _note_probe_loop_failure(target: TargetRun, task: asyncio.Task[None]) -> None:
+    # Without this a loop that died on an unexpected error would leave its row
+    # frozen on its last state for the rest of the run.
+    if not task.cancelled() and (error := task.exception()) is not None:
+        record_probe_loop_failure(target, error)
 
 
 class PinghueTextualApp(App[None]):
@@ -224,6 +233,7 @@ class PinghueTextualApp(App[None]):
                 ),
             )
         )
+        task.add_done_callback(partial(_note_probe_loop_failure, target))
         self._probe_tasks.append(task)
 
     async def _stop_probe_tasks(self) -> None:
