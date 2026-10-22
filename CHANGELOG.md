@@ -6,6 +6,10 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Security
+
+- A DNS answer made only of unspecified addresses (`0.0.0.0`, `::`), which DNS filters and sinkholes return for blocked names, is now reported as `dns_failure` instead of probed; probing it reached the local host on Linux and reported the blocked name healthy. Unspecified addresses are also dropped from mixed answers, and answers are deduplicated in one pass that stops at the 8-address failover cap, so a huge answer cannot stall the event loop. Explicit IP-literal targets are unchanged.
+
 ### Fixed
 
 - Stuck DNS lookups no longer make other hostnames fail with `resolver worker limit reached`. A lookup that runs past its budget keeps its resolver thread until the OS resolver returns, other lookups wait for a free thread, and a retry of a name whose lookup is still running shares that lookup instead of starting another thread. A host that cannot get a resolver thread (all are busy, or the process or container thread limit is reached) keeps its current state (`resolving` before its first lookup) and retries on its next probe, with no new `dns_failure` verdict and no 10-second DNS cooldown. When a lookup finishes after its budget expired, the name's next retry uses that answer instead of starting a new lookup. Resolver threads are capped at 128 (previously 16) and lookup concurrency is 32 (previously 16).
@@ -13,10 +17,6 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - Raised the DNS lookup budget from 5 to 12 seconds, above glibc's default 5-second per-nameserver timeout, so an unresponsive first nameserver in `/etc/resolv.conf` no longer turns every hostname into `dns_failure`; `pinghue --check` uses the same budget.
 - A hostname that resolves after an earlier DNS failure now shows `resolving` until its first probe result instead of `down`.
 - A host whose known addresses keep failing now has its name looked up again in the background while those addresses keep being probed, so a slow or unresponsive DNS server no longer pauses its probes or delays showing its recovery. The new answer is used only if the host is still failing, and IP-literal targets skip the lookup.
-
-### Security
-
-- A DNS answer made only of unspecified addresses (`0.0.0.0`, `::`), which DNS filters and sinkholes return for blocked names, is now reported as `dns_failure` instead of probed; probing it reached the local host on Linux and reported the blocked name healthy. Unspecified addresses are also dropped from mixed answers, and answers are deduplicated in one pass that stops at the 8-address failover cap, so a huge answer cannot stall the event loop. Explicit IP-literal targets are unchanged.
 
 ## 5.1.0 - 2026-08-18
 
