@@ -4,6 +4,7 @@ import threading
 import pytest
 
 from pinghue import doctor
+from pinghue.limits import FdLimit
 
 
 class FakeSocket:
@@ -253,3 +254,81 @@ def test_dns_probe_times_out_when_resolver_hangs(
     assert address is None
     assert elapsed_ms is None
     assert error is not None and "timed out" in error
+
+
+def _check_with_fd_limit(monkeypatch: pytest.MonkeyPatch, limit: FdLimit | None) -> tuple[int, str]:
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: (0.12, None))
+    monkeypatch.setattr(doctor, "_dns_probe", lambda _name: ("10.0.0.10", 1.0, None))
+    monkeypatch.setattr(doctor, "read_fd_limit", lambda: limit)
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=False, use_color=False)
+
+    return exit_code, output.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [
+        (
+            FdLimit(20000, 20000),
+            "[ok]    Open-file limit 20000 (hard 20000) fits --concurrency up to 1024",
+        ),
+        (
+            FdLimit(None, None),
+            "[ok]    Open-file limit unlimited (hard unlimited) fits --concurrency up to 1024",
+        ),
+        (
+            FdLimit(256, None),
+            "[ok]    Open-file limit 256 (hard unlimited); "
+            "raised at startup to fit --concurrency up to 1024",
+        ),
+        (
+            FdLimit(1024, 524288),
+            "[ok]    Open-file limit 1024 (hard 524288); "
+            "raised at startup to fit --concurrency up to 1024",
+        ),
+    ],
+)
+def test_doctor_reports_open_file_limit_that_fits_maximum_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+    limit: FdLimit,
+    expected: str,
+) -> None:
+    exit_code, text = _check_with_fd_limit(monkeypatch, limit)
+
+    assert exit_code == 0
+    assert "\nOpen files\n" in text
+    assert expected in text
+    assert "Raise the hard limit" not in text
+
+
+def test_doctor_warns_when_hard_open_file_limit_caps_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exit_code, text = _check_with_fd_limit(monkeypatch, FdLimit(256, 512))
+
+    # A low open-file limit slows large runs but does not make ICMP unusable.
+    assert exit_code == 0
+    assert "[warn]  Open-file limit 256 (hard 512) caps --concurrency at 384\n" in text
+    assert "Raise the hard limit to at least 1152 to allow --concurrency 1024." in text
+
+
+def test_doctor_flags_open_file_limit_below_default_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, text = _check_with_fd_limit(monkeypatch, FdLimit(160, 160))
+
+    assert (
+        "[warn]  Open-file limit 160 (hard 160) caps --concurrency at 32, "
+        "below the default minimum of 64"
+    ) in text
+
+
+def test_doctor_reports_unavailable_open_file_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    exit_code, text = _check_with_fd_limit(monkeypatch, None)
+
+    assert exit_code == 0
+    assert "[warn]  Open-file limit not available on this platform" in text

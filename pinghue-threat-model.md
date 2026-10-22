@@ -114,6 +114,9 @@ samples. Host files are size/line bounded, the merged CLI inventory is capped
 at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP work
 uses a reusable daemon pool, and retained history is limited to 100,000 samples
 across the run. Whole-run counters/statistics do not retain every sample.
+Probe concurrency never exceeds 1,024 or what the open-file limit can hold:
+pinghue raises only its own soft limit, never past the hard limit, and lowers
+concurrency with a warning when the hard limit is too low.
 
 ### 3. Host-file path confusion
 
