@@ -481,6 +481,74 @@ async def test_resolver_thread_start_failure_releases_capacity(
     assert resolved.address == "192.0.2.30"
 
 
+async def test_resolver_error_reaches_every_caller_joined_to_the_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def failing_getaddrinfo(host: str, *_: object, **__: object) -> list[Any]:
+        calls.append(host)
+        started.set()
+        release.wait(5.0)
+        raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+
+    slots = threading.BoundedSemaphore(2)
+    monkeypatch.setattr(probes, "_dns_thread_slots", slots)
+    monkeypatch.setattr(socket, "getaddrinfo", failing_getaddrinfo)
+
+    try:
+        first = asyncio.ensure_future(resolve_target("fail-join.example", AddressFamily.AUTO))
+        await _wait_until(started.is_set)
+        second = asyncio.ensure_future(resolve_target("fail-join.example", AddressFamily.AUTO))
+        await asyncio.sleep(0.05)
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(first, second), timeout=2.0)
+    finally:
+        release.set()
+
+    assert [result.error for result in results] == [
+        "getaddrinfo: Temporary failure in name resolution"
+    ] * 2
+    assert all(result.address is None for result in results)
+    assert calls == ["fail-join.example"]
+    assert ("fail-join.example", socket.AF_UNSPEC) not in probes._dns_lookups
+    for _ in range(2):
+        assert slots.acquire(blocking=False)
+
+
+async def test_late_answers_stay_bounded_and_evict_the_oldest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = [f"late-{index}.bounded.example" for index in range(5)]
+    releases = {name: threading.Event() for name in names}
+
+    def slow_getaddrinfo(host: str, *_: object, **__: object) -> list[Any]:
+        releases[host].wait(5.0)
+        return [_answer("192.0.2.40")]
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+    monkeypatch.setattr(probes, "MAX_DNS_DAEMON_THREADS", 3)
+    monkeypatch.setattr(probes, "_dns_late_answers", {})
+    keys = [(name, socket.AF_UNSPEC) for name in names]
+
+    try:
+        for name in names:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(resolve_target(name, AddressFamily.AUTO), timeout=0.05)
+        # Every caller gave up; answers then land one at a time, oldest first.
+        for key in keys:
+            releases[key[0]].set()
+            await _wait_until(lambda key=key: key in probes._dns_late_answers)
+            assert len(probes._dns_late_answers) <= 3
+    finally:
+        for release in releases.values():
+            release.set()
+
+    assert list(probes._dns_late_answers) == keys[2:]
+
+
 async def test_resolve_target_joins_running_lookup_of_the_same_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
