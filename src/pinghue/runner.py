@@ -95,12 +95,15 @@ def target_run_from_resolution(resolved: ResolvedTarget) -> TargetRun:
             error=resolved.error,
         )
 
+    # Resolved but not yet probed: stay pending until the first sample lands.
+    # DOWN needs evidence, and a run that ends before this target's first probe
+    # must not report a healthy host as down.
     return TargetRun(
         target=resolved.target,
         resolved_address=resolved.address,
         resolved_family=resolved.family,
         resolved_addresses=resolved.addresses,
-        status=TargetStatus.DOWN,
+        status=TargetStatus.RESOLVING,
         error=None,
     )
 

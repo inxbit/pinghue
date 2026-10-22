@@ -19,6 +19,7 @@ from pinghue.models import (
     ProbeSample,
     SampleStatus,
     TargetRun,
+    TargetStatus,
 )
 from pinghue.probes import ResolvedTarget
 from pinghue.runner import (
@@ -228,3 +229,45 @@ async def test_probe_target_loop_ends_promptly_after_a_probe_swallows_its_cancel
     assert probes == 1
     # The result measured before the cancellation is still reported.
     assert reported == [ok_sample()]
+
+
+# Resolved targets stay pending until their first probe.
+
+
+def test_target_run_from_resolution_is_pending_until_the_first_probe() -> None:
+    run = resolved("service.example", "192.0.2.1")
+    failed = target_run_from_resolution(ResolvedTarget("bad.example", None, None, "not found"))
+
+    assert (run.status, run.error, run.resolved_address) == (
+        TargetStatus.RESOLVING,
+        None,
+        "192.0.2.1",
+    )
+    assert (failed.status, failed.error) == (TargetStatus.DNS_FAILURE, "not found")
+
+
+async def test_run_no_tui_reports_a_never_probed_target_as_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed = capture_stop_event(monkeypatch)
+
+    async def blocked_probe(*_: object, **__: object) -> ProbeSample:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(runner, "probe_once", blocked_probe)
+
+    run_task = asyncio.create_task(run_no_tui(no_tui_args(duration=0.05), ProbeMode.ICMP))
+
+    assert await settle(run_task, installed)
+    targets, exit_reason, _, _ = run_task.result()
+    assert exit_reason == "deadline"
+    assert [(target.status, target.stats.sent) for target in targets] == [
+        (TargetStatus.RESOLVING, 0)
+    ]
+    assert targets[0].resolved_address == "192.0.2.1"
+    # Never-probed targets still fail closed for --fail-on-any-down.
+    assert (
+        runner.exit_code_for_targets(targets, fail_on_any_down=True, fail_on_all_down=False)
+        == runner.EXIT_TARGETS_DOWN
+    )
