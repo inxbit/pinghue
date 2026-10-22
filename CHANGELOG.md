@@ -6,6 +6,23 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Added
+
+- The TUI header shows a fleet summary next to the title: host counts per state and the age of the oldest newest result, in amber once probes fall behind.
+- A host with an address but no probe result yet (just resolved, or just reset) shows `pending` in the TUI instead of `resolving` or a red `down`; JSON output is unchanged.
+
+### Changed
+
+- The TUI refresh no longer rebuilds every row: only rows whose target changed are re-rendered, only changed rows on screen are repainted, and with thousands of hosts the rows out of view are refreshed round-robin within a few seconds (immediately when scrolled into view) while state changes reach every row on the next refresh. At 5,000 hosts the event loop stalls far less, so probes keep their cadence.
+- Long host names are shortened with a middle `…` that keeps the distinguishing end of the name.
+- On narrow terminals the mode, min and max columns (and the hidden address placeholder) collapse before the host column drops below 12 characters.
+
+### Fixed
+
+- The newest history glyphs are visible without horizontal scrolling: the column layout now accounts for cell padding and always reserves the vertical scrollbar.
+- Resizing the terminal or toggling addresses with `a` updates the table's scroll extent and redraws cells at their new widths.
+- Arrow keys no longer force a repaint of the whole table on every press.
+
 ## 5.1.0 - 2026-08-18
 
 ### Added
