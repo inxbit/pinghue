@@ -65,7 +65,7 @@ Open questions:
 | Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency and resolver-thread caps; per-name cooldown and backoff |
 | Resolved address -> network | ICMP datagram or TCP connection | Outbound-only probes; bounded concurrency/timeouts; per-target exception containment |
 | Probe/library errors -> terminal | Target, address, status, error text; doctor OS metadata and socket errors | Central display sanitization; literal escaping of controls and non-ASCII text |
-| Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; effective-user ownership for FIFOs and overwritten files; pre-run path check; schema tests |
+| Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; effective-user ownership for FIFOs and overwritten files; owner-only FIFO permissions in private mode; pre-run path check; schema tests |
 | Git tag -> release workflow | Source commit and package artifacts | Signed annotated-tag identity/target checks; main ancestry; exact-commit validation; protected environment; OIDC; attestations |
 | Dependency metadata -> package indexes | Locked requirements and advisory queries | Hash-enforced installs; narrow runtime ranges; Dependabot and scheduled audits |
 | Docs source -> GitHub Pages | Static HTML/CSS/JS and assets, one same-origin video | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; self-only CSP with no inline script or style (`media-src 'self'` admits only the hero clip in `docs/media/`); Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
@@ -90,6 +90,8 @@ An attacker or mistake may:
 - Race an output path as the same local user.
 - Pre-create a FIFO or regular file at a predictable report path in a shared,
   world-writable directory such as `/tmp` as a different local user.
+- Open, as a different local user, an operator's FIFO whose permission bits
+  let group or other users read it.
 - Cause timeouts, refused connections, partial address failures, or resolver
   failures intended to distort status evidence.
 - Compromise a dependency or attempt to exploit weak release/tag permissions.
@@ -154,19 +156,29 @@ after the opened descriptor matches the observed node.
 
 In a shared sticky directory another local user can create the report path
 first. A FIFO is written only when the effective user owns it, both as
-observed and as opened, so the report is never delivered to another user's
-reader. Character devices remain accepted regardless of owner because the
-only one an unprivileged user can create is the Linux `0:0` whiteout device,
-which has no driver and is refused. These refusals exit with status 1,
-write nothing, and leave no temporary file behind. The CLI runs the
-same type, link-count, and ownership checks, plus write-permission checks on
-an existing node and on the nearest existing parent directory (which must be
-a directory, not a dangling symlink), before probing starts so a refused path
-does not discard a completed run; the write-time checks remain authoritative.
-The containing directory itself is not judged: a user who owns it, or can
-write to it without the sticky bit, can still rename, replace, or remove a
-finished report, so evidence belongs in a directory only the operator
-controls.
+observed and as opened, so the report is never delivered to a reader on a FIFO
+another user created. In the default `private` output mode a FIFO is also
+written only when its permission bits give group and other users no read or
+write access, again both as observed and as opened: `mkfifo` under the usual
+umask `022` creates `0644`, which would let every local user open the FIFO and
+read the report. `--output-mode umask` leaves a FIFO's permissions to the
+operator. On macOS a `/dev/fd/N` path, as passed by process substitution,
+stats as the run's own descriptor, with mode bits that describe the descriptor
+rather than a node (a pipe reports `0660`); no other user can open that
+descriptor through the path, so its bits are not judged. The check reads
+permission bits only: on Linux they reflect any POSIX ACL mask, but a macOS
+ACL can grant access that the bits do not show. Character devices remain
+accepted regardless of owner because the only one an unprivileged user can
+create is the Linux `0:0` whiteout device, which has no driver and is refused.
+These refusals exit with status 1, write nothing, and leave no temporary file
+behind. The CLI runs the same type, link-count, ownership, and FIFO-permission
+checks, plus write-permission checks on an existing node and on the nearest
+existing parent directory (which must be a directory, not a dangling symlink),
+before probing starts so a refused path does not discard a completed run; the
+write-time checks remain authoritative. The containing directory itself is not
+judged: a user who owns it, or can write to it without the sticky bit, can
+still rename, replace, or remove a finished report, so evidence belongs in a
+directory only the operator controls.
 
 Explicit `--overwrite` of an existing single-link regular file keeps the
 verified inode and rewrites it in place. The file must be owned by the
@@ -250,7 +262,7 @@ release gate.
 | TM-001 | Terminal/control-character injection | Central sanitization and adversarial rendering tests | A future output caller could omit sanitization | Low |
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
 | TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and line splitting only at `\n`, `\r\n`, or a lone `\r` | Same-user content modification remains possible | Low |
-| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report | Medium |
+| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, owner-only FIFO permissions in private mode, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report; `--output-mode umask` or a macOS ACL can still let other users read a FIFO | Medium |
 | TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats, token-matched ICMP replies, random ICMP sequence numbers | Remote routing/DNS state is inherently external; forged ICMP errors with short quotes can mark a probe `unreachable` | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
@@ -263,7 +275,8 @@ release gate.
 - Every operator-controlled rendered/exported string is sanitized.
 - Target, file, resolver, probe, and retained-sample bounds stay enforced.
 - Host input and existing output nodes are validated by opened descriptor.
-- Existing FIFOs and `--overwrite` targets must be owned by the effective user.
+- Existing FIFOs and `--overwrite` targets must be owned by the effective user,
+  and in private mode an existing FIFO must give group and other users no access.
 - Existing output files remain no-clobber by default.
 - Release actions remain full-SHA pinned and checkout credentials are not
   persisted.
