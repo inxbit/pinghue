@@ -21,6 +21,8 @@ from pinghue.models import MAX_TARGET_SAMPLES, ProbeConfig, ProbeSample, TargetR
 
 SCHEMA_VERSION = 1
 
+_LINUX = sys.platform.startswith("linux")
+
 
 def format_timestamp(value: datetime) -> str:
     """Return UTC RFC 3339 timestamp with millisecond precision."""
@@ -129,9 +131,20 @@ def _existing_output_error(output_path: Path) -> FileExistsError:
 def _require_fifo_owner(output_path: Path, observed: os.stat_result) -> None:
     # A FIFO pre-created by another local user (for example in a shared sticky
     # directory such as /tmp) would hand the report to that user's reader.
-    # Character devices stay allowed: unprivileged users cannot create them.
+    # Character devices stay allowed whoever owns them: the only one an
+    # unprivileged user can create is the inert whiteout device refused below.
     if stat.S_ISFIFO(observed.st_mode) and observed.st_uid != os.geteuid():
         raise PermissionError(f"refusing to write to a FIFO owned by another user: {output_path}")
+
+
+def _refuse_whiteout_device(output_path: Path, observed: os.stat_result) -> None:
+    # Since Linux 5.8 any user may create the 0:0 "whiteout" character device
+    # that overlay filesystems use. It has no driver, so a report written to it
+    # is lost. On macOS 0:0 is the console device, so the check is Linux-only.
+    if _LINUX and stat.S_ISCHR(observed.st_mode) and observed.st_rdev == 0:
+        raise FileExistsError(
+            f"output path is a whiteout character device (0, 0) with no driver: {output_path}"
+        )
 
 
 def _require_regular_file_owner(output_path: Path, observed: os.stat_result) -> None:
@@ -144,9 +157,9 @@ def _require_regular_file_owner(output_path: Path, observed: os.stat_result) -> 
 def _existing_special_device_fd(output_path: Path) -> int | None:
     """Return a write fd if output_path is an existing char device or FIFO.
 
-    Symlinks, unsupported special nodes, and FIFOs owned by another user are
-    rejected. An opened character device or FIFO must match the identity
-    observed by lstat, closing the lstat/open replacement race.
+    Symlinks, unsupported special nodes, whiteout devices, and FIFOs owned by
+    another user are rejected. An opened character device or FIFO must match
+    the identity observed by lstat, closing the lstat/open replacement race.
     """
     try:
         pre = os.lstat(output_path)
@@ -157,6 +170,7 @@ def _existing_special_device_fd(output_path: Path) -> int | None:
     if stat.S_ISLNK(pre.st_mode) or not (stat.S_ISCHR(pre.st_mode) or stat.S_ISFIFO(pre.st_mode)):
         raise _not_regular_file_error(output_path)
     _require_fifo_owner(output_path, pre)
+    _refuse_whiteout_device(output_path, pre)
 
     flags = os.O_WRONLY
     if stat.S_ISFIFO(pre.st_mode) and hasattr(os, "O_NONBLOCK"):
@@ -352,6 +366,7 @@ def check_output_path(path: str | Path, *, overwrite: bool = False) -> None:
 
     if stat.S_ISCHR(observed.st_mode) or stat.S_ISFIFO(observed.st_mode):
         _require_fifo_owner(output_path, observed)
+        _refuse_whiteout_device(output_path, observed)
         return
     if not stat.S_ISREG(observed.st_mode):
         raise _not_regular_file_error(output_path)

@@ -290,12 +290,68 @@ def test_existing_special_device_rejects_fifo_owner_change_after_open(
 def test_write_output_json_allows_character_device_owned_by_another_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Unprivileged users cannot create device nodes, so devices such as
-    # /dev/null stay valid destinations whoever owns them.
+    # Unprivileged users can create only the inert whiteout device, so real
+    # devices such as /dev/null stay valid destinations whoever owns them.
     _pretend_other_user(monkeypatch)
 
     _write(Path("/dev/null"))
     _write(Path("/dev/null"), overwrite=True)
+
+
+def _whiteout_node() -> SimpleNamespace:
+    return SimpleNamespace(
+        st_mode=stat.S_IFCHR | 0o666,
+        st_dev=1,
+        st_ino=10,
+        st_rdev=0,
+        st_uid=os.geteuid() + 1,
+    )
+
+
+def test_whiteout_device_is_refused_before_it_is_opened(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Linux lets any user create the driverless 0:0 whiteout device in a shared
+    # directory; accepting it would lose the report when the run ends.
+    opened: list[str] = []
+    monkeypatch.setattr(export_module, "_LINUX", True)
+    monkeypatch.setattr(os, "lstat", lambda _path: _whiteout_node())
+    monkeypatch.setattr(os, "open", lambda path, _flags: opened.append(path))
+
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        check_output_path(Path("out.json"))
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        export_module._existing_special_device_fd(Path("out.json"))
+
+    assert opened == []
+
+
+def test_zero_device_number_is_not_a_whiteout_outside_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On macOS 0:0 is the console device, which only root can create.
+    monkeypatch.setattr(export_module, "_LINUX", False)
+    monkeypatch.setattr(os, "lstat", lambda _path: _whiteout_node())
+    monkeypatch.setattr(os, "access", lambda _path, _mode: True)
+
+    check_output_path(Path("console"))
+
+
+@pytest.mark.skipif(not export_module._LINUX, reason="whiteout devices are Linux-only")
+def test_write_output_json_refuses_real_whiteout_device(tmp_path: Path) -> None:
+    output_path = tmp_path / "out.json"
+    try:
+        os.mknod(output_path, stat.S_IFCHR | 0o666, os.makedev(0, 0))
+    except OSError:
+        pytest.skip("this kernel or sandbox does not permit whiteout devices")
+
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        check_output_path(output_path)
+    with pytest.raises(FileExistsError, match="whiteout character device"):
+        _write(output_path)
+
+    assert stat.S_ISCHR(output_path.lstat().st_mode)
+    assert _leftover_temp_files(tmp_path) == []
 
 
 def test_write_output_json_refuses_to_overwrite_file_owned_by_another_user(

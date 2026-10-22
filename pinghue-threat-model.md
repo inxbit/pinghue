@@ -142,8 +142,9 @@ after the opened descriptor matches the observed node.
 In a shared sticky directory another local user can create the report path
 first. A FIFO is written only when the effective user owns it, both as
 observed and as opened, so the report is never delivered to another user's
-reader. Character devices remain accepted regardless of owner because
-unprivileged users cannot create them. These refusals exit with status 1,
+reader. Character devices remain accepted regardless of owner because the
+only one an unprivileged user can create is the Linux `0:0` whiteout device,
+which has no driver and is refused. These refusals exit with status 1,
 write nothing, and leave no temporary file behind. The CLI runs the
 same type, link-count, and ownership checks, plus a parent-directory
 writability check, before probing starts so a refused path does not discard a
