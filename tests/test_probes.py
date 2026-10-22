@@ -8,17 +8,10 @@ import time
 from typing import Any
 
 import pytest
-from icmplib.exceptions import (
-    DestinationUnreachable,
-    ICMPLibError,
-    ICMPv4DestinationUnreachable,
-    SocketPermissionError,
-    TimeExceeded,
-    TimeoutExceeded,
-)
 
 import pinghue.probes as probes
-from pinghue.models import AddressFamily, SampleStatus
+from pinghue import icmp
+from pinghue.models import AddressFamily, SampleStatus, TargetRun, TargetStatus
 from pinghue.probes import ResolvedTarget, icmp_probe, resolve_target, tcp_probe
 
 
@@ -294,162 +287,6 @@ async def test_resolve_target_preserves_all_getaddrinfo_addresses(
     assert resolved.family == AddressFamily.IPV4
 
 
-class _FakeReply:
-    def __init__(
-        self, *, time: float = 1000.0042, code: int = 1, unreachable: bool = False
-    ) -> None:
-        self.time = time
-        self.code = code
-        self._unreachable = unreachable
-
-    def raise_for_status(self) -> None:
-        if self._unreachable:
-            raise ICMPv4DestinationUnreachable(self)
-
-
-class _FakeRequest:
-    def __init__(self, *, destination: str, id: int, sequence: int) -> None:
-        self.destination = destination
-        self.id = id
-        self.sequence = sequence
-        self.time = 1000.0
-
-
-class _FakeSocket:
-    def __init__(self, *, reply: object = None, receive_error: BaseException | None = None) -> None:
-        self._reply = reply
-        self._receive_error = receive_error
-
-    def __enter__(self) -> "_FakeSocket":
-        return self
-
-    def __exit__(self, *_: object) -> bool:
-        return False
-
-    def send(self, request: object) -> None:
-        self.sent = request
-
-    def receive(self, _request: object, _timeout: float) -> object:
-        if self._receive_error is not None:
-            raise self._receive_error
-        return self._reply
-
-
-def _make_backend(*, v4_factory: Any, v6_factory: Any) -> probes._IcmpBackend:
-    return probes._IcmpBackend(
-        socket_v4=v4_factory,
-        socket_v6=v6_factory,
-        request=_FakeRequest,
-        unique_identifier=lambda: 1,
-        timeout_error=TimeoutExceeded,
-        permission_error=SocketPermissionError,
-        unreachable_errors=(DestinationUnreachable, TimeExceeded),
-        library_error=ICMPLibError,
-    )
-
-
-def _install_backend(monkeypatch: pytest.MonkeyPatch, backend: probes._IcmpBackend) -> None:
-    monkeypatch.setattr(probes, "_icmp_backend", backend, raising=False)
-    monkeypatch.setattr(probes, "_icmp_import_error", None, raising=False)
-
-
-async def test_icmp_probe_runs_cancellable_blocking_echo_on_daemon_thread(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = _make_backend(
-        v4_factory=lambda *_: pytest.fail("blocking echo is replaced below"),
-        v6_factory=lambda *_: pytest.fail("blocking echo is replaced below"),
-    )
-    started = threading.Event()
-    release = threading.Event()
-    finished = threading.Event()
-    worker_is_daemon: list[bool] = []
-
-    def blocking_echo(*_: object, **__: object) -> float:
-        worker_is_daemon.append(threading.current_thread().daemon)
-        started.set()
-        try:
-            release.wait(timeout=1.0)
-            return 1.0
-        finally:
-            finished.set()
-
-    monkeypatch.setattr(probes, "_get_icmp_backend", lambda: backend)
-    monkeypatch.setattr(probes, "_run_icmp_echo", blocking_echo)
-
-    task = asyncio.create_task(
-        icmp_probe("1.1.1.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
-    )
-    try:
-        for _ in range(100):
-            if started.is_set():
-                break
-            await asyncio.sleep(0.001)
-        assert started.is_set()
-
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    finally:
-        release.set()
-
-    assert finished.wait(timeout=1.0)
-    assert worker_is_daemon == [True]
-
-
-async def test_daemon_worker_pool_reuses_an_idle_thread() -> None:
-    pool = probes._DaemonWorkerPool(max_workers=2, name="pinghue-test")
-    worker_ids: list[int | None] = []
-
-    def record_worker() -> None:
-        worker_ids.append(threading.current_thread().ident)
-
-    await pool.run(record_worker)
-    await pool.run(record_worker)
-
-    assert len(set(worker_ids)) == 1
-
-
-async def test_daemon_worker_pool_runs_concurrent_submissions_concurrently() -> None:
-    pool = probes._DaemonWorkerPool(max_workers=2, name="pinghue-test")
-    lock = threading.Lock()
-    both_started = threading.Event()
-    started = 0
-
-    def wait_for_peer() -> bool:
-        nonlocal started
-        with lock:
-            started += 1
-            if started == 2:
-                both_started.set()
-        return both_started.wait(timeout=0.25)
-
-    results = await asyncio.gather(pool.run(wait_for_peer), pool.run(wait_for_peer))
-
-    assert results == [True, True]
-
-
-async def test_daemon_worker_pool_recovers_capacity_after_thread_start_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pool = probes._DaemonWorkerPool(max_workers=1, name="pinghue-test")
-    real_thread = threading.Thread
-
-    class FailingThread:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-        def start(self) -> None:
-            raise RuntimeError("thread creation failed")
-
-    monkeypatch.setattr(threading, "Thread", FailingThread)
-    with pytest.raises(RuntimeError, match="thread creation failed"):
-        await pool.run(lambda: 1)
-
-    monkeypatch.setattr(threading, "Thread", real_thread)
-    assert await pool.run(lambda: 2) == 2
-
-
 async def test_daemon_thread_start_failure_releases_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -476,65 +313,112 @@ async def test_daemon_thread_start_failure_releases_capacity(
     slots.release()
 
 
-async def test_icmp_probe_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = _make_backend(
-        v4_factory=lambda *_: _FakeSocket(receive_error=TimeoutExceeded(1.0)),
-        v6_factory=lambda *_: _FakeSocket(receive_error=TimeoutExceeded(1.0)),
-    )
-    _install_backend(monkeypatch, backend)
+class _StubEngine:
+    def __init__(self, result: icmp.EchoResult) -> None:
+        self.result = result
+        self.calls: list[tuple[str, bool, float]] = []
 
-    sample = await icmp_probe("1.1.1.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
-
-    assert sample.status == SampleStatus.TIMEOUT
+    async def echo(self, destination: str, *, ipv6: bool, timeout_s: float) -> icmp.EchoResult:
+        self.calls.append((destination, ipv6, timeout_s))
+        return self.result
 
 
-async def test_icmp_probe_distinguishes_unreachable_from_timeout(
-    monkeypatch: pytest.MonkeyPatch,
+def _install_engine(monkeypatch: pytest.MonkeyPatch, engine: object) -> None:
+    monkeypatch.setattr(probes, "engine_for_running_loop", lambda: engine)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        icmp.EchoResult(SampleStatus.OK, 0.42),
+        icmp.EchoResult(SampleStatus.TIMEOUT),
+        icmp.EchoResult(SampleStatus.UNREACHABLE, error="Destination host unreachable"),
+    ],
+    ids=["ok", "timeout", "unreachable"],
+)
+async def test_icmp_probe_reports_engine_outcome(
+    monkeypatch: pytest.MonkeyPatch, result: icmp.EchoResult
 ) -> None:
-    # M2: a destination-unreachable reply must classify UNREACHABLE, not TIMEOUT.
-    backend = _make_backend(
-        v4_factory=lambda *_: _FakeSocket(reply=_FakeReply(unreachable=True, code=1)),
-        v6_factory=lambda *_: _FakeSocket(reply=_FakeReply(unreachable=True, code=1)),
-    )
-    _install_backend(monkeypatch, backend)
+    _install_engine(monkeypatch, _StubEngine(result))
 
     sample = await icmp_probe("192.0.2.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
 
-    assert sample.status == SampleStatus.UNREACHABLE
-    assert sample.error
+    assert (sample.status, sample.latency_ms, sample.error) == result
 
 
-async def test_icmp_probe_selects_socket_by_address_family(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("address", "sent_to", "ipv6"),
+    [
+        ("192.0.2.1", "192.0.2.1", False),
+        ("2606:4700:4700::1111", "2606:4700:4700::1111", True),
+        ("fe80::1%eth0", "fe80::1%eth0", True),
+        ("::ffff:192.0.2.1", "192.0.2.1", False),
+    ],
+)
+async def test_icmp_probe_selects_socket_family_from_the_address(
+    monkeypatch: pytest.MonkeyPatch, address: str, sent_to: str, ipv6: bool
 ) -> None:
-    used: list[str] = []
+    engine = _StubEngine(icmp.EchoResult(SampleStatus.OK, 1.0))
+    _install_engine(monkeypatch, engine)
 
-    def v4(*_: object) -> _FakeSocket:
-        used.append("v4")
-        return _FakeSocket(reply=_FakeReply())
+    await icmp_probe(address, timeout_s=2.5, address_family=AddressFamily.AUTO)
 
-    def v6(*_: object) -> _FakeSocket:
-        used.append("v6")
-        return _FakeSocket(reply=_FakeReply())
-
-    backend = _make_backend(v4_factory=v4, v6_factory=v6)
-    _install_backend(monkeypatch, backend)
-
-    await icmp_probe("2606:4700:4700::1111", timeout_s=1.0, address_family=AddressFamily.IPV6)
-
-    assert used == ["v6"]
+    assert engine.calls == [(sent_to, ipv6, 2.5)]
 
 
-async def test_icmp_probe_reports_error_when_icmplib_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(probes, "_icmp_backend", None, raising=False)
-    monkeypatch.setattr(probes, "_icmp_import_error", ImportError("no icmplib"), raising=False)
+async def test_icmp_probe_rejects_a_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _StubEngine(icmp.EchoResult(SampleStatus.OK, 1.0))
+    _install_engine(monkeypatch, engine)
 
-    sample = await icmp_probe("1.1.1.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
+    sample = await icmp_probe("example.com", timeout_s=1.0, address_family=AddressFamily.AUTO)
 
     assert sample.status == SampleStatus.ERROR
-    assert "no icmplib" in (sample.error or "")
+    assert sample.error == "ICMP probes need an IP address, not 'example.com'"
+    assert engine.calls == []
+
+
+async def test_icmp_probe_reports_error_when_engine_cannot_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_engine() -> None:
+        raise RuntimeError("no engine")
+
+    monkeypatch.setattr(probes, "engine_for_running_loop", broken_engine)
+
+    sample = await icmp_probe("192.0.2.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
+
+    assert sample.status == SampleStatus.ERROR
+    assert sample.error == "ICMP engine unavailable: no engine"
+
+
+async def test_icmp_probe_socket_permission_error_marks_target_permission_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def blocked_socket(*_: object) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    engine = icmp.IcmpEngine(asyncio.get_running_loop(), socket_factory=blocked_socket)
+    _install_engine(monkeypatch, engine)
+
+    sample = await icmp_probe("192.0.2.1", timeout_s=1.0, address_family=AddressFamily.IPV4)
+    target = TargetRun(target="192.0.2.1")
+    target.apply_sample(sample, fail_threshold=3, jitter_threshold_ms=50.0)
+
+    assert sample.status == SampleStatus.ERROR
+    assert (sample.error or "").startswith("permission denied: ")
+    assert target.status == TargetStatus.PERMISSION_DENIED
+
+
+async def test_icmp_probe_real_loopback_reports_success() -> None:
+    try:
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP).close()
+    except OSError as exc:
+        pytest.skip(f"unprivileged ICMP sockets are not available: {exc}")
+
+    sample = await icmp_probe("127.0.0.1", timeout_s=2.0, address_family=AddressFamily.AUTO)
+
+    assert sample.status == SampleStatus.OK, sample.error
+    assert sample.latency_ms is not None and sample.latency_ms >= 0
 
 
 async def test_resolve_target_caps_failover_addresses(
