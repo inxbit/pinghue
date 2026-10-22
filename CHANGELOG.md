@@ -8,7 +8,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Added
 
-- The TUI header shows a fleet summary next to the title: host counts per state and the age of the oldest newest result, in amber once probes fall behind.
+- The TUI header shows a fleet summary next to the title: the age of the oldest newest result, in amber once probes fall behind, then host counts per state, problems first.
 - A host with an address but no probe result yet (just resolved, or just reset) shows `pending` in the TUI instead of `resolving` or a red `down`; JSON output is unchanged.
 
 ### Changed

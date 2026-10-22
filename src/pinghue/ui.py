@@ -114,15 +114,17 @@ _STATE_LABELS: dict[TargetStatus, CellValue] = {
     TargetStatus.ERROR: ("error", RED),
 }
 
-# Fleet-summary categories in display order, with the color of their count.
+# Fleet-summary categories in display order, with the color of their count:
+# problems first and healthy, the bulk of most fleets, last, so a header too
+# narrow for the whole summary cuts the least useful part.
 SUMMARY_CATEGORIES: tuple[CellValue, ...] = (
-    ("healthy", GREEN),
-    ("intermittent", AMBER),
     ("down", RED),
     ("dns", RED),
     ("denied", RED),
     ("error", RED),
+    ("intermittent", AMBER),
     (PENDING_LABEL, MUTED),
+    ("healthy", GREEN),
 )
 
 # Row refresh scheduling: rows near the viewport are refreshed on every pass;
@@ -661,21 +663,28 @@ def _summary_category(label: str) -> str:
 
 
 def format_age(seconds: float) -> str:
-    """Return a short age such as 0.8s, 12s or 3m."""
+    """Return a short age such as 0.8s, 12s, 3m or 5h."""
     if seconds < 10:
         return f"{seconds:.1f}s"
     if seconds < 120:
         return f"{seconds:.0f}s"
-    return f"{seconds / 60:.0f}m"
+    if seconds < 7200:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds / 3600:.0f}h"
 
 
 def fleet_summary_parts(summary: FleetSummary, *, stale_after_s: float) -> list[CellValue]:
     """Return (text, style) parts of the always-visible fleet summary.
 
-    States with no hosts are left out; the result age turns amber once it
-    exceeds ``stale_after_s``.
+    The result age comes first, so a narrow header never cuts it, and turns
+    amber once it exceeds ``stale_after_s``; states with no hosts are left out.
     """
     parts: list[CellValue] = []
+    age = summary.oldest_result_age_s
+    if age is not None:
+        parts.append(("oldest ", MUTED))
+        parts.append((format_age(age), AMBER if age > stale_after_s else MUTED))
+
     for category, style in SUMMARY_CATEGORIES:
         count = summary.counts.get(category, 0)
         if not count:
@@ -684,14 +693,6 @@ def fleet_summary_parts(summary: FleetSummary, *, stale_after_s: float) -> list[
             parts.append(("  ", MUTED))
         parts.append((str(count), style))
         parts.append((f" {category}", MUTED))
-
-    age = summary.oldest_result_age_s
-    if age is not None:
-        if parts:
-            parts.append(("  ", MUTED))
-        parts.append(("oldest result ", MUTED))
-        parts.append((format_age(age), AMBER if age > stale_after_s else MUTED))
-        parts.append((" ago", MUTED))
     return parts
 
 

@@ -19,6 +19,7 @@ from textual.app import App, ComposeResult
 from textual.geometry import Region
 from textual.widget import Widget
 from textual.widgets import DataTable, Header
+from textual.widgets._header import HeaderTitle
 
 import pinghue.app as app_module
 import pinghue.runner as runner_module
@@ -516,8 +517,9 @@ def test_fleet_summary_counts_states_and_the_oldest_result() -> None:
         oldest_result_age_s=5.0,
     )
     parts = fleet_summary_parts(summary, stale_after_s=4.0)
+    # The age first and healthy last: a narrow header cuts the end.
     assert "".join(text for text, _style in parts) == (
-        "1 healthy  1 intermittent  1 down  1 dns  1 denied  3 pending  oldest result 5.0s ago"
+        "oldest 5.0s  1 down  1 dns  1 denied  1 intermittent  3 pending  1 healthy"
     )
     assert ("5.0s", AMBER) in parts
     assert ("5.0s", MUTED) in fleet_summary_parts(summary, stale_after_s=6.0)
@@ -537,6 +539,7 @@ def test_format_age_stays_short() -> None:
     assert format_age(0.84) == "0.8s"
     assert format_age(12.4) == "12s"
     assert format_age(300.0) == "5m"
+    assert format_age(5 * 3600.0) == "5h"
 
 
 class TableApp(App[None]):
@@ -755,9 +758,10 @@ async def test_header_shows_the_fleet_summary() -> None:
     async with app.run_test(size=(140, 20)) as pilot:
         await _start(pilot, app)
 
-        assert app.sub_title.startswith("2 healthy  oldest result ")
+        assert app.sub_title.startswith("oldest ")
+        assert app.sub_title.endswith("  2 healthy")
         title = app.query_one(Header).format_title().plain
-        assert title.startswith(f"{app.title}  2 healthy  oldest result ")
+        assert title.startswith(f"{app.title}  oldest ")
 
 
 @pytest.mark.usefixtures("stub_network")
@@ -787,3 +791,41 @@ async def test_rows_scrolled_into_view_are_refreshed_before_they_are_painted() -
         table.scroll_to(y=40, animate=False, immediate=True)
 
         assert table.get_cell(target_row_key(50), "last").plain == "777.00"
+
+
+def _show_every_state(app: PinghueTextualApp) -> None:
+    """Spread the targets over every summary category, ten hosts each."""
+    states = [
+        TargetStatus.HEALTHY,
+        TargetStatus.INTERMITTENT,
+        TargetStatus.DOWN,
+        TargetStatus.DNS_FAILURE,
+        TargetStatus.PERMISSION_DENIED,
+        TargetStatus.ERROR,
+        TargetStatus.RESOLVING,
+    ]
+    for index, target in enumerate(app.targets):
+        target.status = states[index % len(states)]
+    app._last_full_refresh = float("-inf")
+    app._refresh_table()
+
+
+@pytest.mark.usefixtures("stub_network")
+@pytest.mark.parametrize("width", [100, 120])
+async def test_header_keeps_the_result_age_on_screen_with_every_state(width: int) -> None:
+    targets = [f"host-{index:02d}.example" for index in range(70)]
+    app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(width, 20)) as pilot:
+        await _start(pilot, app)
+        _show_every_state(app)
+        await pilot.pause()
+
+        assert app.sub_title.startswith("oldest ")
+        assert "10 down  10 dns  10 denied  10 error" in app.sub_title
+        title = app.query_one(HeaderTitle)
+        shown = title.render_lines(Region(0, 0, title.size.width, 1))[0].text
+        # The header is too narrow for the whole summary, but the age and the
+        # problem states come before the cut.
+        assert ELLIPSIS in shown
+        assert f"{app.title}  oldest " in shown
+        assert "10 down" in shown

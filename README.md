@@ -235,7 +235,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `b` | Probe the selected host immediately. |
 | `B` | Probe all hosts immediately. |
 
-The header shows a fleet summary next to the title: how many hosts are in each state, and how long ago the stalest host's newest result arrived. That age turns amber once it falls well behind `--interval` and `--timeout`, which means probes are not keeping up.
+The header shows a fleet summary next to the title: how long ago the stalest host's newest result arrived (`oldest 1.2s`), then how many hosts are in each state, problems first and healthy last, so a narrow terminal cuts the least useful part. That age turns amber once it falls well behind `--interval` and `--timeout`, which means probes are not keeping up.
 
 Columns follow the terminal width so the newest history glyphs stay on screen without horizontal scrolling. On narrow terminals the history column shrinks first, then the hidden address placeholder and the mode column collapse before host names are shortened, then the host column shrinks down to 12 characters; below that the min and max columns collapse instead of squeezing host names further. Host names longer than their column keep their start and the part that tells them apart from the other hosts, with a `…` at each cut: `db-primary-001.dc1.exam…`, or `db-primar…001…` on a narrow terminal.
 
