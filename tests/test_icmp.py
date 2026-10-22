@@ -38,6 +38,8 @@ class FakeIcmpSocket:
         self.options: dict[tuple[int, int], int] = {}
         self.sent: list[tuple[bytes, Any]] = []
         self.send_errors: list[OSError] = []
+        # Runs before each send error is raised, e.g. to queue an ICMP error.
+        self.on_send_error: Callable[[FakeIcmpSocket], None] | None = None
         self.receive_errors: list[OSError] = []
         self.replies: deque[tuple[bytes, list[tuple[int, int, bytes]], int, Any]] = deque()
         self.errors: deque[tuple[bytes, list[tuple[int, int, bytes]], int, Any]] = deque()
@@ -58,6 +60,8 @@ class FakeIcmpSocket:
 
     def sendto(self, data: bytes, address: Any) -> int:
         if self.send_errors:
+            if self.on_send_error is not None:
+                self.on_send_error(self)
             raise self.send_errors.pop(0)
         self.sent.append((bytes(data), address))
         if self.responder is not None:
@@ -729,6 +733,60 @@ async def test_send_retries_once_after_queued_icmp_error(engines: list[icmp.Icmp
     assert len(factory.sockets[0].sent) == 1
 
 
+def queue_error_for_another_probe(sock: FakeIcmpSocket) -> None:
+    # Linux queues an ICMP error for any probe on the socket and fails the
+    # socket's next send with its errno; this one quotes a request to a host
+    # that nobody here probes.
+    ancdata = [
+        (
+            socket.IPPROTO_IP,
+            IP_RECVERR,
+            extended_error(
+                ee_errno=errno.EHOSTUNREACH, origin=2, icmp_type=3, code=1, offender="192.0.2.1"
+            ),
+        )
+    ]
+    request = ECHO_HEADER.pack(icmp.ICMP_ECHO_REQUEST, 0, 0, 0, 0) + bytes(16)
+    sock.queue_error(request, ("192.0.2.99", 0), ancdata)
+
+
+async def test_send_retries_while_icmp_errors_for_other_probes_arrive(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    factory = FakeSocketFactory(responder=linux_echo())
+    engine = make_engine(engines, factory)
+    assert (await engine.echo("127.0.0.1", ipv6=False, timeout_s=1.0)).status == SampleStatus.OK
+    sock = factory.sockets[0]
+    # A new error lands before every retry, so each attempt fails once more.
+    sock.on_send_error = queue_error_for_another_probe
+    sock.send_errors = [OSError(errno.EHOSTUNREACH, "No route to host")] * 3
+
+    result = await engine.echo("127.0.0.1", ipv6=False, timeout_s=1.0)
+
+    assert result.status == SampleStatus.OK
+    assert len(sock.sent) == 2
+    assert not sock.send_errors
+    assert not sock.errors
+
+
+async def test_send_failure_is_reported_when_icmp_errors_never_stop(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    factory = FakeSocketFactory(responder=linux_echo())
+    engine = make_engine(engines, factory)
+    assert (await engine.echo("127.0.0.1", ipv6=False, timeout_s=1.0)).status == SampleStatus.OK
+    sock = factory.sockets[0]
+    error = OSError(errno.EHOSTUNREACH, "No route to host")
+    sock.on_send_error = queue_error_for_another_probe
+    sock.send_errors = [error] * 100
+
+    result = await engine.echo("127.0.0.1", ipv6=False, timeout_s=1.0)
+
+    assert result == icmp.EchoResult(SampleStatus.UNREACHABLE, error=str(error))
+    assert len(sock.send_errors) == 100 - icmp._SEND_ATTEMPTS
+    assert pending_count(engine) == 0
+
+
 @pytest.mark.parametrize(
     ("error", "status"),
     [
@@ -739,13 +797,16 @@ async def test_send_retries_once_after_queued_icmp_error(engines: list[icmp.Icmp
 async def test_send_failure_is_classified(
     engines: list[icmp.IcmpEngine], error: OSError, status: str
 ) -> None:
-    engine = make_engine(engines, FakeSocketFactory(send_errors=[error, error]))
+    factory = FakeSocketFactory(send_errors=[error] * 3)
+    engine = make_engine(engines, factory)
 
     result = await engine.echo("127.0.0.1", ipv6=False, timeout_s=1.0)
 
     assert result.status == SampleStatus(status)
     assert result.error == str(error)
     assert pending_count(engine) == 0
+    # The failure repeated with nothing queued, so it is the send's own.
+    assert len(factory.sockets[0].send_errors) == 1
 
 
 async def test_send_backs_off_while_the_send_buffer_is_full(

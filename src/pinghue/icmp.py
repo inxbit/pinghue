@@ -90,6 +90,9 @@ _MAX_SOCKETS_PER_FAMILY = 16
 
 _SEND_RETRY_DELAY_SECONDS = 0.001
 _SEND_RETRY_MAX_DELAY_SECONDS = 0.05
+# Bounds the immediate retries of a send that failed while ICMP errors for
+# other probes kept arriving on its socket (see IcmpEngine._send).
+_SEND_ATTEMPTS = 8
 _SEND_BACKOFF_ERRNOS = {
     value
     for value in (errno.EAGAIN, errno.EWOULDBLOCK, getattr(errno, "ENOBUFS", None))
@@ -551,24 +554,39 @@ class IcmpEngine:
         icmp_socket.pending[sequence] = entry
         return entry
 
-    @staticmethod
-    def _send(entry: _PendingEcho, packet: bytes, sockaddr: tuple[str, int]) -> OSError | None:
-        sock = entry.icmp_socket.sock
+    def _send(
+        self, entry: _PendingEcho, packet: bytes, sockaddr: tuple[str, int]
+    ) -> OSError | None:
+        icmp_socket = entry.icmp_socket
         failure: OSError | None = None
-        for _attempt in range(2):
+        unexplained = 0
+        for _attempt in range(_SEND_ATTEMPTS):
             # Stamp immediately before sendto: monotonic first, then the wall
             # clock that kernel receive timestamps use.
             entry.tx_monotonic_ns = time.perf_counter_ns()
             entry.tx_wall_ns = time.time_ns()
             try:
-                sock.sendto(packet, sockaddr)
+                icmp_socket.sock.sendto(packet, sockaddr)
             except OSError as exc:
-                if exc.errno in _SEND_BACKOFF_ERRNOS or failure is not None:
+                if exc.errno in _SEND_BACKOFF_ERRNOS:
                     return exc
-                # On Linux an ICMP error queued for an earlier probe fails the
-                # next send on the socket once (the error itself waits on the
-                # error queue), so a failed send is tried once more.
                 failure = exc
+                # On Linux every ICMP error that reaches the socket, whichever
+                # probe it is for, fails the socket's next send once with its
+                # errno; the error itself waits on the error queue. Reading the
+                # queue hands those errors to their probes and clears the
+                # socket error, so the send is tried again while errors keep
+                # turning up there. The error can also be flagged just after
+                # the queue was read, so only a failure that repeats twice in a
+                # row with nothing queued is this send's own.
+                if icmp_socket.recverr and (
+                    self._drain_error_queue(icmp_socket, _READ_BUDGET) < _READ_BUDGET
+                ):
+                    unexplained = 0
+                    continue
+                unexplained += 1
+                if unexplained == 2:
+                    return exc
                 continue
             return None
         return failure
@@ -630,15 +648,16 @@ class IcmpEngine:
                 self._handle_datagram(icmp_socket, data, ancdata, address)
 
     def _drain_error_queue(self, icmp_socket: _IcmpSocket, budget: int) -> int:
+        """Handle up to budget queued errors and return the budget left."""
         sock = icmp_socket.sock
         while budget > 0:
-            budget -= 1
             try:
                 data, ancdata, _flags, address = sock.recvmsg(
                     _RECEIVE_SIZE, _ERROR_QUEUE_ANCILLARY_SIZE, _MSG_ERRQUEUE
                 )
             except OSError:
                 return budget
+            budget -= 1
             with contextlib.suppress(Exception):
                 self._handle_queued_error(icmp_socket, data, ancdata, address)
         return budget
