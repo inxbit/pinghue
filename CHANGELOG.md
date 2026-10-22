@@ -8,7 +8,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Security
 
-- A DNS answer made only of unspecified addresses (`0.0.0.0`, `::`), which DNS filters and sinkholes return for blocked names, is now reported as `dns_failure` instead of probed; probing it reached the local host on Linux and reported the blocked name healthy. Unspecified addresses are also dropped from mixed answers, and answers are deduplicated in one pass that stops at the 8-address failover cap, so a huge answer cannot stall the event loop. Explicit IP-literal targets are unchanged.
+- A DNS answer made only of unspecified addresses (`0.0.0.0`, `::`), which DNS filters and sinkholes return for blocked names, is now reported as `dns_failure` instead of probed; probing it reached the local host on Linux and reported the blocked name healthy. Unspecified addresses are also dropped from mixed answers, and answers are deduplicated in one pass that stops at the 8-address failover cap, so a huge answer cannot stall the event loop. Explicit IP-literal targets are unchanged. `pinghue --check` reports such an answer as a DNS failure too, instead of showing `0.0.0.0` as a working lookup.
 
 ### Fixed
 

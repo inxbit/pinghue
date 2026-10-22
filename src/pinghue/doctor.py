@@ -12,6 +12,7 @@ from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
+from pinghue.probes import UNSPECIFIED_ONLY_ERROR, _usable_addresses
 
 OK = "[ok]"
 FAIL = "[fail]"
@@ -141,8 +142,14 @@ def _dns_probe(
     if not infos:
         return None, None, "getaddrinfo: no addresses returned"
 
+    # Judge the answer as a run would: a DNS filter's 0.0.0.0 or :: is a
+    # dns_failure there, so it must not read as working DNS here.
+    usable = _usable_addresses(infos, prefer_ipv4=False)
+    if not usable:
+        return None, None, UNSPECIFIED_ONLY_ERROR
+
     elapsed_ms = float(round((time.perf_counter() - start) * 1000))
-    family, *_rest, sockaddr = infos[0]
+    family, *_rest, sockaddr = usable[0]
     address = sockaddr[0]
     protocol = "ipv6" if family == socket.AF_INET6 else "ipv4"
     return f"{address} ({protocol})", elapsed_ms, None

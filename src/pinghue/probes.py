@@ -390,6 +390,12 @@ def _is_unspecified(address: str) -> bool:
     return ip.is_unspecified
 
 
+UNSPECIFIED_ONLY_ERROR = (
+    "getaddrinfo: only unspecified addresses returned (0.0.0.0 or ::); "
+    "the name may be blocked by a DNS filter"
+)
+
+
 def _usable_addresses(infos: list[Any], *, prefer_ipv4: bool) -> list[Any]:
     """Return up to MAX_FAILOVER_ADDRESSES getaddrinfo entries, one per address, to probe.
 
@@ -458,13 +464,7 @@ async def resolve_target(
     # len(addresses) * timeout_s.
     usable = _usable_addresses(infos, prefer_ipv4=address_family == AddressFamily.AUTO)
     if not usable:
-        return ResolvedTarget(
-            target,
-            None,
-            None,
-            "getaddrinfo: only unspecified addresses returned (0.0.0.0 or ::); "
-            "the name may be blocked by a DNS filter",
-        )
+        return ResolvedTarget(target, None, None, UNSPECIFIED_ONLY_ERROR)
 
     family = AddressFamily.IPV4 if usable[0][0] == socket.AF_INET else AddressFamily.IPV6
     addresses = tuple(info[4][0] for info in usable)
