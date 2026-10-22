@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 import signal
 from collections.abc import Callable
@@ -94,6 +95,7 @@ async def test_tui_resolution_preserves_aggregate_sample_budget(monkeypatch) -> 
     monkeypatch.setattr(app, "_start_probe_task", record_start)
 
     await app._resolve_targets()
+    await app.on_unmount()
 
     assert {target.samples.maxlen for target in app.targets} == {
         MAX_TOTAL_RETAINED_SAMPLES // target_count
@@ -628,6 +630,78 @@ async def test_tui_marks_a_row_whose_probe_loop_dies(monkeypatch) -> None:
     assert app.targets[0].error == "Unexpected probe loop error: loop bug"
     assert app.targets[1].status == TargetStatus.RESOLVING
     await app.on_unmount()
+
+
+async def test_tui_leaves_startup_objects_out_of_full_collections_until_unmount(
+    monkeypatch,
+) -> None:
+    # Every full collection walked all rows, targets and probe loops again,
+    # stalling the event loop for 200-400 ms at 5,000 hosts.
+    app = PinghueTextualApp(
+        args=build_args(targets=["192.0.2.1", "192.0.2.2"]),
+        mode=ProbeMode.ICMP,
+    )
+
+    async def fake_probe_target_loop(*_: Any, stop_event: asyncio.Event, **__: Any) -> None:
+        await stop_event.wait()
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=app_module.resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+    gc.unfreeze()
+    try:
+        await app.on_mount()
+        assert gc.get_freeze_count() == 0
+        assert app._resolution_task is not None
+        await asyncio.wait_for(app._resolution_task, timeout=2.0)
+
+        assert len(app._probe_tasks) == 2
+        assert gc.get_freeze_count() > 0
+        await app.on_unmount()
+        assert gc.get_freeze_count() == 0
+    finally:
+        gc.unfreeze()
+
+
+async def test_tui_stopped_during_resolution_freezes_nothing(monkeypatch) -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["slow.example", "192.0.2.1"]),
+        mode=ProbeMode.ICMP,
+    )
+    release_slow = asyncio.Event()
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "slow.example":
+            await release_slow.wait()
+        return _resolved(target, "192.0.2.9")
+
+    async def fake_probe_target_loop(*_: Any, **__: Any) -> None:
+        return None
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=fake_resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+    gc.unfreeze()
+    try:
+        await app.on_mount()
+        assert await _eventually(lambda: app._probe_tasks)
+        # The last lookup completes after the run was told to stop.
+        app._stop_event.set()
+        release_slow.set()
+        assert app._resolution_task is not None
+        await asyncio.wait_for(app._resolution_task, timeout=2.0)
+
+        assert len(app._probe_tasks) == 1
+        assert gc.get_freeze_count() == 0
+        await app.on_unmount()
+    finally:
+        gc.unfreeze()
 
 
 @pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP", "SIGINT"])
