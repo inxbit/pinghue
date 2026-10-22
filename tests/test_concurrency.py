@@ -1,6 +1,5 @@
 import asyncio
 import statistics
-import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -11,11 +10,11 @@ import pinghue.runner as runner
 from pinghue.cli import (
     CONCURRENCY_DEFAULT_MINIMUM,
     CONCURRENCY_MAXIMUM,
-    ICMP_CONCURRENCY_DEFAULT_MAXIMUM,
     default_concurrency,
     default_concurrency_ceiling,
     parse_args,
 )
+from pinghue.hostfile import TARGET_COUNT_MAXIMUM
 from pinghue.models import ProbeMode, ProbeSample, SampleStatus
 
 
@@ -48,84 +47,77 @@ def test_default_concurrency_sizes_slots_for_every_target_timing_out(
     )
 
 
-def test_default_concurrency_stays_finite_for_huge_timeouts() -> None:
-    assert (
-        default_concurrency(5000, interval=1.0, timeout=1e308, mode=ProbeMode.TCP)
-        == CONCURRENCY_MAXIMUM
-    )
+@pytest.mark.parametrize("mode", [ProbeMode.TCP, ProbeMode.ICMP])
+def test_default_concurrency_stays_finite_for_huge_timeouts(mode: ProbeMode) -> None:
+    assert default_concurrency(
+        5000, interval=1.0, timeout=1e308, mode=mode
+    ) == default_concurrency_ceiling(mode)
+
+
+def test_default_concurrency_ceiling_bounds_only_socket_holding_tcp_probes() -> None:
+    # Every in-flight TCP probe holds a socket; an in-flight ICMP probe holds no
+    # thread and no socket of its own, so its default may cover every target.
+    assert default_concurrency_ceiling(ProbeMode.TCP) == CONCURRENCY_MAXIMUM
+    assert default_concurrency_ceiling(ProbeMode.ICMP) == TARGET_COUNT_MAXIMUM
 
 
 @pytest.mark.parametrize(
-    ("target_count", "mode", "platform", "expected"),
+    ("target_count", "interval", "timeout", "expected"),
     [
-        # Each in-flight ICMP probe blocks a thread, so the ICMP default stops at 256.
-        (100, ProbeMode.ICMP, "linux", 114),
-        (500, ProbeMode.ICMP, "linux", ICMP_CONCURRENCY_DEFAULT_MAXIMUM),
-        (5000, ProbeMode.ICMP, "linux", ICMP_CONCURRENCY_DEFAULT_MAXIMUM),
-        # macOS ICMP sockets each wake for every echo reply: keep the old fixed 64.
-        (500, ProbeMode.ICMP, "darwin", CONCURRENCY_DEFAULT_MINIMUM),
-        (5000, ProbeMode.ICMP, "darwin", CONCURRENCY_DEFAULT_MINIMUM),
-        # TCP connects wait on the event loop, without a thread, on every platform.
-        (500, ProbeMode.TCP, "darwin", 569),
-        (5000, ProbeMode.TCP, "darwin", CONCURRENCY_MAXIMUM),
-        (5000, ProbeMode.TCP, "linux", CONCURRENCY_MAXIMUM),
+        (50, 1.0, 1.0, CONCURRENCY_DEFAULT_MINIMUM),
+        (100, 1.0, 1.0, 114),
+        (500, 1.0, 1.0, 569),
+        (1000, 1.0, 1.0, 1137),
+        # An all-silent 5,000-target run would need 5,682 slots: every target gets one.
+        (5000, 1.0, 1.0, TARGET_COUNT_MAXIMUM),
+        (5000, 1.0, 0.5, 3125),
+        (500, 1.0, 0.2, 125),
     ],
 )
-def test_default_concurrency_caps_thread_backed_icmp_probes(
+def test_default_concurrency_sizes_icmp_like_tcp_up_to_the_target_cap(
     target_count: int,
-    mode: ProbeMode,
-    platform: str,
+    interval: float,
+    timeout: float,
     expected: int,
 ) -> None:
-    assert (
-        default_concurrency(target_count, interval=1.0, timeout=1.0, mode=mode, platform=platform)
-        == expected
+    workload = {"interval": interval, "timeout": timeout}
+
+    assert default_concurrency(target_count, **workload, mode=ProbeMode.ICMP) == expected
+    assert default_concurrency(target_count, **workload, mode=ProbeMode.TCP) == min(
+        expected, CONCURRENCY_MAXIMUM
     )
 
 
-@pytest.mark.parametrize(
-    ("platform", "expected"),
-    [("linux", ICMP_CONCURRENCY_DEFAULT_MAXIMUM), ("darwin", CONCURRENCY_DEFAULT_MINIMUM)],
-)
-def test_default_concurrency_ceiling_reads_the_running_platform(
-    monkeypatch: pytest.MonkeyPatch,
-    platform: str,
-    expected: int,
-) -> None:
-    monkeypatch.setattr(sys, "platform", platform)
-
-    assert default_concurrency_ceiling(ProbeMode.ICMP) == expected
-    assert default_concurrency_ceiling(ProbeMode.TCP) == CONCURRENCY_MAXIMUM
-
-
-def test_parse_args_sizes_default_concurrency_from_the_workload(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(sys, "platform", "linux")
+def test_parse_args_sizes_default_concurrency_from_the_workload() -> None:
     targets = [f"127.0.{i // 250}.{i % 250 + 1}" for i in range(500)]
+    large = [f"127.{i // 62500}.{i // 250 % 250}.{i % 250 + 1}" for i in range(5000)]
 
     assert parse_args(["127.0.0.1"]).concurrency == CONCURRENCY_DEFAULT_MINIMUM
     assert parse_args([*targets, "-p", "443"]).concurrency == 569
     assert parse_args([*targets, "-p", "443", "--timeout", "0.2"]).concurrency == 125
     assert parse_args([*targets, "--timeout", "0.2"]).concurrency == 125
-    assert parse_args(targets).concurrency == ICMP_CONCURRENCY_DEFAULT_MAXIMUM
+    assert parse_args(targets).concurrency == 569
+    assert parse_args(large).concurrency == TARGET_COUNT_MAXIMUM
+    assert parse_args([*large, "-p", "443"]).concurrency == CONCURRENCY_MAXIMUM
     assert parse_args(["--check"]).concurrency == CONCURRENCY_DEFAULT_MINIMUM
 
-    monkeypatch.setattr(sys, "platform", "darwin")
-    assert parse_args(targets).concurrency == CONCURRENCY_DEFAULT_MINIMUM
-    assert parse_args([*targets, "-p", "443"]).concurrency == 569
+
+@pytest.mark.parametrize("mode_args", [[], ["-p", "443"]], ids=["icmp", "tcp"])
+def test_parse_args_keeps_explicit_concurrency_for_large_runs(mode_args: list[str]) -> None:
+    targets = [f"127.0.{i // 250}.{i % 250 + 1}" for i in range(5000)]
+
+    assert parse_args([*targets, *mode_args, "--concurrency", "8"]).concurrency == 8
+    assert parse_args(["127.0.0.1", *mode_args, "--concurrency", "1024"]).concurrency == 1024
+    assert parse_args([*targets, *mode_args, "--concurrency", "1024"]).concurrency == 1024
+    # The ICMP default may exceed it, but an explicit value keeps the 1-1024 range.
+    with pytest.raises(SystemExit):
+        parse_args([*targets, *mode_args, "--concurrency", str(CONCURRENCY_MAXIMUM + 1)])
 
 
-def test_parse_args_keeps_explicit_concurrency_for_large_runs() -> None:
-    targets = [f"127.0.{i // 250}.{i % 250 + 1}" for i in range(1000)]
-
-    assert parse_args([*targets, "--concurrency", "8"]).concurrency == 8
-    assert parse_args(["127.0.0.1", "--concurrency", "1024"]).concurrency == 1024
-    assert parse_args([*targets, "--concurrency", "1024"]).concurrency == 1024
-
-
+@pytest.mark.parametrize("mode", [ProbeMode.ICMP, ProbeMode.TCP])
 async def test_default_concurrency_keeps_healthy_cadence_with_many_silent_targets(
     monkeypatch: pytest.MonkeyPatch,
+    mode: ProbeMode,
 ) -> None:
     # 250 of 300 targets never answer and hold a probe slot for the whole timeout.
     # The old fixed default of 64 slots stretched every target's cycle, healthy
@@ -133,9 +125,9 @@ async def test_default_concurrency_keeps_healthy_cadence_with_many_silent_target
     interval = 0.2
     silent = [f"127.0.2.{i}" for i in range(1, 251)]
     healthy = [f"127.0.1.{i}" for i in range(1, 51)]
-    # TCP mode sizes the default the same way on every platform.
+    mode_args = ["-p", "443"] if mode == ProbeMode.TCP else []
     args = parse_args(
-        [*silent, *healthy, "-n", "--no-tui", "-p", "443", "-i", str(interval)]
+        [*silent, *healthy, "-n", "--no-tui", *mode_args, "-i", str(interval)]
         + ["--duration", "2.0"]
     )
     assert args.concurrency > CONCURRENCY_DEFAULT_MINIMUM
@@ -160,7 +152,7 @@ async def test_default_concurrency_keeps_healthy_cadence_with_many_silent_target
 
     monkeypatch.setattr(runner, "_probe_address", fake_probe_address)
 
-    await asyncio.wait_for(runner.run_no_tui(args, ProbeMode.TCP), timeout=10.0)
+    await asyncio.wait_for(runner.run_no_tui(args, mode), timeout=10.0)
 
     healthy_gaps = [
         later - earlier

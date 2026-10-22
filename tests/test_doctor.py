@@ -341,21 +341,22 @@ def _check_with_fd_limit(monkeypatch: pytest.MonkeyPatch, limit: FdLimit | None)
     [
         (
             FdLimit(20000, 20000),
-            "[ok]    Open-file limit 20000 (hard 20000) fits --concurrency up to 1024",
+            "[ok]    Open-file limit 20000 (hard 20000) fits --concurrency up to 1024 in TCP mode",
         ),
         (
             FdLimit(None, None),
-            "[ok]    Open-file limit unlimited (hard unlimited) fits --concurrency up to 1024",
+            "[ok]    Open-file limit unlimited (hard unlimited) "
+            "fits --concurrency up to 1024 in TCP mode",
         ),
         (
             FdLimit(256, None),
             "[ok]    Open-file limit 256 (hard unlimited); "
-            "raised at startup to fit --concurrency up to 1024",
+            "raised at startup to fit --concurrency up to 1024 in TCP mode",
         ),
         (
             FdLimit(1024, 524288),
             "[ok]    Open-file limit 1024 (hard 524288); "
-            "raised at startup to fit --concurrency up to 1024",
+            "raised at startup to fit --concurrency up to 1024 in TCP mode",
         ),
     ],
 )
@@ -377,10 +378,13 @@ def test_doctor_warns_when_hard_open_file_limit_caps_concurrency(
 ) -> None:
     exit_code, text = _check_with_fd_limit(monkeypatch, FdLimit(256, 512))
 
-    # A low open-file limit slows large runs but does not make ICMP unusable.
+    # A low open-file limit only bounds TCP mode; ICMP probes share a few sockets.
     assert exit_code == 0
-    assert "[warn]  Open-file limit 256 (hard 512) caps --concurrency at 384\n" in text
-    assert "Raise the hard limit to at least 1152 to allow --concurrency 1024." in text
+    assert "[warn]  Open-file limit 256 (hard 512) caps --concurrency at 384 in TCP mode\n" in text
+    assert (
+        "Raise the hard limit to at least 1152 to allow --concurrency 1024 in TCP mode.\n"
+        "          ICMP probes share a few sockets and are not limited by it.\n"
+    ) in text
 
 
 def test_doctor_flags_open_file_limit_below_default_concurrency(
@@ -389,7 +393,7 @@ def test_doctor_flags_open_file_limit_below_default_concurrency(
     _, text = _check_with_fd_limit(monkeypatch, FdLimit(100, 100))
 
     assert (
-        "[warn]  Open-file limit 100 (hard 100) caps --concurrency at 50, "
+        "[warn]  Open-file limit 100 (hard 100) caps --concurrency at 50 in TCP mode, "
         "below the default minimum of 64"
     ) in text
 
@@ -400,7 +404,7 @@ def test_doctor_scales_the_reserve_for_a_small_open_file_limit(
     # Matches the runtime: a 160-descriptor limit keeps half of itself in reserve.
     _, text = _check_with_fd_limit(monkeypatch, FdLimit(160, 160))
 
-    assert "[warn]  Open-file limit 160 (hard 160) caps --concurrency at 80\n" in text
+    assert "[warn]  Open-file limit 160 (hard 160) caps --concurrency at 80 in TCP mode\n" in text
 
 
 def test_doctor_reports_unavailable_open_file_limit(monkeypatch: pytest.MonkeyPatch) -> None:

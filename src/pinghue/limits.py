@@ -1,4 +1,8 @@
-"""Open-file limit handling for probe concurrency."""
+"""Open-file limit handling for TCP probe concurrency.
+
+Every in-flight TCP probe holds its own socket. ICMP probes share the ICMP
+engine's few sockets, so ICMP concurrency is not bounded by this limit.
+"""
 
 from __future__ import annotations
 
@@ -10,9 +14,9 @@ try:
 except ImportError:  # pragma: no cover - every supported platform provides it
     resource = None  # type: ignore[assignment]
 
-# Descriptors kept free beside the probe sockets: stdio, the event loop's
-# selector and self-pipe, the TUI driver, DNS worker threads, and the --output
-# file, which is written while abandoned ICMP workers may still hold sockets.
+# Descriptors kept free beside the TCP probe sockets: stdio, the event loop's
+# selector and self-pipe, the TUI driver, DNS lookups still running on their
+# resolver threads, and the --output file.
 FD_RESERVE = 128
 # A run uses a dozen or so descriptors besides its probe sockets, so a limit too
 # small for the full reserve keeps half of itself, but never less than this.
@@ -58,7 +62,7 @@ def concurrency_capacity(limit: int) -> int:
 
 
 def fit_concurrency_to_fd_limit(concurrency: int) -> tuple[int, str | None]:
-    """Make room for ``concurrency`` in-flight probes, each holding one socket.
+    """Make room for ``concurrency`` in-flight TCP probes, each holding one socket.
 
     Raises the soft open-file limit toward ``concurrency + FD_RESERVE``, never past
     the hard limit. When the limit still cannot fit, returns a lower concurrency and
@@ -90,7 +94,7 @@ def fit_concurrency_to_fd_limit(concurrency: int) -> tuple[int, str | None]:
         return concurrency, None
     warning = (
         f"the open-file limit (soft {soft}, hard {fd_limit_label(limit.hard)}) "
-        f"cannot fit {concurrency} concurrent probes plus the descriptors pinghue keeps "
+        f"cannot fit {concurrency} concurrent TCP probes plus the descriptors pinghue keeps "
         f"in reserve; lowering concurrency to {effective}. Raise the open-file limit "
         f"to at least {needed} to probe more hosts at once."
     )

@@ -909,11 +909,13 @@ def exit_code_for_targets(
 async def run(args: RunConfig, *, mode: ProbeMode) -> int:
     probe = probe_config(args, mode)
 
-    # Every in-flight probe holds a socket, and both modes size their probe
-    # semaphore from args.concurrency, so fit it to the open-file limit first.
-    args.concurrency, fd_warning = fit_concurrency_to_fd_limit(args.concurrency)
-    if fd_warning is not None:
-        print(f"pinghue: warning: {fd_warning}", file=sys.stderr)
+    if mode == ProbeMode.TCP:
+        # Every in-flight TCP probe holds its own socket, and both run modes size
+        # their probe semaphore from args.concurrency, so fit it to the open-file
+        # limit first. ICMP probes share the ICMP engine's few sockets instead.
+        args.concurrency, fd_warning = fit_concurrency_to_fd_limit(args.concurrency)
+        if fd_warning is not None:
+            print(f"pinghue: warning: {fd_warning}", file=sys.stderr)
 
     if args.no_tui:
         targets, exit_reason, started_at, ended_at = await run_no_tui(args, mode)

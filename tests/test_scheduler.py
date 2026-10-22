@@ -649,7 +649,7 @@ async def test_resolution_rejects_work_and_preserves_targets_after_expired_deadl
     assert resolution_calls == 0
 
 
-async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
+async def test_run_no_tui_runs_icmp_probes_without_a_dedicated_executor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = TargetRun(
@@ -660,7 +660,7 @@ async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
     probe_kwargs: list[set[str]] = []
 
     def no_dedicated_executor(*_: object, **__: object) -> object:
-        pytest.fail("ICMP probes must use the daemon-thread bridge")
+        pytest.fail("ICMP probes run on the event loop, not on a thread pool")
 
     async def fake_probe_once(*_: object, **kwargs: object) -> ProbeSample:
         probe_kwargs.append(set(kwargs))

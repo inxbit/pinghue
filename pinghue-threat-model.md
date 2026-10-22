@@ -115,9 +115,13 @@ at 5,000 unique targets, probe and resolver concurrency are bounded, ICMP probes
 share a few event-loop sockets per address family instead of a thread and a
 socket each, and retained history is limited to 100,000 samples across the run.
 Whole-run counters/statistics do not retain every sample.
-Probe concurrency never exceeds 1,024 or what the open-file limit can hold:
-pinghue raises only its own soft limit, never past the hard limit, and lowers
-concurrency with a warning when the hard limit is too low.
+TCP probe concurrency never exceeds 1,024 or what the open-file limit can hold,
+because every in-flight TCP probe holds a socket: pinghue raises only its own
+soft limit, never past the hard limit, and lowers concurrency with a warning
+when the hard limit is too low. The automatic ICMP concurrency can give each of
+the 5,000 targets a slot, since an in-flight ICMP probe holds only a pending
+entry and a loop timer on the shared sockets; an explicit `--concurrency` stays
+within 1-1,024 in both modes.
 
 ### 3. Host-file path confusion
 

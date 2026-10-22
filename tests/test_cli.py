@@ -69,7 +69,7 @@ def test_help_describes_every_option_and_shows_defaults() -> None:
         "(default: 1.0)",
         (
             "(default: automatic, sized from the target count, timeout and interval: "
-            "64-1024 for TCP, 64-256 for ICMP, 64 for ICMP on macOS)"
+            "64-1024 for TCP, 64-5000 for ICMP)"
         ),
         "(default: 3)",
         "(default: 50.0)",

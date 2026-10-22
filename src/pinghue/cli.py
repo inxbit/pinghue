@@ -21,11 +21,6 @@ from pinghue.runner import MIN_OVERRUN_SLEEP
 INTERVAL_MINIMUM = 0.1
 CONCURRENCY_DEFAULT_MINIMUM = 64
 CONCURRENCY_MAXIMUM = 1024
-# Every in-flight ICMP probe blocks a daemon thread on its own socket. Past a few
-# hundred of them, GIL contention lags the event loop and inflates measured RTTs,
-# so the automatic ICMP default stops here. On macOS every unconnected ICMP socket
-# also wakes for every echo reply, so there it stays at the minimum.
-ICMP_CONCURRENCY_DEFAULT_MAXIMUM = 256
 # Spare slots above the all-silent estimate, so queueing jitter near saturation
 # does not stretch the probe cadence.
 CONCURRENCY_HEADROOM = 1.25
@@ -94,11 +89,10 @@ def _parser() -> argparse.ArgumentParser:
         "--concurrency",
         type=int,
         help=(
-            f"maximum concurrent probes, 1-{CONCURRENCY_MAXIMUM}; ICMP daemon workers are "
-            "bounded by this limit (default: automatic, sized from the target count, "
-            f"timeout and interval: {CONCURRENCY_DEFAULT_MINIMUM}-{CONCURRENCY_MAXIMUM} "
-            f"for TCP, {CONCURRENCY_DEFAULT_MINIMUM}-{ICMP_CONCURRENCY_DEFAULT_MAXIMUM} "
-            f"for ICMP, {CONCURRENCY_DEFAULT_MINIMUM} for ICMP on macOS)"
+            f"maximum concurrent probes, 1-{CONCURRENCY_MAXIMUM} (default: automatic, "
+            "sized from the target count, timeout and interval: "
+            f"{CONCURRENCY_DEFAULT_MINIMUM}-{CONCURRENCY_MAXIMUM} for TCP, "
+            f"{CONCURRENCY_DEFAULT_MINIMUM}-{TARGET_COUNT_MAXIMUM} for ICMP)"
         ),
     )
     parser.add_argument(
@@ -170,13 +164,17 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def default_concurrency_ceiling(mode: ProbeMode, *, platform: str | None = None) -> int:
-    """Return the most probe slots the automatic default may use in ``mode``."""
+def default_concurrency_ceiling(mode: ProbeMode) -> int:
+    """Return the most probe slots the automatic default may use in ``mode``.
+
+    Every in-flight TCP probe holds its own socket, so TCP stays within the explicit
+    ``--concurrency`` maximum (and, at startup, the open-file limit). An in-flight
+    ICMP probe holds no thread and no socket of its own, only an entry on the loop's
+    shared ICMP engine, so the ICMP default may give every target a slot.
+    """
     if mode == ProbeMode.TCP:
         return CONCURRENCY_MAXIMUM
-    if (sys.platform if platform is None else platform) == "darwin":
-        return CONCURRENCY_DEFAULT_MINIMUM
-    return ICMP_CONCURRENCY_DEFAULT_MAXIMUM
+    return TARGET_COUNT_MAXIMUM
 
 
 def default_concurrency(
@@ -185,7 +183,6 @@ def default_concurrency(
     interval: float,
     timeout: float,
     mode: ProbeMode,
-    platform: str | None = None,
 ) -> int:
     """Return enough probe slots to keep every target on cadence even when all are silent.
 
@@ -197,7 +194,7 @@ def default_concurrency(
     """
     cycle = max(interval, timeout + MIN_OVERRUN_SLEEP)
     needed = math.ceil(target_count * (timeout / cycle) * CONCURRENCY_HEADROOM)
-    ceiling = default_concurrency_ceiling(mode, platform=platform)
+    ceiling = default_concurrency_ceiling(mode)
     return max(CONCURRENCY_DEFAULT_MINIMUM, min(ceiling, needed))
 
 

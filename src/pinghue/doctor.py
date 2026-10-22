@@ -236,6 +236,8 @@ def _write_linux_fix(lines: list[str], *, egid: int) -> None:
 
 
 def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
+    # Only TCP mode is bounded by the open-file limit: every in-flight TCP probe
+    # holds a socket, while ICMP probes share the ICMP engine's few sockets.
     # Imported here because the CLI module imports this one at startup.
     from pinghue.cli import CONCURRENCY_DEFAULT_MINIMUM, CONCURRENCY_MAXIMUM
 
@@ -253,7 +255,7 @@ def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
     if limit.soft is None or limit.soft >= needed:
         lines.append(
             f"  {_status(OK, use_color=use_color)}    "
-            f"{label} fits --concurrency up to {CONCURRENCY_MAXIMUM}"
+            f"{label} fits --concurrency up to {CONCURRENCY_MAXIMUM} in TCP mode"
         )
         return
 
@@ -261,7 +263,8 @@ def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
     if raisable >= needed:
         lines.append(
             f"  {_status(OK, use_color=use_color)}    "
-            f"{label}; raised at startup to fit --concurrency up to {CONCURRENCY_MAXIMUM}"
+            f"{label}; raised at startup to fit --concurrency up to {CONCURRENCY_MAXIMUM} "
+            "in TCP mode"
         )
         return
 
@@ -274,9 +277,10 @@ def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
     lines.extend(
         [
             f"  {_status(WARN, use_color=use_color)}  "
-            f"{label} caps --concurrency at {capacity}{below_default}",
+            f"{label} caps --concurrency at {capacity} in TCP mode{below_default}",
             f"          Raise the hard limit to at least {needed} to allow "
-            f"--concurrency {CONCURRENCY_MAXIMUM}.",
+            f"--concurrency {CONCURRENCY_MAXIMUM} in TCP mode.",
+            "          ICMP probes share a few sockets and are not limited by it.",
         ]
     )
 

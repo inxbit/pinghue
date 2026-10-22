@@ -97,7 +97,7 @@ def test_fit_clamps_concurrency_to_a_low_hard_limit_with_one_warning(
     assert fake.setrlimit_calls == [(512, 512)]
     assert concurrency == 512 - FD_RESERVE
     assert warning == (
-        "the open-file limit (soft 512, hard 512) cannot fit 1024 concurrent probes plus "
+        "the open-file limit (soft 512, hard 512) cannot fit 1024 concurrent TCP probes plus "
         "the descriptors pinghue keeps in reserve; lowering concurrency to 384. Raise the "
         "open-file limit to at least 1152 to probe more hosts at once."
     )
@@ -279,7 +279,7 @@ def run_args(**overrides: object) -> SimpleNamespace:
         "interval": 1.0,
         "no_tui": True,
         "output": None,
-        "port": None,
+        "port": 443,
         "targets": ["127.0.0.1"],
         "timeout": 1.0,
     }
@@ -292,7 +292,7 @@ def finished_run() -> tuple[list[TargetRun], str, datetime, datetime]:
     return [], "completed", now, now
 
 
-async def test_run_fits_concurrency_before_no_tui_probing_starts(
+async def test_run_fits_tcp_concurrency_before_no_tui_probing_starts(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -307,7 +307,7 @@ async def test_run_fits_concurrency_before_no_tui_probing_starts(
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
 
-    assert await runner.run(run_args(), mode=ProbeMode.ICMP) == 0
+    assert await runner.run(run_args(), mode=ProbeMode.TCP) == 0
 
     [(concurrency, stderr_before_probing)] = started
     assert concurrency == 256 - FD_RESERVE
@@ -316,7 +316,7 @@ async def test_run_fits_concurrency_before_no_tui_probing_starts(
     assert capsys.readouterr().err == ""
 
 
-async def test_run_fits_concurrency_before_the_tui_starts(
+async def test_run_fits_tcp_concurrency_before_the_tui_starts(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -332,7 +332,7 @@ async def test_run_fits_concurrency_before_the_tui_starts(
 
     monkeypatch.setattr(app_module, "PinghueApp", FakeApp)
 
-    assert await runner.run(run_args(no_tui=False), mode=ProbeMode.ICMP) == 0
+    assert await runner.run(run_args(no_tui=False), mode=ProbeMode.TCP) == 0
 
     [(concurrency, stderr_before_tui)] = started
     assert concurrency == 256 - FD_RESERVE
@@ -354,8 +354,44 @@ async def test_run_raises_the_soft_limit_silently_when_the_hard_limit_allows(
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
 
-    assert await runner.run(run_args(), mode=ProbeMode.ICMP) == 0
+    assert await runner.run(run_args(), mode=ProbeMode.TCP) == 0
 
     assert seen == [569]
     assert fake.setrlimit_calls == [(569 + FD_RESERVE, LINUX_RLIM_INFINITY)]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("no_tui", [True, False])
+async def test_run_leaves_icmp_concurrency_and_the_open_file_limit_alone(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_tui: bool,
+) -> None:
+    # In-flight ICMP probes share the ICMP engine's few sockets, so even 5,000 of
+    # them fit a 256-descriptor limit that would cap TCP mode at 128.
+    fake = use_fake_resource(monkeypatch, FakeResource(256, 256))
+    seen: list[int] = []
+
+    async def fake_run_no_tui(
+        args: SimpleNamespace, _mode: ProbeMode
+    ) -> tuple[list[TargetRun], str, datetime, datetime]:
+        seen.append(args.concurrency)
+        return finished_run()
+
+    class FakeApp:
+        def __init__(self, *, args: SimpleNamespace, **_: object) -> None:
+            seen.append(args.concurrency)
+
+        async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
+            return finished_run()
+
+    monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
+    monkeypatch.setattr(app_module, "PinghueApp", FakeApp)
+
+    args = run_args(concurrency=5000, port=None, no_tui=no_tui)
+    assert await runner.run(args, mode=ProbeMode.ICMP) == 0
+
+    assert seen == [5000]
+    assert fake.setrlimit_calls == []
+    assert fake.limits == (256, 256)
     assert capsys.readouterr().err == ""
