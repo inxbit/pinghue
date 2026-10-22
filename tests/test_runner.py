@@ -1,6 +1,7 @@
 import asyncio
 import io
 import socket
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -70,6 +71,18 @@ def test_print_sample_routes_both_branches_to_given_stream() -> None:
     assert len(lines) == 2
     assert "1.1.1.1 ok latency=2.00ms" in lines[0]
     assert "bad.example dns_failure error=resolution failed" in lines[1]
+
+
+def test_warn_drops_the_message_when_stderr_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # print(file=None) writes to stdout, which may carry a `--output -` document.
+    monkeypatch.setattr(sys, "stderr", None)
+
+    runner._warn("could not write probe lines")
+
+    assert capsys.readouterr().out == ""
 
 
 async def test_run_writes_configured_host_label(

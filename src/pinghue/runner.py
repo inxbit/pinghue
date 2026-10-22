@@ -776,7 +776,10 @@ def _reader_is_gone(error: BaseException) -> bool:
 
 
 def _warn(message: str) -> None:
-    # print() to a stderr of None (closed at startup) is a no-op.
+    # A stderr closed at startup is None, and print(file=None) would write to
+    # stdout, into the line output or a `--output -` JSON document: drop it.
+    if sys.stderr is None:
+        return
     with contextlib.suppress(OSError, ValueError):
         print(f"pinghue: warning: {message}", file=sys.stderr, flush=True)
 
