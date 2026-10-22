@@ -10,6 +10,7 @@ from collections.abc import Iterable, Iterator, MutableMapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import pairwise
 from typing import Any
 
 from rich.text import Span, Text
@@ -93,6 +94,8 @@ NARROW_COLLAPSE_ORDER = ("address", "mode", "min", "max")
 SPARE_COLUMNS = frozenset({"address", "mode"})
 
 ELLIPSIS = "…"
+# Host-name labels are kept whole when a long name is shortened.
+HOST_NAME_SEPARATORS = ".-_:"
 PENDING_LABEL = "pending"
 HOST_INDEX = COLUMN_KEYS.index("host")
 STATE_INDEX = COLUMN_KEYS.index("state")
@@ -201,9 +204,9 @@ def compact_loss(value: float) -> str:
 def truncate_middle(value: str, width: int) -> str:
     """Shorten text to ``width`` with a middle ellipsis that keeps most of the tail.
 
-    Host names in one fleet usually share a prefix and differ near the end
-    (``db-primary-01.dc1.example.net`` vs ``db-primary-02.dc1.example.net``),
-    so the tail gets three quarters of the space.
+    Without the rest of the fleet to compare against, the end of a host name
+    is the likeliest part to tell it apart, so the tail gets three quarters
+    of the space.
     """
     if len(value) <= width:
         return value
@@ -212,6 +215,86 @@ def truncate_middle(value: str, width: int) -> str:
     head = (width - 1) // 4
     tail = width - 1 - head
     return f"{value[:head]}{ELLIPSIS}{value[-tail:]}"
+
+
+def _shared_prefix_length(left: str, right: str) -> int:
+    length = min(len(left), len(right))
+    for index in range(length):
+        if left[index] != right[index]:
+            return index
+    return length
+
+
+def host_name_spans(names: Sequence[str]) -> list[tuple[int, int]]:
+    """Return the ``(start, end)`` span of each name that tells it apart.
+
+    The span runs from the first character a name does not share with the
+    most similar name from the start to the last one it does not share with
+    the most similar name from the end (its neighbors in sorted order, so
+    this is O(N log N)), widened to whole labels between HOST_NAME_SEPARATORS:
+    ``001`` in ``db-primary-001.dc1.example.net``. A fleet usually shares a
+    domain suffix, so the end of a name alone does not tell hosts apart.
+    """
+    count = len(names)
+    shared_head = [0] * count
+    shared_tail = [0] * count
+    for shared, keys in ((shared_head, names), (shared_tail, [name[::-1] for name in names])):
+        order = sorted(range(count), key=keys.__getitem__)
+        for left, right in pairwise(order):
+            length = _shared_prefix_length(keys[left], keys[right])
+            shared[left] = max(shared[left], length)
+            shared[right] = max(shared[right], length)
+
+    spans: list[tuple[int, int]] = []
+    for name, head, tail in zip(names, shared_head, shared_tail, strict=True):
+        size = len(name)
+        start = max(0, min(head, size - tail - 1))
+        end = min(size, max(head + 1, size - tail))
+        while start > 0 and name[start - 1] not in HOST_NAME_SEPARATORS:
+            start -= 1
+        while end < size and name[end] not in HOST_NAME_SEPARATORS:
+            end += 1
+        spans.append((start, end))
+    return spans
+
+
+def fit_host_name(name: str, width: int, span: tuple[int, int]) -> str:
+    """Shorten a display-safe host name to ``width`` and keep ``span`` whole.
+
+    The rest of the room goes to the start of the name, then to what follows
+    the span, with ``…`` at each cut: ``db-primary-001.dc1.exam…``. When the
+    span itself does not fit, this falls back to truncate_middle.
+    """
+    size = len(name)
+    if size <= width:
+        return name
+    start, end = span
+    core = name[start:end]
+    if len(core) + (start > 0) + (end < size) > width:
+        return truncate_middle(name, width)
+
+    room = width - len(core)
+    # One cell stays for whatever follows the span, or the cut there.
+    tail_reserve = min(size - end, 1)
+    if start <= room - tail_reserve:
+        head = name[:start]
+    else:
+        head = name[: room - tail_reserve - 1] + ELLIPSIS
+    room -= len(head)
+    tail = name[end:]
+    if len(tail) > room:
+        tail = name[end : end + room - 1] + ELLIPSIS
+    return head + core + tail
+
+
+def host_labels(names: Sequence[str], width: int | None) -> list[str]:
+    """Return display-safe host labels at most ``width`` wide that keep the
+    part of each name that tells it apart from the rest of the fleet."""
+    safe_names = [sanitize_display(name) for name in names]
+    if width is None:
+        return safe_names
+    spans = host_name_spans(safe_names)
+    return [fit_host_name(name, width, span) for name, span in zip(safe_names, spans, strict=True)]
 
 
 def format_state_cell(status: TargetStatus) -> Text:
@@ -700,10 +783,11 @@ class TargetTableRenderer:
 
     A row is rebuilt only when its target object, sample window or window
     revision, status or address changed (every way the runner and the app
-    change a target), or when the layout changed, and only cells whose text or
-    style changed are sent to the table. Rows near the viewport are refreshed
-    first and the rest round-robin within a time budget; a changed state label
-    is written at once on every full pass, so no state change is held back.
+    change a target), or when the layout or the host labels changed, and only
+    cells whose text or style changed are sent to the table. Rows near the
+    viewport are refreshed first and the rest round-robin within a time
+    budget; a changed state label is written at once on every full pass, so
+    no state change is held back.
     """
 
     def __init__(
@@ -728,6 +812,11 @@ class TargetTableRenderer:
         self._row_keys: list[Any] = []
         self._categories: list[str] = []
         self._newest: list[datetime] = []
+        self._names: list[str] = []
+        self._safe_names: list[str] = []
+        self._name_spans: list[tuple[int, int]] = []
+        self._host_labels: list[str] = []
+        self._labels_width: int | None = None
         self._show_address = False
         self._host_width: int | None = None
         self._history_width = 0
@@ -756,6 +845,7 @@ class TargetTableRenderer:
         also writes changed state labels everywhere, refreshes the other
         changed rows round-robin, and returns the fleet summary.
         """
+        self._update_host_labels(targets)
         # Rows are added outside the batch: add_row's own repaint request
         # must not be dropped.
         self._add_missing_rows(table, targets)
@@ -776,6 +866,32 @@ class TargetTableRenderer:
         if changed and refresh_rows is not None:
             refresh_rows(changed)
         return self._summary(count, now) if full else None
+
+    def _update_host_labels(self, targets: Sequence[TargetRun]) -> None:
+        """Recompute the host labels when a name or the host width changed.
+
+        Comparing the names is cheap (they are the same string objects from
+        one call to the next); telling the names apart is O(N log N) and only
+        redone when one changed.
+        """
+        names = [target.target for target in targets]
+        names_changed = names != self._names
+        if names_changed:
+            self._names = names
+            self._safe_names = [sanitize_display(name) for name in names]
+            self._name_spans = host_name_spans(self._safe_names)
+        width = self._host_width
+        if names_changed or width != self._labels_width:
+            self._labels_width = width
+            self._host_labels = (
+                list(self._safe_names)
+                if width is None
+                else [
+                    fit_host_name(name, width, span)
+                    for name, span in zip(self._safe_names, self._name_spans, strict=True)
+                ]
+            )
+            self._generation += 1
 
     def _refresh_changed_rows(
         self,
@@ -843,12 +959,9 @@ class TargetTableRenderer:
             slow_latency_ms=self.slow_latency_ms,
         )
 
-    def _values(self, row: _RowState, target: TargetRun) -> RowValues:
-        host = row.values[HOST_INDEX]
-        if host is None or row.target is not target or row.generation != self._generation:
-            host = _host_value(target, self._host_width)
+    def _values(self, index: int, row: _RowState, target: TargetRun) -> RowValues:
         return (
-            host,
+            (self._host_labels[index], GREEN),
             _address_value(target, self._show_address),
             *_metric_values(
                 target,
@@ -863,7 +976,7 @@ class TargetTableRenderer:
         for index in range(len(self._rows), len(targets)):
             target = targets[index]
             row = _RowState()
-            values = self._values(row, target)
+            values = self._values(index, row, target)
             row.values[:] = values
             key = target_row_key(index)
             added = table.add_row(
@@ -915,7 +1028,7 @@ class TargetTableRenderer:
         current = row.values
         row_key = self._row_keys[index]
         changed = False
-        for column, value in enumerate(self._values(row, target)):
+        for column, value in enumerate(self._values(index, row, target)):
             if current[column] == value:
                 continue
             table.update_cell(

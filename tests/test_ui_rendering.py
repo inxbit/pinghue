@@ -48,6 +48,7 @@ from pinghue.ui import (
     fleet_summary_parts,
     format_age,
     format_history_cell,
+    host_labels,
     target_row_cells,
     target_row_key,
     target_state,
@@ -231,8 +232,8 @@ def test_every_way_a_target_changes_rerenders_its_row(mutate: Any) -> None:
 
 
 def test_layout_change_rerenders_every_row() -> None:
-    long_name = "db-primary-01.dc1.example.net"
-    targets = [healthy(long_name, *(ok(float(n)) for n in range(1, 40))) for _ in range(3)]
+    names = [f"db-primary-{index:02d}.dc1.example.net" for index in range(3)]
+    targets = [healthy(name, *(ok(float(n)) for n in range(1, 40))) for name in names]
     table = RecordingTable()
     renderer = make_renderer()
     renderer.sync(table, targets)
@@ -241,9 +242,9 @@ def test_layout_change_rerenders_every_row() -> None:
     renderer.set_layout(show_address=False, widths=narrow)
     renderer.sync(table, targets)
 
-    for index in range(3):
+    for index, label in enumerate(host_labels(names, 14)):
         assert len(table.cell(index, "history").plain) == 9
-        assert table.cell(index, "host").plain == truncate_middle(long_name, 14)
+        assert table.cell(index, "host").plain == label
         assert table.cell(index, "address").plain == ""
 
 
@@ -388,6 +389,70 @@ def test_truncate_middle_keeps_the_distinguishing_tail() -> None:
     assert truncate_middle("short.example", 24) == "short.example"
     assert truncate_middle("abcdef", 1) == ELLIPSIS
     assert truncate_middle("abcdef", 0) == ""
+
+
+NUMBERED_FLEETS = {
+    "db-primary": [f"db-primary-{index:03d}.dc1.example.net" for index in range(500)],
+    "web": [f"web-{index:04d}.prod.us-east-1.example.com" for index in range(2000)],
+    "two-sites": [
+        f"db-primary-{index:03d}.dc{site}.example.net" for site in (1, 2) for index in range(250)
+    ],
+    "two-digit": [f"db-primary-{index:02d}.dc1.example.net" for index in range(40)],
+}
+
+
+@pytest.mark.parametrize("fleet", NUMBERED_FLEETS)
+@pytest.mark.parametrize("width", [100, 120, 160])
+def test_numbered_fleets_keep_every_host_label_distinct(fleet: str, width: int) -> None:
+    # A fleet shares a domain suffix: the end of a name alone is not enough.
+    names = NUMBERED_FLEETS[fleet]
+    targets = [TargetRun(name) for name in names]
+    for show_address in (False, True):
+        layout = compute_table_layout(width=width, targets=targets, show_address=show_address)
+
+        labels = host_labels(names, layout["host"])
+
+        assert len(set(labels)) == len(names), (fleet, width, show_address)
+        assert max(len(label) for label in labels) <= layout["host"]
+
+
+def test_host_labels_keep_the_start_and_the_label_that_tells_hosts_apart() -> None:
+    names = NUMBERED_FLEETS["two-digit"]
+
+    assert host_labels(names, 24)[1] == f"db-primary-01.dc1.examp{ELLIPSIS}"
+    assert host_labels(names, 14)[11] == f"db-primary-11{ELLIPSIS}"
+    assert host_labels(NUMBERED_FLEETS["two-sites"], 14)[1] == (f"db-pr{ELLIPSIS}001.dc1{ELLIPSIS}")
+    sites = [f"server-in-datacenter-frankfurt-{index:02d}" for index in range(3)]
+    assert host_labels(sites, 24)[1] == f"server-in-datacenter-{ELLIPSIS}01"
+    # Names that fit stay whole; with nothing shared, the end is kept.
+    assert host_labels(["short.example", "x" * 30], 24) == [
+        "short.example",
+        truncate_middle("x" * 30, 24),
+    ]
+    assert host_labels(names, None) == names
+
+
+def test_renderer_host_cells_tell_a_numbered_fleet_apart() -> None:
+    names = NUMBERED_FLEETS["db-primary"]
+    targets = [healthy(name) for name in names]
+    table = RecordingTable()
+    renderer = make_renderer()
+    renderer.set_layout(show_address=False, widths=dict(WIDTHS, host=14))
+
+    renderer.sync(table, targets)
+
+    hosts = [table.cell(index, "host").plain for index in range(len(names))]
+    assert len(set(hosts)) == len(names)
+    assert hosts[1] == f"db-primar{ELLIPSIS}001{ELLIPSIS}"
+
+
+def test_host_labels_escape_control_characters_first() -> None:
+    names = ["evil\x1b[31m-01.example.net", "evil\x1b[31m-02.example.net"]
+
+    labels = host_labels(names, 14)
+
+    assert all("\x1b" not in label and len(label) <= 14 for label in labels)
+    assert len(set(labels)) == 2
 
 
 def test_host_cell_escapes_control_characters_before_truncating() -> None:
