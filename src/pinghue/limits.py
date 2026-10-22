@@ -14,6 +14,9 @@ except ImportError:  # pragma: no cover - every supported platform provides it
 # selector and self-pipe, the TUI driver, DNS worker threads, and the --output
 # file, which is written while abandoned ICMP workers may still hold sockets.
 FD_RESERVE = 128
+# A run uses a dozen or so descriptors besides its probe sockets, so a limit too
+# small for the full reserve keeps half of itself, but never less than this.
+FD_RESERVE_MINIMUM = 32
 # macOS OPEN_MAX: setrlimit rejects a larger soft limit there even when the hard
 # limit is RLIM_INFINITY, so pinghue never asks for more.
 FD_REQUEST_MAXIMUM = 10_240
@@ -48,13 +51,20 @@ def fd_limit_label(value: int | None) -> str:
     return "unlimited" if value is None else str(value)
 
 
+def concurrency_capacity(limit: int) -> int:
+    """Return how many concurrent probes an open-file limit of ``limit`` can hold."""
+    reserve = min(FD_RESERVE, max(FD_RESERVE_MINIMUM, limit // 2))
+    return max(1, limit - reserve)
+
+
 def fit_concurrency_to_fd_limit(concurrency: int) -> tuple[int, str | None]:
     """Make room for ``concurrency`` in-flight probes, each holding one socket.
 
     Raises the soft open-file limit toward ``concurrency + FD_RESERVE``, never past
     the hard limit. When the limit still cannot fit, returns a lower concurrency and
     a warning for the operator; otherwise returns ``concurrency`` unchanged and
-    ``None``.
+    ``None``. A limit below twice ``FD_RESERVE`` keeps a smaller reserve (see
+    ``concurrency_capacity``), so small limits still fit a few dozen probes.
     """
     needed = concurrency + FD_RESERVE
     limit = read_fd_limit()
@@ -75,13 +85,13 @@ def fit_concurrency_to_fd_limit(concurrency: int) -> tuple[int, str | None]:
                 return concurrency, None
             soft = raised.soft
 
-    effective = max(1, soft - FD_RESERVE)
+    effective = concurrency_capacity(soft)
     if effective >= concurrency:
         return concurrency, None
     warning = (
         f"the open-file limit (soft {soft}, hard {fd_limit_label(limit.hard)}) "
-        f"cannot fit {concurrency} concurrent probes plus {FD_RESERVE} reserved "
-        f"descriptors; lowering concurrency to {effective}. Raise the open-file limit "
+        f"cannot fit {concurrency} concurrent probes plus the descriptors pinghue keeps "
+        f"in reserve; lowering concurrency to {effective}. Raise the open-file limit "
         f"to at least {needed} to probe more hosts at once."
     )
     return effective, warning

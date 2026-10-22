@@ -98,7 +98,7 @@ def test_fit_clamps_concurrency_to_a_low_hard_limit_with_one_warning(
     assert concurrency == 512 - FD_RESERVE
     assert warning == (
         "the open-file limit (soft 512, hard 512) cannot fit 1024 concurrent probes plus "
-        f"{FD_RESERVE} reserved descriptors; lowering concurrency to 384. Raise the "
+        "the descriptors pinghue keeps in reserve; lowering concurrency to 384. Raise the "
         "open-file limit to at least 1152 to probe more hosts at once."
     )
 
@@ -161,8 +161,43 @@ def test_fit_never_requests_more_than_macos_open_max(monkeypatch: pytest.MonkeyP
     assert warning is not None
 
 
+@pytest.mark.parametrize(
+    ("limit", "capacity"),
+    [
+        (20, 1),
+        (64, 32),
+        (100, 50),
+        # Below twice the full reserve, half the limit stays free for everything else.
+        (128, 64),
+        (160, 80),
+        (256, 256 - FD_RESERVE),
+        (512, 512 - FD_RESERVE),
+        (1024 + FD_RESERVE, 1024),
+    ],
+)
+def test_concurrency_capacity_scales_the_reserve_down_for_small_limits(
+    limit: int,
+    capacity: int,
+) -> None:
+    assert limits.concurrency_capacity(limit) == capacity
+
+
+def test_fit_keeps_the_old_default_under_a_small_hard_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A 128-descriptor limit ran the old default of 64 cleanly; the full 128-descriptor
+    # reserve would have left a single probe slot.
+    use_fake_resource(monkeypatch, FakeResource(128, 128))
+
+    assert limits.fit_concurrency_to_fd_limit(64) == (64, None)
+
+    concurrency, warning = limits.fit_concurrency_to_fd_limit(256)
+    assert concurrency == 64
+    assert warning is not None and "lowering concurrency to 64." in warning
+
+
 def test_fit_keeps_at_least_one_probe_slot(monkeypatch: pytest.MonkeyPatch) -> None:
-    use_fake_resource(monkeypatch, FakeResource(100, 100))
+    use_fake_resource(monkeypatch, FakeResource(20, 20))
 
     concurrency, warning = limits.fit_concurrency_to_fd_limit(64)
     assert concurrency == 1

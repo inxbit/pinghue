@@ -319,12 +319,21 @@ def test_doctor_warns_when_hard_open_file_limit_caps_concurrency(
 def test_doctor_flags_open_file_limit_below_default_concurrency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, text = _check_with_fd_limit(monkeypatch, FdLimit(160, 160))
+    _, text = _check_with_fd_limit(monkeypatch, FdLimit(100, 100))
 
     assert (
-        "[warn]  Open-file limit 160 (hard 160) caps --concurrency at 32, "
+        "[warn]  Open-file limit 100 (hard 100) caps --concurrency at 50, "
         "below the default minimum of 64"
     ) in text
+
+
+def test_doctor_scales_the_reserve_for_a_small_open_file_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Matches the runtime: a 160-descriptor limit keeps half of itself in reserve.
+    _, text = _check_with_fd_limit(monkeypatch, FdLimit(160, 160))
+
+    assert "[warn]  Open-file limit 160 (hard 160) caps --concurrency at 80\n" in text
 
 
 def test_doctor_reports_unavailable_open_file_limit(monkeypatch: pytest.MonkeyPatch) -> None:

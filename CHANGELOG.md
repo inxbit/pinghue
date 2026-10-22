@@ -14,7 +14,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 ### Fixed
 
 - Silent targets no longer stretch every target's probe cadence at the default concurrency. Each probe holds its slot until the reply or the timeout, so with the old fixed 64 slots a large inventory with many unresponsive hosts sampled healthy hosts every several seconds instead of every interval (500 targets with 250 silent: every 3 s; 1,000 targets with 500 silent: every 7 s), and delayed down detection by the same factor.
-- High concurrency no longer exhausts the open-file limit. Every in-flight probe holds a socket, so a run whose concurrency exceeded the soft limit (256 by default on macOS, often 1024 on Linux) failed healthy probes with `Too many open files` and could lose the `--output` report. pinghue now raises its soft limit to the concurrency plus 128 reserved descriptors before probing starts, never past the hard limit, and when the hard limit is too low it lowers the concurrency and prints one warning on stderr.
+- High concurrency no longer exhausts the open-file limit. Every in-flight probe holds a socket, so a run whose concurrency exceeded the soft limit (256 by default on macOS, often 1024 on Linux) failed healthy probes with `Too many open files` and could lose the `--output` report. pinghue now raises its soft limit to the concurrency plus 128 reserved descriptors before probing starts, never past the hard limit, and when the hard limit is too low it lowers the concurrency and prints one warning on stderr. Under a limit below 256 the reserve shrinks to half the limit, so a 128-descriptor limit still runs 64 probes at once.
 
 ## 5.1.0 - 2026-08-18
 

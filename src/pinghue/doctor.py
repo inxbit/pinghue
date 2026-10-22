@@ -12,7 +12,13 @@ from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
-from pinghue.limits import FD_REQUEST_MAXIMUM, FD_RESERVE, fd_limit_label, read_fd_limit
+from pinghue.limits import (
+    FD_REQUEST_MAXIMUM,
+    FD_RESERVE,
+    concurrency_capacity,
+    fd_limit_label,
+    read_fd_limit,
+)
 
 OK = "[ok]"
 FAIL = "[fail]"
@@ -251,7 +257,7 @@ def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
         )
         return
 
-    capacity = max(1, raisable - FD_RESERVE)
+    capacity = concurrency_capacity(raisable)
     below_default = (
         f", below the default minimum of {CONCURRENCY_DEFAULT_MINIMUM}"
         if capacity < CONCURRENCY_DEFAULT_MINIMUM

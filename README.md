@@ -307,9 +307,9 @@ echo "net.ipv4.ping_group_range=${gid} ${gid}" \
 
 The broader range `0 2147483647` also works, but enables unprivileged ICMP for every local group on the system.
 
-The doctor also reports the open-file limit. Every in-flight probe holds a socket, and pinghue keeps 128 descriptors in reserve, so `--concurrency 1024` needs a limit of at least 1152. pinghue raises its own soft limit at startup as far as the hard limit allows; when `--check` warns that the hard limit caps concurrency, raise the hard limit (for example `LimitNOFILE=` in a systemd unit or `/etc/security/limits.conf`).
-
 `setcap cap_net_raw` does not work for pip or Homebrew installs: the `pinghue` command is a Python launcher script, and Linux ignores file capabilities on interpreter scripts. Use the `ping_group_range` fix above, or TCP mode. Do not set capabilities on a shared Python interpreter.
+
+The doctor also reports the open-file limit. Every in-flight probe holds a socket, and pinghue keeps 128 descriptors in reserve (half the limit, but at least 32, when the limit is below 256), so `--concurrency 1024` needs a limit of at least 1152. pinghue raises its own soft limit at startup to fit the concurrency, never past the hard limit; when `--check` warns that the hard limit caps concurrency, raise the hard limit (for example `LimitNOFILE=` in a systemd unit or `/etc/security/limits.conf`).
 
 ## JSON Output
 
