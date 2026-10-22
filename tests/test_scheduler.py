@@ -649,18 +649,17 @@ async def test_resolution_rejects_work_and_preserves_targets_after_expired_deadl
     assert resolution_calls == 0
 
 
-async def test_run_no_tui_runs_icmp_probes_without_a_dedicated_executor(
+async def test_run_no_tui_passes_args_mode_and_semaphore_to_probe_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # That ICMP probes use no threads is covered by the loopback engine tests
+    # in test_icmp.py; this pins only how the run mode calls probe_once.
     target = TargetRun(
         target="1.1.1.1",
         resolved_address="1.1.1.1",
         resolved_family=AddressFamily.IPV4,
     )
     probe_kwargs: list[set[str]] = []
-
-    def no_dedicated_executor(*_: object, **__: object) -> object:
-        pytest.fail("ICMP probes run on the event loop, not on a thread pool")
 
     async def fake_probe_once(*_: object, **kwargs: object) -> ProbeSample:
         probe_kwargs.append(set(kwargs))
@@ -670,7 +669,6 @@ async def test_run_no_tui_runs_icmp_probes_without_a_dedicated_executor(
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(runner, "ThreadPoolExecutor", no_dedicated_executor, raising=False)
     use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
