@@ -246,7 +246,10 @@ def test_main_checks_fifo_permissions_against_the_output_mode_before_probing(
         assert exit_code == 1
         assert calls == []
         assert err.startswith("pinghue: error: refusing to write to a FIFO that other users ")
-        assert "(mode 0644); chmod 600 it or use --output-mode umask: " in err
+        assert (
+            "(mode 0644); remove it and recreate it with mkfifo -m 600, "
+            "or use --output-mode umask: " in err
+        )
         assert "\x1b" not in err
         assert "report\\x1b[2J.fifo" in err
     else:

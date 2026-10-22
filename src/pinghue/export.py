@@ -165,13 +165,17 @@ def _require_private_fifo(output_path: Path, observed: os.stat_result, output_mo
     # umask 022 makes it 0644, readable by every local user), so a FIFO that
     # grants group or other users read or write access is refused instead of
     # being handed the report. --output-mode umask leaves that to the operator.
+    # The bits are checked only when a FIFO is opened, so a chmod does not
+    # revoke a reader that opened it, or is blocked opening it, while it was
+    # shared; the message therefore asks for a new FIFO rather than a chmod.
     if output_mode != "private" or not stat.S_ISFIFO(observed.st_mode):
         return
     permissions = stat.S_IMODE(observed.st_mode)
     if permissions & _SHARED_ACCESS_BITS and not _is_descriptor_path(output_path):
         raise PermissionError(
             f"refusing to write to a FIFO that other users can open (mode {permissions:04o}); "
-            f"chmod 600 it or use --output-mode umask: {output_path}"
+            f"remove it and recreate it with mkfifo -m 600, or use --output-mode umask: "
+            f"{output_path}"
         )
 
 

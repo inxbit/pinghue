@@ -302,7 +302,10 @@ def test_private_mode_refuses_fifo_that_other_users_can_open(tmp_path: Path, mod
     output_path = tmp_path / "out.fifo"
     _private_fifo(output_path, mode)
     reader_fd = os.open(output_path, os.O_RDONLY | os.O_NONBLOCK)
-    message = rf"FIFO that other users can open \(mode {mode:04o}\); chmod 600 it"
+    message = (
+        rf"FIFO that other users can open \(mode {mode:04o}\); "
+        r"remove it and recreate it with mkfifo -m 600, or use --output-mode umask: "
+    )
     try:
         with pytest.raises(PermissionError, match=message):
             check_output_path(output_path)
