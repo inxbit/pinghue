@@ -357,6 +357,13 @@ def main(argv: list[str] | None = None) -> int:
         resolve_name = args.resolve_name or (args.targets[0] if args.targets else None)
         return run_check(quiet=args.quiet, resolve_name=resolve_name)
 
+    if not args.no_tui and sys.__stderr__ is None:
+        # The TUI draws on the stderr the process started with. With descriptor
+        # 2 closed there is nowhere to draw: the app would hang, ignoring stop
+        # signals, before probing anything. Nor is there anywhere to report it,
+        # and stdout may feed a pipeline, so exit without printing.
+        return 1
+
     from pinghue.runner import run
 
     if not args.no_tui and not sys.stdout.isatty():
