@@ -99,7 +99,10 @@ Host files are plain text. Blank lines and `#` comments are ignored. Inline comm
 on host lines are also ignored (`host.example  # comment`).
 Host files must be non-symlink regular files, at most 1 MiB, and at most 5,000
 lines. A run accepts at most 5,000 unique targets in total, and each target string
-is capped at 253 characters.
+is capped at 253 characters. Lines end only at `\n` (`\r\n` also works). Other
+line-break characters, such as form feeds or Unicode line separators, stay inside
+the line instead of splitting it into several targets: control characters make
+the target invalid, and anything else non-ASCII is shown escaped.
 
 ```text
 # edge and core checks
@@ -198,8 +201,8 @@ pinghue [OPTIONS] [TARGET ...]
 | `-c, --count N` | continuous | Stop after `N` probes per target. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
-| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. |
-| `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file in place. The rewrite is type-safe but not crash-atomic. |
+| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. A path that would be refused is reported before probing starts. |
+| `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file owned by the current user in place. The rewrite is type-safe but not crash-atomic. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
 | `--concurrency N` | `64` | Maximum concurrent probes, `1-1024`; ICMP daemon workers are bounded by this limit. |
@@ -312,6 +315,8 @@ The broader range `0 2147483647` also works, but enables unprivileged ICMP for e
 ## JSON Output
 
 `--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. Symlinks, sockets, multiply linked regular files, and other unsupported special nodes are never replaced. Existing character devices and FIFOs are written directly only when they can be opened safely as the same node. This is the breaking `2.0.0` CLI change for scripts that previously reused the same output file. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
+
+In a shared directory such as `/tmp`, another local user can create the report path before PingHue does. A FIFO is written only when it is owned by the effective user, and `--overwrite` refuses a regular file owned by anyone else; character devices are accepted regardless of owner, because unprivileged users cannot create them. These refusals exit with status 1 and write nothing. PingHue checks the output path before probing starts, so an unusable path is reported at once instead of after the run, and checks again when it writes the report. The directory itself is not checked: a user who owns it, or can write to it without the sticky bit, can still replace a finished report, so keep evidence in a directory that only you control.
 
 New report creation is no-clobber and first tries to hard-link a complete temporary report into place atomically. On filesystems without hardlink support (for example exFAT and some FUSE mounts), it falls back to an exclusive create and copy: ordinary errors and handled interrupts remove that fallback file, but an abrupt process or system failure can leave a partial new report. Explicitly overwriting an existing regular file uses a descriptor-verified in-place rewrite so a path race cannot replace a symlink, socket, FIFO, or device node; that path is also not crash-atomic. Evidence workflows should accept a report only after PingHue exits successfully and the JSON parses, then rotate it as a separate step.
 

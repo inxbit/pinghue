@@ -6,6 +6,21 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Security
+
+- `--output` no longer writes into an existing FIFO owned by another user, and `--overwrite` refuses an existing regular file owned by another user. Both checks apply to the node as observed and as opened, exit with status `1`, and write nothing. In a shared sticky directory such as `/tmp`, another local user can no longer pre-create the report path to receive the report. Character devices are still accepted whoever owns them.
+- `pinghue --check` now escapes OS release metadata, the interpreter path, and ICMP socket and library error text before printing them, like every other operator-visible string.
+- The repository-hardening workflow passes the repository name to its script through the environment instead of an inline expression. Repository tests now reject `${{ }}` expressions inside any workflow `run:` step, `pull_request_target` and `workflow_run` triggers, dependency caches, and default token permissions other than read.
+- The hosted-hardening check script keeps GitHub API responses in a private `mktemp -d` directory instead of a predictable file name next to a temporary file.
+
+### Changed
+
+- An `--output` path that would be refused is now reported before probing starts, with the same message and exit status `1`, instead of after the run. This covers an existing file without `--overwrite`, a symlink or other unsupported node, a multiply linked or foreign-owned file, a foreign-owned FIFO, and an unwritable directory. A long `--duration` run no longer ends with a lost report. The write at exit still repeats every check, so a path that changes during the run is still refused.
+
+### Fixed
+
+- Host files now end lines only at `\n`, with an optional `\r` before it. Vertical tabs, form feeds, file/group/record separators, NEL, and Unicode line and paragraph separators stay inside their line. They no longer split one line into several targets or skew line numbers and the 5,000-line limit, and a line containing a control character is rejected as an invalid target. A lone `\r` (classic Mac OS line ending) no longer ends a line.
+
 ## 5.1.0 - 2026-08-18
 
 ### Added
