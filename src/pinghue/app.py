@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any
 
 from textual.app import App, ComposeResult
@@ -17,10 +19,15 @@ from pinghue.config import RunConfig
 from pinghue.models import ProbeMode, SampleWindow, TargetRun, TargetStatus
 from pinghue.runner import (
     _monotonic_time,
+    _pending_target_runs,
     apply_retained_sample_budget,
+    first_probe_delay,
+    flush_or_discard_output,
+    install_stop_signal_callback,
     probe_target_loop,
+    record_probe_loop_failure,
     resolve_run_target,
-    stagger_delay,
+    stagger_window,
 )
 from pinghue.ui import (
     COLUMN_KEYS,
@@ -33,6 +40,16 @@ from pinghue.ui import (
 
 SLOW_LATENCY_MS = 100.0
 UI_REFRESH_INTERVAL = 0.5
+# Lookups that are already done (IP literals) drain without suspending; give
+# input and rendering a turn this often while starting their probe loops.
+RESOLUTION_YIELD_EVERY = 256
+
+
+def _note_probe_loop_failure(target: TargetRun, task: asyncio.Task[None]) -> None:
+    # Without this a loop that died on an unexpected error would leave its row
+    # frozen on its last state for the rest of the run.
+    if not task.cancelled() and (error := task.exception()) is not None:
+        record_probe_loop_failure(target, error)
 
 
 class PinghueTextualApp(App[None]):
@@ -103,7 +120,7 @@ class PinghueTextualApp(App[None]):
         self._stop_event = asyncio.Event()
         self._probe_tasks: list[asyncio.Task[None]] = []
         self._resolution_task: asyncio.Task[None] | None = None
-        self._resolution_target_tasks: list[asyncio.Task[tuple[int, TargetRun]]] = []
+        self._resolution_target_tasks: list[asyncio.Task[tuple[int, TargetRun | None]]] = []
         self._deadline_task: asyncio.Task[None] | None = None
         self._completion_task: asyncio.Task[None] | None = None
         self._immediate_events: list[asyncio.Event] = []
@@ -142,66 +159,95 @@ class PinghueTextualApp(App[None]):
         self.set_interval(UI_REFRESH_INTERVAL, self._refresh_table)
         if self.args_config.duration is not None:
             self._deadline_task = asyncio.create_task(self._wait_for_deadline())
-        self._resolution_task = asyncio.create_task(self._resolve_targets())
+        # One "probe now" event per row from the start, so b/B address rows by
+        # index even while some targets are still resolving.
+        self._immediate_events = [asyncio.Event() for _ in self.targets]
+        # A stop signal that arrived during startup may have finished the app.
+        if not self._finishing:
+            self._resolution_task = asyncio.create_task(self._resolve_targets())
 
-    async def _resolve_one_target(self, index: int, target: str) -> tuple[int, TargetRun]:
-        return index, await resolve_run_target(target, self.args_config)
+    async def _resolve_one_target(self, index: int, target: str) -> tuple[int, TargetRun | None]:
+        try:
+            return index, await resolve_run_target(target, self.args_config)
+        except Exception as exc:
+            # Like the no-TUI backstop: mark this row and let the drain go on,
+            # so one failed lookup cannot leave the rows after it unprobed.
+            record_probe_loop_failure(self.targets[index], exc)
+            return index, None
 
     async def _resolve_targets(self) -> None:
+        """Resolve targets and start each probe loop as soon as its target resolves.
+
+        Rows are redrawn by the UI_REFRESH_INTERVAL timer rather than once per
+        resolved target, which would rebuild the whole table N times.
+        """
+        run_start = _monotonic_time()
+        window = stagger_window(
+            interval=self.args_config.interval,
+            remaining=None if self._deadline_at is None else self._deadline_at - run_start,
+        )
         self._resolution_target_tasks = [
             asyncio.create_task(self._resolve_one_target(index, target.target))
             for index, target in enumerate(self.targets)
         ]
 
         try:
-            for task in asyncio.as_completed(self._resolution_target_tasks):
+            for drained, task in enumerate(
+                asyncio.as_completed(self._resolution_target_tasks), start=1
+            ):
                 index, resolved = await task
-                resolved.samples = SampleWindow(
-                    resolved.samples,
-                    maxlen=self.targets[index].samples.maxlen,
-                )
-                self.targets[index] = resolved
-                self._refresh_table()
+                if resolved is not None:
+                    resolved.samples = SampleWindow(
+                        resolved.samples,
+                        maxlen=self.targets[index].samples.maxlen,
+                    )
+                    self.targets[index] = resolved
+                    if not self._stop_event.is_set():
+                        self._start_probe_task(index, resolved, run_start=run_start, window=window)
+                if drained % RESOLUTION_YIELD_EVERY == 0:
+                    await asyncio.sleep(0)
         except asyncio.CancelledError:
             for task in self._resolution_target_tasks:
                 task.cancel()
             await asyncio.gather(*self._resolution_target_tasks, return_exceptions=True)
             raise
 
-        if not self._stop_event.is_set():
-            self._start_probe_tasks()
+        # Every loop exists now, so --count completion waits for all of them,
+        # including loops whose targets resolved last.
+        if self.args_config.count is not None and not self._stop_event.is_set():
+            self._completion_task = asyncio.create_task(self._finish_when_probe_tasks_complete())
 
     def _focus_target_table(self) -> DataTable[Any]:
         table = self.query_one("#targets", DataTable)
         focus_table(table)
         return table
 
-    def _start_probe_tasks(self) -> None:
-        active_count = len(self.targets)
-        self._immediate_events = []
-
-        for index, target in enumerate(self.targets):
-            immediate_event = asyncio.Event()
-            self._immediate_events.append(immediate_event)
-            task = asyncio.create_task(
-                probe_target_loop(
-                    target,
-                    args=self.args_config,
-                    mode=self.mode,
-                    semaphore=self._semaphore,
-                    stop_event=self._stop_event,
-                    immediate_event=immediate_event,
-                    initial_delay=stagger_delay(
-                        index=index,
-                        count=active_count,
-                        interval=self.args_config.interval,
-                    ),
-                )
+    def _start_probe_task(
+        self,
+        index: int,
+        target: TargetRun,
+        *,
+        run_start: float,
+        window: float,
+    ) -> None:
+        task = asyncio.create_task(
+            probe_target_loop(
+                target,
+                args=self.args_config,
+                mode=self.mode,
+                semaphore=self._semaphore,
+                stop_event=self._stop_event,
+                immediate_event=self._immediate_events[index],
+                initial_delay=first_probe_delay(
+                    index=index,
+                    count=len(self.targets),
+                    window=window,
+                    elapsed=_monotonic_time() - run_start,
+                ),
             )
-            self._probe_tasks.append(task)
-
-        if self.args_config.count is not None:
-            self._completion_task = asyncio.create_task(self._finish_when_probe_tasks_complete())
+        )
+        task.add_done_callback(partial(_note_probe_loop_failure, target))
+        self._probe_tasks.append(task)
 
     async def _stop_probe_tasks(self) -> None:
         self._stop_event.set()
@@ -260,6 +306,10 @@ class PinghueTextualApp(App[None]):
         self._finishing = True
         self.ended_at = datetime.now(timezone.utc)
         self.exit_reason = exit_reason
+        # Stop first so no lookup that completes meanwhile starts a new loop,
+        # then cancel outstanding lookups and every loop already started.
+        self._stop_event.set()
+        await self._stop_resolution_tasks()
         await self._stop_probe_tasks()
         self.exit()
 
@@ -367,6 +417,27 @@ class PinghueApp:
 
     async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
         app = PinghueTextualApp(args=self.args, mode=self.mode)
-        await app.run_async()
+        finish_tasks: list[asyncio.Task[None]] = []
+
+        def interrupt() -> None:
+            # Textual handles only job-control signals itself; finishing through
+            # the app restores the terminal and lets run() write --output.
+            if not finish_tasks:
+                finish_tasks.append(asyncio.create_task(app._finish("interrupted")))
+
+        # Installed around the whole app run, so a signal that arrives during
+        # startup is handled too, and removed again once the app has exited.
+        cleanup_signal_handlers = install_stop_signal_callback(interrupt)
+        try:
+            await app.run_async()
+            await asyncio.gather(*finish_tasks, return_exceptions=True)
+        finally:
+            cleanup_signal_handlers()
+        # After a hangup the terminal-restore sequences cannot be written and
+        # stay buffered; drop them so the exit flush keeps the exit status.
+        flush_or_discard_output(sys.stderr)
+        flush_or_discard_output(sys.stdout)
+        # A signal before mount ends the app before it builds its target list.
+        targets = app.targets or _pending_target_runs(self.args.targets)
         ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)
-        return app.targets, app.exit_reason, app.started_at, ended_at
+        return targets, app.exit_reason, app.started_at, ended_at

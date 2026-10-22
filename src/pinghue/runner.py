@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import errno
+import os
 import signal
 import sys
 import time
@@ -95,18 +98,35 @@ def target_run_from_resolution(resolved: ResolvedTarget) -> TargetRun:
             error=resolved.error,
         )
 
+    # Resolved but not yet probed: stay pending until the first sample lands.
+    # DOWN needs evidence, and a run that ends before this target's first probe
+    # must not report a healthy host as down.
     return TargetRun(
         target=resolved.target,
         resolved_address=resolved.address,
         resolved_family=resolved.family,
         resolved_addresses=resolved.addresses,
-        status=TargetStatus.DOWN,
+        status=TargetStatus.RESOLVING,
         error=None,
     )
 
 
+def _is_ip_literal(target: str) -> bool:
+    try:
+        family_from_ip(target)
+    except ValueError:
+        return False
+    return True
+
+
 async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
     family = AddressFamily(args.address_family)
+    if args.numeric or _is_ip_literal(target):
+        # Nothing to look up: skip the resolver queue so IP literals can be
+        # probed at once instead of waiting behind slow DNS names.
+        run = target_run_from_resolution(await resolve_target(target, family, numeric=args.numeric))
+        run._last_resolve_time = _monotonic_time()
+        return run
     try:
         resolved = await _resolve_target_bounded(target, family, numeric=args.numeric)
     except Exception as exc:
@@ -139,6 +159,12 @@ def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
 
 
 async def resolve_runs(args: RunConfig) -> list[TargetRun]:
+    """Resolve every target before returning, in requested order.
+
+    Neither run mode uses this: both resolve each target with
+    ``resolve_run_target`` and start probing it as soon as it resolves. It
+    remains for callers that want every lookup settled up front.
+    """
     runs = await asyncio.gather(*(resolve_run_target(target, args) for target in args.targets))
     apply_retained_sample_budget(runs)
     return runs
@@ -252,14 +278,27 @@ async def probe_once(
     return sample
 
 
-def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup:
-    """Install SIGINT/SIGTERM handlers that let no-TUI mode write final output."""
+def stop_signals() -> tuple[signal.Signals, ...]:
+    """Return the signals that end a run cleanly: SIGINT, SIGTERM and SIGHUP.
+
+    SIGHUP (closed terminal, dropped SSH session) is left alone when it was
+    already ignored at startup, so a ``nohup`` run keeps going after logout.
+    """
+    signals = [signal.SIGINT, signal.SIGTERM]
+    hangup = getattr(signal, "SIGHUP", None)
+    if hangup is not None and signal.getsignal(hangup) is not signal.SIG_IGN:
+        signals.append(hangup)
+    return tuple(signals)
+
+
+def install_stop_signal_callback(callback: Callable[[], object]) -> StopSignalCleanup:
+    """Run ``callback`` on the event loop for each of ``stop_signals()``."""
     loop = asyncio.get_running_loop()
     installed: list[signal.Signals] = []
 
-    for signal_number in (signal.SIGINT, signal.SIGTERM):
+    for signal_number in stop_signals():
         try:
-            loop.add_signal_handler(signal_number, stop_event.set)
+            loop.add_signal_handler(signal_number, callback)
         except (NotImplementedError, RuntimeError, ValueError):
             continue
         installed.append(signal_number)
@@ -271,12 +310,61 @@ def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup
     return cleanup
 
 
+def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup:
+    """Install SIGINT/SIGTERM/SIGHUP handlers that let no-TUI mode write final output."""
+    return install_stop_signal_callback(stop_event.set)
+
+
 def stagger_delay(*, index: int, count: int, interval: float) -> float:
     """Return a start delay that spreads hosts evenly across one interval."""
     if count <= 0:
         return 0.0
 
     return round((interval / count) * index, 6)
+
+
+def stagger_window(*, interval: float, remaining: float | None) -> float:
+    """Return the span that first probes are spread across.
+
+    Normally one interval. A ``--duration`` shorter than two intervals spreads
+    them across half of the remaining run instead, so every host still gets
+    its first probe well before the deadline.
+    """
+    if remaining is None:
+        return interval
+    return max(0.0, min(interval, remaining / 2))
+
+
+def first_probe_delay(*, index: int, count: int, window: float, elapsed: float) -> float:
+    """Return how long target ``index`` waits before its first probe.
+
+    Slots are spread evenly across ``window`` from a fixed run start, so a
+    target that resolves late still lands in its own slot instead of bunching
+    up with others, and one whose slot has already passed starts at once.
+    """
+    return max(0.0, stagger_delay(index=index, count=count, interval=window) - elapsed)
+
+
+def record_probe_loop_failure(target: TargetRun, error: BaseException) -> None:
+    """Mark a target whose probe loop ended on an unexpected error.
+
+    The target then reports the failure instead of keeping its last state as
+    if it were still being probed.
+    """
+    target.status = TargetStatus.ERROR
+    target.error = f"Unexpected probe loop error: {error}"
+
+
+def _cancel_requested() -> bool:
+    """Return whether the running task has a pending cancellation request.
+
+    ``Task.cancelling()`` is new in Python 3.11. On 3.10 this is always False
+    and loops rely on the stop event, which both modes set before cancelling.
+    """
+    if sys.version_info < (3, 11):
+        return False
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
 
 
 async def probe_target_loop(
@@ -294,7 +382,10 @@ async def probe_target_loop(
     """Run one target's probe loop without blocking other targets or UI refresh.
 
     Both the TUI and no-TUI mode drive their probes through this loop; no-TUI
-    mode passes ``on_sample`` to print each result as it lands.
+    mode passes ``on_sample`` to print each result as it lands. Shutdown sets
+    ``stop_event`` before cancelling the task, so the loop ends even when a
+    probe swallows its cancellation; a result such a probe returns was
+    measured before the stop and is still reported.
     """
     if initial_delay > 0:
         stop_wait = asyncio.create_task(stop_event.wait())
@@ -311,16 +402,33 @@ async def probe_target_loop(
             await asyncio.gather(stop_wait, immediate_wait, return_exceptions=True)
         if stop_event.is_set():
             return
-        immediate_event.clear()
+    # A "probe now" request made before the loop started is served by the
+    # first probe rather than triggering a second one right after it.
+    immediate_event.clear()
 
     probes_completed = 0
     probe_limit = args.count
     while not stop_event.is_set():
         probe_started = _monotonic_time()
-        if probe_once_fn is None:
-            sample = await probe_once(target, args=args, mode=mode, semaphore=semaphore)
-        else:
-            sample = await probe_once_fn()
+        try:
+            if probe_once_fn is None:
+                sample = await probe_once(target, args=args, mode=mode, semaphore=semaphore)
+            else:
+                sample = await probe_once_fn()
+        except Exception as exc:
+            # Record an unexpected failure like any failed probe so the row
+            # keeps updating and the run carries on instead of losing the loop.
+            sample = ProbeSample(
+                timestamp=datetime.now(timezone.utc),
+                latency_ms=None,
+                status=SampleStatus.ERROR,
+                error=f"Unexpected probe error: {exc}",
+            )
+            target.apply_sample(
+                sample,
+                fail_threshold=args.fail_threshold,
+                jitter_threshold_ms=args.jitter_threshold,
+            )
         if on_sample is not None:
             on_sample(target, sample)
 
@@ -328,7 +436,10 @@ async def probe_target_loop(
         if probe_limit is not None and probes_completed >= probe_limit:
             return
 
-        if stop_event.is_set():
+        # A probe may swallow the cancellation that shutdown sends it (TCP
+        # close teardown keeps a success measured before the stop), so check
+        # for a stop here rather than waiting out another interval.
+        if stop_event.is_set() or _cancel_requested():
             return
 
         # Subtract the probe's own duration so cadence tracks the interval even
@@ -375,7 +486,7 @@ def _iteration_sleep(*, interval: float, iteration_elapsed: float) -> float:
 
 
 async def _run_probe_loops_until_shutdown(
-    targets: Sequence[TargetRun],
+    targets: list[TargetRun],
     *,
     args: RunConfig,
     mode: ProbeMode,
@@ -384,10 +495,17 @@ async def _run_probe_loops_until_shutdown(
     deadline_at: float | None,
     on_sample: SampleCallback,
 ) -> str | None:
-    """Run every target's probe loop until they finish, a stop is requested, or the deadline.
+    """Resolve and probe every target until done, a stop is requested, or the deadline.
+
+    ``targets`` holds the pending runs in requested order. Each target's probe
+    loop starts as soon as that target resolves, so IP literals and fast
+    lookups are probed while slow names are still resolving. Each resolved run
+    replaces its pending entry in place, so an interrupted or deadline run
+    keeps every completed lookup in the requested order.
 
     Returns ``None`` when every loop completed on its own (``--count``), otherwise
-    the stop reason. Loops still running at shutdown are cancelled promptly.
+    the stop reason. Lookups and loops still running at shutdown are cancelled
+    promptly.
     """
     loop = asyncio.get_running_loop()
     if stop_event.is_set():
@@ -395,24 +513,47 @@ async def _run_probe_loops_until_shutdown(
     if deadline_at is not None and loop.time() >= deadline_at:
         return "deadline"
 
+    # First probes are spread across one interval like the TUI, so N hosts do
+    # not fire in one burst and stay phase-locked into periodic bursts. With
+    # --count the last host therefore finishes up to one interval later.
+    run_start = loop.time()
+    window = stagger_window(
+        interval=args.interval,
+        remaining=None if deadline_at is None else deadline_at - run_start,
+    )
     # No-TUI mode has no "probe now" key, so one shared, never-set event serves
-    # every loop; probes start together rather than staggered across an interval.
+    # every loop.
     immediate_event = asyncio.Event()
-    tasks = [
-        asyncio.create_task(
-            probe_target_loop(
-                target,
+
+    async def resolve_and_probe(index: int) -> None:
+        run = targets[index]
+        try:
+            resolved = await resolve_run_target(run.target, args)
+            resolved.samples = SampleWindow(resolved.samples, maxlen=run.samples.maxlen)
+            targets[index] = run = resolved
+            if stop_event.is_set():
+                return
+            await probe_target_loop(
+                resolved,
                 args=args,
                 mode=mode,
                 semaphore=semaphore,
                 stop_event=stop_event,
                 immediate_event=immediate_event,
-                initial_delay=0.0,
+                initial_delay=first_probe_delay(
+                    index=index,
+                    count=len(targets),
+                    window=window,
+                    elapsed=loop.time() - run_start,
+                ),
                 on_sample=on_sample,
             )
-        )
-        for target in targets
-    ]
+        except Exception as exc:
+            # One target's unexpected failure must not end the whole run
+            # without a report; record it on that target instead.
+            record_probe_loop_failure(run, exc)
+
+    tasks = [asyncio.create_task(resolve_and_probe(index)) for index in range(len(targets))]
     all_loops = asyncio.gather(*tasks)
     stop_wait = asyncio.create_task(stop_event.wait())
     try:
@@ -428,18 +569,16 @@ async def _run_probe_loops_until_shutdown(
             return "deadline"
         if not all_loops.done():
             return "deadline"
-        # gather() settles on the first failure, so sibling loops may still be
-        # running here; the finally block cancels them.
-        for task in tasks:
-            if not task.done():
-                continue
-            if task.cancelled():
-                return "interrupted"
-            error = task.exception()
-            if error is not None:
-                raise error
+        # gather() settles as soon as one loop is cancelled, so sibling loops
+        # may still be running here; the finally block cancels them.
+        if any(task.cancelled() for task in tasks):
+            return "interrupted"
         return None
     finally:
+        # Set the stop event before cancelling: a probe that swallows its
+        # cancellation (TCP close teardown) then ends its loop instead of
+        # probing on past the deadline and keeping the run alive.
+        stop_event.set()
         for task in tasks:
             task.cancel()
         all_loops.cancel()
@@ -447,42 +586,103 @@ async def _run_probe_loops_until_shutdown(
         await asyncio.gather(all_loops, stop_wait, *tasks, return_exceptions=True)
 
 
-async def _resolve_runs_until_shutdown(
-    args: RunConfig,
-    stop_event: asyncio.Event,
-    *,
-    deadline_at: float | None,
-    pending_runs: list[TargetRun] | None = None,
-) -> tuple[list[TargetRun], str | None]:
-    """Resolve targets while honoring both process signals and run duration."""
-    unresolved = pending_runs if pending_runs is not None else _pending_target_runs(args.targets)
-    loop = asyncio.get_running_loop()
-    if stop_event.is_set():
-        return unresolved, "interrupted"
-    if deadline_at is not None and loop.time() >= deadline_at:
-        return unresolved, "deadline"
+def _discard_output(stream: TextIO) -> None:
+    """Point ``stream``'s descriptor at the null device once its reader is gone.
 
-    resolution = asyncio.create_task(resolve_runs(args))
-    stop_wait = asyncio.create_task(stop_event.wait())
+    Python flushes standard streams at exit; without this, the unwritten tail
+    raises BrokenPipeError again there and the exit status becomes 120.
+    """
     try:
-        timeout = None if deadline_at is None else max(0.0, deadline_at - loop.time())
-        await asyncio.wait(
-            (resolution, stop_wait),
-            timeout=timeout,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if stop_event.is_set():
-            return unresolved, "interrupted"
-        if deadline_at is not None and loop.time() >= deadline_at:
-            return unresolved, "deadline"
-        if not resolution.done():
-            return unresolved, "deadline"
-        return await resolution, None
+        descriptor = stream.fileno()
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except (AttributeError, OSError, ValueError):
+        return
+    try:
+        os.dup2(devnull, descriptor)
+    except OSError:
+        pass
     finally:
-        stop_wait.cancel()
-        if not resolution.done():
-            resolution.cancel()
-        await asyncio.gather(stop_wait, resolution, return_exceptions=True)
+        os.close(devnull)
+
+
+def flush_or_discard_output(stream: TextIO | None) -> None:
+    """Flush ``stream``, or discard what it still holds when writing fails.
+
+    Restoring the terminal after a hangup leaves bytes that can never be
+    written; the flush at exit would then fail and turn the exit status into 120.
+    """
+    if stream is None:
+        return
+    try:
+        stream.flush()
+    except (OSError, ValueError):
+        _discard_output(stream)
+
+
+def _reader_is_gone(error: BaseException) -> bool:
+    """Return whether a write failed because nothing reads the stream any more."""
+    if isinstance(error, (BrokenPipeError, ConnectionResetError)):
+        return True
+    # A hung-up terminal fails writes with EIO.
+    return isinstance(error, OSError) and error.errno == errno.EIO
+
+
+def _warn(message: str) -> None:
+    # print() to a stderr of None (closed at startup) is a no-op.
+    with contextlib.suppress(OSError, ValueError):
+        print(f"pinghue: warning: {message}", file=sys.stderr, flush=True)
+
+
+class _SampleLinePrinter:
+    """Print no-TUI probe lines and push them to the reader within one loop turn.
+
+    Python block-buffers stdout when it is a pipe or a file (``| tee``,
+    journald), which would hold lines back by kilobytes. One flush is scheduled
+    per event-loop turn instead of one ``write()`` per line, so a burst of
+    results still reaches the reader together and promptly.
+
+    When the reader goes away (``| head``, a hung-up terminal) printing stops
+    and ``on_closed`` asks the run to stop as if interrupted, so the run still
+    ends cleanly and ``--output`` is still written. Any other write failure
+    (a full disk, for example) stops the run the same way after a warning on
+    stderr. A ``stream`` of None (its descriptor was closed at startup) drops
+    the lines and lets the run go on.
+    """
+
+    def __init__(self, stream: TextIO | None, *, on_closed: Callable[[], object]) -> None:
+        self._stream = stream
+        self._on_closed = on_closed
+        self._flush_scheduled = False
+        self._closed = False
+
+    def __call__(self, target: TargetRun, sample: ProbeSample | None) -> None:
+        if self._closed or self._stream is None:
+            return
+        try:
+            print_sample(target, sample, stream=self._stream)
+        except (OSError, ValueError) as exc:
+            self._close(self._stream, exc)
+            return
+        if not self._flush_scheduled:
+            self._flush_scheduled = True
+            asyncio.get_running_loop().call_soon(self.flush)
+
+    def flush(self) -> None:
+        self._flush_scheduled = False
+        stream = self._stream
+        if self._closed or stream is None:
+            return
+        try:
+            stream.flush()
+        except (OSError, ValueError) as exc:
+            self._close(stream, exc)
+
+    def _close(self, stream: TextIO, error: BaseException) -> None:
+        self._closed = True
+        if not _reader_is_gone(error):
+            _warn(f"could not write probe lines, stopping the run: {error}")
+        _discard_output(stream)
+        self._on_closed()
 
 
 async def run_no_tui(
@@ -498,35 +698,30 @@ async def run_no_tui(
     cleanup_signal_handlers = install_stop_signal_handlers(stop_event)
     exit_reason = "completed"
     # With `--output -` the JSON document owns stdout; per-probe lines move to
-    # stderr so the exported document stays machine-parseable.
-    sample_stream = sys.stderr if args.output is not None and str(args.output) == "-" else None
-
-    def print_to_stream(target: TargetRun, sample: ProbeSample | None) -> None:
-        print_sample(target, sample, stream=sample_stream)
+    # stderr so the exported document stays machine-parseable. A stream that is
+    # None (closed at startup) drops the lines rather than using the other one.
+    sample_stream = (
+        sys.stderr if args.output is not None and str(args.output) == "-" else sys.stdout
+    )
+    print_line = _SampleLinePrinter(sample_stream, on_closed=stop_event.set)
 
     try:
-        targets, stop_reason = await _resolve_runs_until_shutdown(
-            args,
-            stop_event,
+        stop_reason = await _run_probe_loops_until_shutdown(
+            targets,
+            args=args,
+            mode=mode,
+            semaphore=semaphore,
+            stop_event=stop_event,
             deadline_at=deadline_at,
-            pending_runs=targets,
+            on_sample=print_line,
         )
-        if stop_reason is None:
-            stop_reason = await _run_probe_loops_until_shutdown(
-                targets,
-                args=args,
-                mode=mode,
-                semaphore=semaphore,
-                stop_event=stop_event,
-                deadline_at=deadline_at,
-                on_sample=print_to_stream,
-            )
         if stop_reason is not None:
             exit_reason = stop_reason
     except (asyncio.CancelledError, KeyboardInterrupt):
         exit_reason = "interrupted"
     finally:
         cleanup_signal_handlers()
+        print_line.flush()
 
     ended_at = datetime.now(timezone.utc)
     return targets, exit_reason, started_at, ended_at

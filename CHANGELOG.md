@@ -6,6 +6,21 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Changed
+
+- Each target now starts probing as soon as its own name resolves, in both modes, instead of waiting for every lookup in the run; IP literals start at once instead of queueing behind DNS names for a resolver slot.
+- No-TUI mode now spreads the targets' first probes across one interval like the TUI, instead of probing every target in the same instant on every cycle; with `--count`, a run with several targets can take up to one interval longer. When `--duration` is shorter than two intervals, first probes are spread across half the run so every target is still probed.
+- A resolved target whose first probe has not landed yet now shows and exports as `resolving` instead of `down`; such never-probed targets still count as down for `--fail-on-any-down` and `--fail-on-all-down`.
+- No-TUI per-probe lines now reach a pipe or file as soon as each result lands instead of sitting in an output buffer; when the reader goes away (for example `| head`), the run stops as `interrupted` and still writes `--output` instead of failing with a broken-pipe error. Any other failure to write a line, such as a full disk, stops the run the same way after a warning on stderr.
+
+### Fixed
+
+- A `--no-tui --duration` run in TCP mode could keep probing past its deadline, never write `--output` and never exit, when the deadline cut off a probe's connection teardown.
+- TUI startup no longer redraws the whole table once per resolved target, which froze the TUI for seconds at 500 targets and for many minutes at 5,000 before any host was probed.
+- `SIGTERM` and `SIGHUP` now end a TUI run cleanly, restoring the terminal and writing `--output` with `exit_reason` `interrupted`, and `SIGHUP` now ends a no-TUI run the same way; a `SIGHUP` already ignored at startup (`nohup`) stays ignored. A closed terminal window or dropped SSH session ends the run this way too, with its normal exit status.
+- A probe loop that fails on an unexpected error now marks its target `error` instead of leaving it frozen on its last state, and no longer ends a no-TUI run without a report. In the TUI, a lookup that fails that way marks its own row instead of keeping the other rows from ever being probed.
+- With `--output -` and stderr closed, no-TUI per-probe lines are now dropped instead of being written into the JSON document on stdout.
+
 ## 5.1.0 - 2026-08-18
 
 ### Added

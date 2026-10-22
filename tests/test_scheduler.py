@@ -38,6 +38,16 @@ def no_tui_args(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**values)
 
 
+def use_resolved_runs(monkeypatch: pytest.MonkeyPatch, *runs: TargetRun) -> None:
+    """Make each target name resolve to the given prepared run."""
+    by_target = {run.target: run for run in runs}
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        return by_target[target]
+
+    monkeypatch.setattr(runner, "resolve_run_target", fake_resolve_run_target)
+
+
 def test_stagger_delay_spreads_hosts_across_interval() -> None:
     assert stagger_delay(index=0, count=4, interval=1.0) == 0.0
     assert stagger_delay(index=1, count=4, interval=1.0) == 0.25
@@ -201,9 +211,6 @@ async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
         recorded.append((interval, iteration_elapsed))
         return 0.0
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
             timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
@@ -213,7 +220,7 @@ async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
 
     monkeypatch.setattr(runner, "_monotonic_time", lambda: next(monotonic_times))
     monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     await run_no_tui(no_tui_args(count=2), ProbeMode.ICMP)
@@ -238,9 +245,6 @@ async def test_run_no_tui_yields_after_slow_iteration(
         sleeps.append(sleep_for)
         return sleep_for
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
             timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
@@ -250,7 +254,7 @@ async def test_run_no_tui_yields_after_slow_iteration(
 
     monkeypatch.setattr(runner, "_monotonic_time", lambda: next(monotonic_times))
     monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     await run_no_tui(no_tui_args(count=2), ProbeMode.ICMP)
@@ -267,9 +271,6 @@ async def test_run_no_tui_probes_targets_independently_and_prints_as_results_lan
     fast = TargetRun(target="fast.example", resolved_address="192.0.2.1")
     slow = TargetRun(target="slow.example", resolved_address="192.0.2.2")
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [fast, slow]
-
     async def fake_probe_once(target: TargetRun, *_: object, **__: object) -> ProbeSample:
         if target is slow:
             await asyncio.sleep(0.3)
@@ -279,7 +280,7 @@ async def test_run_no_tui_probes_targets_independently_and_prints_as_results_lan
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, fast, slow)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     _, exit_reason, _, _ = await run_no_tui(
@@ -301,13 +302,10 @@ async def test_run_no_tui_returns_interrupted_on_cancellation(
         resolved_family=AddressFamily.IPV4,
     )
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     args = no_tui_args()
@@ -333,9 +331,6 @@ async def test_run_no_tui_skips_probes_when_stop_is_already_requested(
         stop_event.set()
         return lambda: None
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         nonlocal probe_calls
         probe_calls += 1
@@ -346,7 +341,7 @@ async def test_run_no_tui_skips_probes_when_stop_is_already_requested(
         )
 
     monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     args = no_tui_args(count=1, port=443)
@@ -371,9 +366,6 @@ async def test_run_no_tui_reports_interrupted_when_count_final_probe_requests_st
         installed_stop_event = stop_event
         return lambda: None
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         assert installed_stop_event is not None
         installed_stop_event.set()
@@ -384,7 +376,7 @@ async def test_run_no_tui_reports_interrupted_when_count_final_probe_requests_st
         )
 
     monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     args = no_tui_args(count=1, port=443)
@@ -416,11 +408,6 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
         installed_stop_event = stop_event
         return lambda: None
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        # The blocked target is listed first so its probe is already in flight
-        # when the fast target's probe requests the stop.
-        return [blocked, fast]
-
     async def fake_probe_once(target: TargetRun, *_: object, **__: object) -> ProbeSample:
         if target is blocked:
             try:
@@ -440,7 +427,9 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
         return sample
 
     monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    # The blocked target is listed first so its probe is already in flight
+    # when the fast target's probe requests the stop.
+    use_resolved_runs(monkeypatch, blocked, fast)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     targets, exit_reason, _, _ = await run_no_tui(
@@ -469,9 +458,6 @@ async def test_run_no_tui_cancels_an_active_probe_when_stop_is_requested(
         installed_stop_event = stop_event
         return lambda: None
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def blocked_probe(*_: object, **__: object) -> ProbeSample:
         probe_started.set()
         try:
@@ -481,7 +467,7 @@ async def test_run_no_tui_cancels_an_active_probe_when_stop_is_requested(
         raise AssertionError("unreachable")
 
     monkeypatch.setattr(runner, "install_stop_signal_handlers", fake_install_stop_signal_handlers)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", blocked_probe)
     args = no_tui_args(port=443, timeout=30.0)
 
@@ -508,9 +494,6 @@ async def test_run_no_tui_duration_cancels_an_active_probe(
     probe_started = asyncio.Event()
     probe_cancelled = asyncio.Event()
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def blocked_probe(*_: object, **__: object) -> ProbeSample:
         probe_started.set()
         try:
@@ -519,7 +502,7 @@ async def test_run_no_tui_duration_cancels_an_active_probe(
             probe_cancelled.set()
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", blocked_probe)
     args = no_tui_args(duration=0.01, port=443, timeout=30.0)
 
@@ -542,7 +525,7 @@ async def test_run_no_tui_duration_cancels_active_resolution(
     resolution_started = asyncio.Event()
     resolution_cancelled = asyncio.Event()
 
-    async def blocked_resolve_runs(_: object) -> list[TargetRun]:
+    async def blocked_resolve_run_target(*_: object) -> TargetRun:
         resolution_started.set()
         try:
             await asyncio.Event().wait()
@@ -550,7 +533,7 @@ async def test_run_no_tui_duration_cancels_active_resolution(
             resolution_cancelled.set()
         raise AssertionError("unreachable")
 
-    monkeypatch.setattr(runner, "resolve_runs", blocked_resolve_runs)
+    monkeypatch.setattr(runner, "resolve_run_target", blocked_resolve_run_target)
     args = no_tui_args(
         duration=0.01,
         port=443,
@@ -591,13 +574,13 @@ async def test_run_no_tui_duration_includes_synchronous_startup_time(
         time.sleep(0.02)
         return original_pending_runs(targets)
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
         nonlocal resolution_calls
         resolution_calls += 1
-        return [TargetRun("1.1.1.1", resolved_address="1.1.1.1")]
+        return TargetRun(target, resolved_address=target)
 
     monkeypatch.setattr(runner, "_pending_target_runs", slow_pending_runs)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    monkeypatch.setattr(runner, "resolve_run_target", fake_resolve_run_target)
 
     _, exit_reason, _, _ = await run_no_tui(
         no_tui_args(duration=0.001, count=1),
@@ -639,18 +622,22 @@ async def test_resolution_rejects_work_and_preserves_targets_after_expired_deadl
 ) -> None:
     resolution_calls = 0
 
-    async def immediate_resolution(_: object) -> list[TargetRun]:
+    async def immediate_resolution(target: str, _args: object) -> TargetRun:
         nonlocal resolution_calls
         resolution_calls += 1
-        return []
+        return TargetRun(target)
 
-    monkeypatch.setattr(runner, "resolve_runs", immediate_resolution)
-    args = SimpleNamespace(targets=["a.example", "b.example"])
+    monkeypatch.setattr(runner, "resolve_run_target", immediate_resolution)
+    targets = runner._pending_target_runs(["a.example", "b.example"])
 
-    targets, stop_reason = await runner._resolve_runs_until_shutdown(
-        args,
-        asyncio.Event(),
+    stop_reason = await runner._run_probe_loops_until_shutdown(
+        targets,
+        args=no_tui_args(targets=["a.example", "b.example"]),
+        mode=ProbeMode.ICMP,
+        semaphore=asyncio.Semaphore(1),
+        stop_event=asyncio.Event(),
         deadline_at=asyncio.get_running_loop().time() - 1.0,
+        on_sample=lambda *_: None,
     )
 
     assert [target.target for target in targets] == ["a.example", "b.example"]
@@ -675,9 +662,6 @@ async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
     def no_dedicated_executor(*_: object, **__: object) -> object:
         pytest.fail("ICMP probes must use the daemon-thread bridge")
 
-    async def fake_resolve_runs(_: object) -> list[TargetRun]:
-        return [target]
-
     async def fake_probe_once(*_: object, **kwargs: object) -> ProbeSample:
         probe_kwargs.append(set(kwargs))
         return ProbeSample(
@@ -687,7 +671,7 @@ async def test_run_no_tui_uses_daemon_icmp_bridge_without_dedicated_executor(
         )
 
     monkeypatch.setattr(runner, "ThreadPoolExecutor", no_dedicated_executor, raising=False)
-    monkeypatch.setattr(runner, "resolve_runs", fake_resolve_runs)
+    use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
 
     args = no_tui_args(concurrency=5, count=1)

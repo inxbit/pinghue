@@ -179,6 +179,16 @@ Example no-TUI output:
 2026-05-14T18:32:12.420000+00:00 api.internal timeout latency=-
 ```
 
+Each line is written as soon as its probe result lands, also when stdout is a
+pipe or a file. If the reader goes away (for example `| head`), the run stops as
+if interrupted and still writes `--output`. Any other failure to write a line,
+such as a full disk, stops the run the same way after a warning on stderr.
+
+Both modes start probing each target as soon as its own name resolves (IP
+literals at once) and spread the targets' first probes evenly across one
+interval, or across half the run when `--duration` is shorter than two
+intervals, so a large host list is not probed in one burst.
+
 ## CLI Reference
 
 ```text
@@ -195,7 +205,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `-n, --numeric` | off | Skip DNS and require IP literals. |
 | `-i, --interval SEC` | `1.0` | Seconds between probes. Minimum: `0.1`. |
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
-| `-c, --count N` | continuous | Stop after `N` probes per target. Intentionally has no upper bound. |
+| `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. |
@@ -219,10 +229,14 @@ pinghue [OPTIONS] [TARGET ...]
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Run completed (and no `--fail-on-*` condition triggered). In `--no-tui` mode, interrupting a run with Ctrl-C still evaluates the fail conditions, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. In the TUI, use `q`, which records `user_quit`. |
+| `0` | Run completed (and no `--fail-on-*` condition triggered). Interrupting a run with Ctrl-C in `--no-tui` mode, or with `SIGTERM` or `SIGHUP` in either mode, still evaluates the fail conditions and writes `--output`, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. A `SIGHUP` that is already ignored when pinghue starts (for example under `nohup`) stays ignored. In the TUI, use `q`, which records `user_quit`. |
 | `1` | Runtime error (for example the `--output` file could not be written), or `--check` found the environment not ICMP-ready. |
 | `2` | Usage error: unknown flag or invalid value. |
 | `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
+
+A target the run never probed, for example one still `resolving` when
+`--duration` ends, has no evidence that it is up, so both `--fail-on-*` options
+count it as down.
 
 ## TUI Controls
 
