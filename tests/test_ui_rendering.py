@@ -37,7 +37,7 @@ from pinghue.models import (
     TargetStatus,
 )
 from pinghue.probes import ResolvedTarget
-from pinghue.runner import target_run_from_resolution
+from pinghue.runner import record_probe_loop_failure, target_run_from_resolution
 from pinghue.ui import (
     AMBER,
     COLUMN_KEYS,
@@ -584,6 +584,25 @@ def test_result_age_leaves_out_targets_that_sent_their_count() -> None:
     assert summary is not None
     assert summary.oldest_result_age_s is None
     assert summary.counts == {"healthy": 2}
+
+
+def test_result_age_leaves_out_a_target_whose_probe_loop_died() -> None:
+    live = healthy("live.example", ok(5.0, at=119.5))
+    stuck = healthy("stuck.example", ok(5.0, at=0.0))
+    table = RecordingTable()
+    renderer = make_renderer()
+    now = T0 + timedelta(seconds=120)
+
+    # Still probed, the stale target is what the age is for.
+    summary = renderer.sync(table, [live, stuck], now=now)
+    assert summary == FleetSummary(counts={"healthy": 2}, oldest_result_age_s=120.0)
+
+    # Once its probe loop is dead it shows as an error, and its last result no
+    # longer says anything about whether probes keep up.
+    record_probe_loop_failure(stuck, RuntimeError("boom"))
+    summary = renderer.sync(table, [live, stuck], now=now)
+    assert summary == FleetSummary(counts={"healthy": 1, "error": 1}, oldest_result_age_s=0.5)
+    assert make_renderer().sync(RecordingTable(), [live, stuck], now=now) == summary
 
 
 def test_format_age_stays_short() -> None:

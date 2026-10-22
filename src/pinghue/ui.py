@@ -920,9 +920,15 @@ class TargetTableRenderer:
         self._remember_state(index, row.values[STATE_INDEX] or target_state(target), samples)
 
     def _remember_state(self, index: int, state: CellValue, samples: SampleWindow) -> None:
-        self._categories[index] = _summary_category(state[0])
+        category = _summary_category(state[0])
+        self._categories[index] = category
+        # Only a dead probe loop sets ERROR (record_probe_loop_failure): that
+        # host is counted as an error, and its last result says nothing about
+        # whether the hosts still being probed keep up.
         self._newest[index] = (
-            samples[-1].timestamp if samples and not self._probes_done(samples) else _NO_SAMPLE
+            samples[-1].timestamp
+            if samples and category != "error" and not self._probes_done(samples)
+            else _NO_SAMPLE
         )
 
     def _probes_done(self, samples: SampleWindow) -> bool:
