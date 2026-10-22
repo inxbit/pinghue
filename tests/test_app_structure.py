@@ -453,6 +453,47 @@ async def test_tui_resolution_does_not_redraw_the_table_per_target(monkeypatch) 
     await app.on_unmount()
 
 
+async def test_tui_keeps_starting_rows_after_one_lookup_raises(monkeypatch) -> None:
+    # An unexpected error from one lookup used to end the whole drain: every
+    # row not drained yet stayed "resolving" and a -c run never completed.
+    app = PinghueTextualApp(
+        args=build_args(targets=["192.0.2.1", "bad.example", "192.0.2.3"], count=1),
+        mode=ProbeMode.ICMP,
+    )
+    started: list[str] = []
+
+    async def fake_resolve_run_target(target: str, _args: object) -> TargetRun:
+        if target == "bad.example":
+            raise RuntimeError("resolver bug")
+        return _resolved(target, target)
+
+    async def fake_probe_target_loop(
+        target: TargetRun, *, stop_event: asyncio.Event, **_: Any
+    ) -> None:
+        started.append(target.target)
+        await stop_event.wait()
+
+    _mount_with_fakes(
+        monkeypatch,
+        app,
+        resolve=fake_resolve_run_target,
+        probe_loop=fake_probe_target_loop,
+    )
+
+    await app.on_mount()
+    assert app._resolution_task is not None
+    await asyncio.wait_for(app._resolution_task, timeout=2.0)
+    assert await _eventually(lambda: len(started) == 2)
+
+    assert started == ["192.0.2.1", "192.0.2.3"]
+    assert [target.target for target in app.targets] == ["192.0.2.1", "bad.example", "192.0.2.3"]
+    assert app.targets[1].status == TargetStatus.ERROR
+    assert app.targets[1].error == "Unexpected probe loop error: resolver bug"
+    # --count completion is armed for the loops that did start.
+    assert app._completion_task is not None
+    await app.on_unmount()
+
+
 async def test_tui_starts_each_probe_loop_as_its_target_resolves(monkeypatch) -> None:
     # IP literals are probed while a slow lookup is still pending, and
     # --count completion still waits for the loop of the target resolved last.

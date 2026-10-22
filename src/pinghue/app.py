@@ -120,7 +120,7 @@ class PinghueTextualApp(App[None]):
         self._stop_event = asyncio.Event()
         self._probe_tasks: list[asyncio.Task[None]] = []
         self._resolution_task: asyncio.Task[None] | None = None
-        self._resolution_target_tasks: list[asyncio.Task[tuple[int, TargetRun]]] = []
+        self._resolution_target_tasks: list[asyncio.Task[tuple[int, TargetRun | None]]] = []
         self._deadline_task: asyncio.Task[None] | None = None
         self._completion_task: asyncio.Task[None] | None = None
         self._immediate_events: list[asyncio.Event] = []
@@ -166,8 +166,14 @@ class PinghueTextualApp(App[None]):
         if not self._finishing:
             self._resolution_task = asyncio.create_task(self._resolve_targets())
 
-    async def _resolve_one_target(self, index: int, target: str) -> tuple[int, TargetRun]:
-        return index, await resolve_run_target(target, self.args_config)
+    async def _resolve_one_target(self, index: int, target: str) -> tuple[int, TargetRun | None]:
+        try:
+            return index, await resolve_run_target(target, self.args_config)
+        except Exception as exc:
+            # Like the no-TUI backstop: mark this row and let the drain go on,
+            # so one failed lookup cannot leave the rows after it unprobed.
+            record_probe_loop_failure(self.targets[index], exc)
+            return index, None
 
     async def _resolve_targets(self) -> None:
         """Resolve targets and start each probe loop as soon as its target resolves.
@@ -190,13 +196,14 @@ class PinghueTextualApp(App[None]):
                 asyncio.as_completed(self._resolution_target_tasks), start=1
             ):
                 index, resolved = await task
-                resolved.samples = SampleWindow(
-                    resolved.samples,
-                    maxlen=self.targets[index].samples.maxlen,
-                )
-                self.targets[index] = resolved
-                if not self._stop_event.is_set():
-                    self._start_probe_task(index, resolved, run_start=run_start, window=window)
+                if resolved is not None:
+                    resolved.samples = SampleWindow(
+                        resolved.samples,
+                        maxlen=self.targets[index].samples.maxlen,
+                    )
+                    self.targets[index] = resolved
+                    if not self._stop_event.is_set():
+                        self._start_probe_task(index, resolved, run_start=run_start, window=window)
                 if drained % RESOLUTION_YIELD_EVERY == 0:
                     await asyncio.sleep(0)
         except asyncio.CancelledError:
