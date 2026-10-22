@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
-from typing import Any, TypeVar
+from typing import Any
 
 from pinghue.icmp import UNREACHABLE_ERRNOS as UNREACHABLE_ERRNOS
 from pinghue.icmp import engine_for_running_loop
@@ -23,7 +23,6 @@ from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 MAX_FAILOVER_ADDRESSES = 8
 MAX_DNS_DAEMON_THREADS = 128
 _dns_thread_slots = threading.BoundedSemaphore(MAX_DNS_DAEMON_THREADS)
-_T = TypeVar("_T")
 
 # A clean TCP close finishes on the next loop iteration; this only bounds a
 # teardown that stalls after the connect was already measured.
@@ -182,7 +181,8 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
     ever exist. A lookup of a name whose previous call is still running joins
     that call instead of starting another thread. When every slot is taken, the
     lookup waits up to DNS_THREAD_WAIT_SECONDS for one, then raises
-    ResolverBusyError; so does a thread that fails to start.
+    ResolverBusyError; so does a thread that fails to start, once the rest of
+    that wait has passed.
     """
     key = (target, family)
     loop = asyncio.get_running_loop()
@@ -221,9 +221,13 @@ async def _getaddrinfo_daemon(target: str, family: int) -> list[Any]:
                 _settle_dns_lookup(key, lookup, [], exc)
                 raise
             # "can't start new thread" (a pids or RLIMIT_NPROC cap, memory) is
-            # local capacity, not a DNS verdict.
+            # local capacity, not a DNS verdict. Free the slot, then wait out
+            # DNS_THREAD_WAIT_SECONDS like a lookup that found every thread
+            # busy: callers retry at once, so without the wait every pending
+            # name would try to start a thread on every probe iteration.
             busy = ResolverBusyError(f"could not start a resolver thread: {exc}")
             _settle_dns_lookup(key, lookup, [], busy)
+            await asyncio.sleep(max(0.0, deadline - loop.time()))
             raise busy from exc
 
     try:
@@ -244,6 +248,12 @@ def _is_unspecified(address: str) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         return ip.ipv4_mapped.is_unspecified
     return ip.is_unspecified
+
+
+UNSPECIFIED_ONLY_ERROR = (
+    "getaddrinfo: only unspecified addresses returned (0.0.0.0 or ::); "
+    "the name may be blocked by a DNS filter"
+)
 
 
 def _usable_addresses(infos: list[Any], *, prefer_ipv4: bool) -> list[Any]:
@@ -314,13 +324,7 @@ async def resolve_target(
     # len(addresses) * timeout_s.
     usable = _usable_addresses(infos, prefer_ipv4=address_family == AddressFamily.AUTO)
     if not usable:
-        return ResolvedTarget(
-            target,
-            None,
-            None,
-            "getaddrinfo: only unspecified addresses returned (0.0.0.0 or ::); "
-            "the name may be blocked by a DNS filter",
-        )
+        return ResolvedTarget(target, None, None, UNSPECIFIED_ONLY_ERROR)
 
     family = AddressFamily.IPV4 if usable[0][0] == socket.AF_INET else AddressFamily.IPV6
     addresses = tuple(info[4][0] for info in usable)

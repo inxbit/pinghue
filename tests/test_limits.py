@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import pinghue.app as app_module
+import pinghue.probes as probes
 import pinghue.runner as runner
 from pinghue import limits
 from pinghue.limits import FD_REQUEST_MAXIMUM, FD_RESERVE, FdLimit
@@ -95,11 +96,12 @@ def test_fit_clamps_concurrency_to_a_low_hard_limit_with_one_warning(
     concurrency, warning = limits.fit_concurrency_to_fd_limit(1024)
 
     assert fake.setrlimit_calls == [(512, 512)]
-    assert concurrency == 512 - FD_RESERVE
+    # Below twice the full reserve, half the limit stays in reserve.
+    assert concurrency == 256
     assert warning == (
         "the open-file limit (soft 512, hard 512) cannot fit 1024 concurrent TCP probes plus "
-        "the descriptors pinghue keeps in reserve; lowering concurrency to 384. Raise the "
-        "open-file limit to at least 1152 to probe more hosts at once."
+        "the descriptors pinghue keeps in reserve; lowering concurrency to 256. Raise the "
+        "open-file limit to at least 1472 to probe more hosts at once."
     )
 
 
@@ -131,7 +133,7 @@ def test_fit_clamps_to_the_current_soft_limit_when_setrlimit_fails(
     concurrency, warning = limits.fit_concurrency_to_fd_limit(569)
 
     assert fake.setrlimit_calls == [(569 + FD_RESERVE, MACOS_RLIM_INFINITY)]
-    assert concurrency == 256 - FD_RESERVE
+    assert concurrency == 128
     assert warning is not None and "(soft 256, hard unlimited)" in warning
 
 
@@ -147,7 +149,7 @@ def test_fit_clamps_to_the_old_soft_limit_when_it_cannot_be_reread(
 
     concurrency, warning = limits.fit_concurrency_to_fd_limit(1024)
 
-    assert concurrency == 256 - FD_RESERVE
+    assert concurrency == 128
     assert warning is not None and "(soft 256, hard 512)" in warning
 
 
@@ -170,8 +172,10 @@ def test_fit_never_requests_more_than_macos_open_max(monkeypatch: pytest.MonkeyP
         # Below twice the full reserve, half the limit stays free for everything else.
         (128, 64),
         (160, 80),
-        (256, 256 - FD_RESERVE),
-        (512, 512 - FD_RESERVE),
+        (256, 128),
+        (512, 256),
+        (2 * FD_RESERVE, FD_RESERVE),
+        (2 * FD_RESERVE + 100, FD_RESERVE + 100),
         (1024 + FD_RESERVE, 1024),
     ],
 )
@@ -267,7 +271,7 @@ def test_fit_raises_and_clamps_the_real_process_limit() -> None:
     parent = limits.read_fd_limit()
     if parent is not None and (parent.hard is None or parent.hard >= 1024 + FD_RESERVE):
         assert raised == f"1024 True {1024 + FD_RESERVE}"
-    assert clamped == f"{256 - FD_RESERVE} False 256"
+    assert clamped == "128 False 256"
 
 
 def run_args(**overrides: object) -> SimpleNamespace:
@@ -310,7 +314,7 @@ async def test_run_fits_tcp_concurrency_before_no_tui_probing_starts(
     assert await runner.run(run_args(), mode=ProbeMode.TCP) == 0
 
     [(concurrency, stderr_before_probing)] = started
-    assert concurrency == 256 - FD_RESERVE
+    assert concurrency == 128
     assert stderr_before_probing.count("pinghue: warning: the open-file limit") == 1
     assert "lowering concurrency to 128" in stderr_before_probing
     assert capsys.readouterr().err == ""
@@ -335,7 +339,7 @@ async def test_run_fits_tcp_concurrency_before_the_tui_starts(
     assert await runner.run(run_args(no_tui=False), mode=ProbeMode.TCP) == 0
 
     [(concurrency, stderr_before_tui)] = started
-    assert concurrency == 256 - FD_RESERVE
+    assert concurrency == 128
     assert "lowering concurrency to 128" in stderr_before_tui
 
 
@@ -362,14 +366,16 @@ async def test_run_raises_the_soft_limit_silently_when_the_hard_limit_allows(
 
 
 @pytest.mark.parametrize("no_tui", [True, False])
-async def test_run_leaves_icmp_concurrency_and_the_open_file_limit_alone(
+async def test_run_leaves_icmp_concurrency_alone_and_reserves_resolver_descriptors(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     no_tui: bool,
 ) -> None:
     # In-flight ICMP probes share the ICMP engine's few sockets, so even 5,000 of
-    # them fit a 256-descriptor limit that would cap TCP mode at 128.
-    fake = use_fake_resource(monkeypatch, FakeResource(256, 256))
+    # them fit a 256-descriptor limit that would cap TCP mode at 128. Lookups
+    # stuck in the OS resolver still hold sockets, so the soft limit is raised
+    # to the reserve when the hard limit allows, silently.
+    fake = use_fake_resource(monkeypatch, FakeResource(256, LINUX_RLIM_INFINITY))
     seen: list[int] = []
 
     async def fake_run_no_tui(
@@ -392,6 +398,37 @@ async def test_run_leaves_icmp_concurrency_and_the_open_file_limit_alone(
     assert await runner.run(args, mode=ProbeMode.ICMP) == 0
 
     assert seen == [5000]
+    assert fake.setrlimit_calls == [(FD_RESERVE, LINUX_RLIM_INFINITY)]
+    assert capsys.readouterr().err == ""
+
+    # A hard limit below the reserve is left as it is, with no warning.
+    fake = use_fake_resource(monkeypatch, FakeResource(256, 256))
+    assert await runner.run(args, mode=ProbeMode.ICMP) == 0
     assert fake.setrlimit_calls == []
     assert fake.limits == (256, 256)
+    assert seen == [5000, 5000]
     assert capsys.readouterr().err == ""
+
+
+def test_ensure_fd_reserve_leaves_a_sufficient_soft_limit_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = use_fake_resource(monkeypatch, FakeResource(FD_RESERVE, LINUX_RLIM_INFINITY))
+    limits.ensure_fd_reserve()
+    assert fake.setrlimit_calls == []
+
+    fake = use_fake_resource(monkeypatch, FakeResource(256, 300))
+    limits.ensure_fd_reserve()
+    assert fake.setrlimit_calls == [(300, 300)]
+
+    monkeypatch.setattr(limits, "resource", None)
+    limits.ensure_fd_reserve()
+
+
+def test_fd_reserve_covers_every_resolver_thread_holding_its_sockets() -> None:
+    # A lookup stuck in glibc keeps one socket per nameserver tried (MAXNS = 3)
+    # until libc returns; during a DNS outage every resolver thread can be stuck.
+    # The reserve must hold all of them plus the run's own descriptors, or
+    # healthy TCP probes fail with "Too many open files".
+    assert FD_RESERVE >= probes.MAX_DNS_DAEMON_THREADS * 3 + 32
+    assert limits.FD_BASE_RESERVE >= 32

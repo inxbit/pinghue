@@ -33,7 +33,7 @@ Current version: `5.1.0`. The command-line interface and JSON output are stable 
 <table>
   <tr>
     <td width="33%" valign="top"><b>Dense at-a-glance view</b><br><br>Watch many hosts in one readable terminal table — per-host latency, loss, jitter, and a live history bar.</td>
-    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</td>
+    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent TCP probes; in ICMP mode, a probe slot for every target (up to 5,000).</td>
     <td width="33%" valign="top"><b>Evidence-ready JSON</b><br><br><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</td>
   </tr>
   <tr>
@@ -209,7 +209,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `-n, --numeric` | off | Skip DNS and require IP literals. |
 | `-i, --interval SEC` | `1.0` | Seconds between probes. Minimum: `0.1`. |
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
-| `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. Intentionally has no upper bound. |
+| `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. A probe that could not run because no resolver thread was free does not count. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
 | `--no-tui` | off | Print one line per probe instead of launching the TUI. |
 | `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document. Existing regular files are not replaced unless `--overwrite` is set. |
@@ -337,7 +337,7 @@ The broader range `0 2147483647` also works, but enables unprivileged ICMP for e
 
 `setcap cap_net_raw` does not work for pip or Homebrew installs: the `pinghue` command is a Python launcher script, and Linux ignores file capabilities on interpreter scripts. Use the `ping_group_range` fix above, or TCP mode. Do not set capabilities on a shared Python interpreter.
 
-The doctor also reports the open-file limit, which bounds TCP mode only. Every in-flight TCP probe holds a socket, and pinghue keeps 128 descriptors in reserve (half the limit, but at least 32, when the limit is below 256), so `--concurrency 1024` in TCP mode needs a limit of at least 1152. pinghue raises its own soft limit at startup to fit the TCP concurrency, never past the hard limit; when `--check` warns that the hard limit caps concurrency, raise the hard limit (for example `LimitNOFILE=` in a systemd unit or `/etc/security/limits.conf`). ICMP probes share a few sockets, so the limit does not cap ICMP concurrency.
+The doctor also reports the open-file limit, which bounds TCP mode only. Every in-flight TCP probe holds a socket, and pinghue keeps 448 descriptors in reserve (half the limit, but at least 32, when the limit is below 896): enough for its own files plus every resolver thread holding its sockets while lookups hang during a DNS outage. `--concurrency 1024` in TCP mode therefore needs a limit of at least 1472. pinghue raises its own soft limit at startup to fit the TCP concurrency, never past the hard limit; when `--check` warns that the hard limit caps concurrency, raise the hard limit (for example `LimitNOFILE=` in a systemd unit or `/etc/security/limits.conf`). ICMP probes share a few sockets, so the limit does not cap ICMP concurrency; in ICMP mode pinghue still raises its soft limit to the reserve when the hard limit allows.
 
 ## JSON Output
 

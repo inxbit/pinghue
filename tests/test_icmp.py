@@ -262,6 +262,20 @@ async def test_linux_echo_reply_is_matched(engines: list[icmp.IcmpEngine]) -> No
     assert pending_count(engine) == 0
 
 
+@pytest.mark.parametrize("timeout_s", [1e300, float(2**40)])
+async def test_huge_timeout_still_matches_the_reply(
+    engines: list[icmp.IcmpEngine], timeout_s: float
+) -> None:
+    # The CLI accepts any finite --timeout; near the float maximum the
+    # nanosecond conversions used to overflow and fail every probe.
+    engine = make_engine(engines, FakeSocketFactory(responder=linux_echo()))
+
+    result = await engine.echo("127.0.0.1", ipv6=False, timeout_s=timeout_s)
+
+    assert result.status == SampleStatus.OK, result.error
+    assert pending_count(engine) == 0
+
+
 @pytest.mark.parametrize(
     "responder",
     [
@@ -523,13 +537,27 @@ async def test_macos_icmp_error_for_other_probe_is_ignored(
     assert result.status == SampleStatus.TIMEOUT
 
 
-def test_sequence_numbers_skip_in_flight_probes_and_wrap() -> None:
+def test_sequence_numbers_are_random_and_skip_in_flight_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sock = FakeIcmpSocket(socket.AF_INET, socket.SOCK_DGRAM, 1)
     try:
         icmp_socket = icmp._IcmpSocket(sock, ipv6=False, capacity=4)
-        icmp_socket.sequence = 0xFFFD
-        icmp_socket.pending = dict.fromkeys((0xFFFE, 0xFFFF, 0), object())  # type: ignore[arg-type]
+        # A target sees its own probes' sequence numbers; counting up would let
+        # it predict those of the probes in flight to other targets.
+        drawn = {icmp_socket.next_sequence() for _ in range(64)}
+        assert len(drawn) > 32
+        assert drawn != set(range(min(drawn), min(drawn) + len(drawn)))
 
+        # Draws that land on in-flight probes are skipped.
+        draws = iter([b"\x00\x05", b"\x00\x07", b"\x00\x09"])
+        monkeypatch.setattr(icmp.os, "urandom", lambda _size: next(draws))
+        icmp_socket.pending = dict.fromkeys((5, 7), object())  # type: ignore[arg-type]
+        assert icmp_socket.next_sequence() == 9
+
+        # When every draw is taken, a scan from a random start finds a free one.
+        monkeypatch.setattr(icmp.os, "urandom", lambda _size: b"\xff\xfe")
+        icmp_socket.pending = dict.fromkeys((0xFFFE, 0xFFFF, 0), object())  # type: ignore[arg-type]
         assert icmp_socket.next_sequence() == 1
 
         icmp_socket.pending = dict.fromkeys(range(0x10000), object())  # type: ignore[arg-type]
