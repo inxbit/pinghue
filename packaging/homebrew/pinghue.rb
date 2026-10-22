@@ -10,7 +10,7 @@ class Pinghue < Formula
 
   desc "Colored, concurrent ICMP/TCP ping monitor for the terminal"
   homepage "https://github.com/inxbit/pinghue"
-  url "https://files.pythonhosted.org/packages/source/p/pinghue/pinghue-6.0.0.tar.gz"
+  url "https://files.pythonhosted.org/packages/36/e4/3d7bcc67abf70c5979db5aaa05bb94ec991912091d33483541d0bf5d6c5e/pinghue-6.0.0.tar.gz"
   sha256 "7aaa96e10ec56957dc37f5fee3d250657cef366f9c88cfde1cce505b8e600508"
   license "MIT"
   head "https://github.com/inxbit/pinghue.git", branch: "main"
@@ -18,8 +18,8 @@ class Pinghue < Formula
   depends_on "python@3.13"
 
   resource "linkify-it-py" do
-    url "https://files.pythonhosted.org/packages/2e/c9/06ea13676ef354f0af6169587ae292d3e2406e212876a413bf9eece4eb23/linkify_it_py-2.1.0.tar.gz"
-    sha256 "43360231720999c10e9328dc3691160e27a718e280673d444c38d7d3aaa3b98b"
+    url "https://files.pythonhosted.org/packages/45/98/7a1a5f31fd5c7ba93e963b168e244b8e3dd705b3d2a718e3c3307583bf57/linkify_it_py-2.2.0.tar.gz"
+    sha256 "907acd2d17ac1fbb9ddb62c8957ccbd6158cac602231a15c3b0cd1e215f03cee"
   end
 
   resource "markdown-it-py" do
@@ -38,13 +38,13 @@ class Pinghue < Formula
   end
 
   resource "platformdirs" do
-    url "https://files.pythonhosted.org/packages/b8/d7/e7bfbc86e9f99ff7807e24de7703f032e9c9ba80bb355cf26e0e9bc5a75e/platformdirs-4.11.3.tar.gz"
-    sha256 "66a73d38a849810252df809a3d8bcbda8e26f6c189920e7535ad608a48dbb5ab"
+    url "https://files.pythonhosted.org/packages/58/e6/d0abbb256b44e6a05748c6942511ff67db8dbb068de0c35b24bf1b395b09/platformdirs-4.13.5.tar.gz"
+    sha256 "05831adf87d392760f4b5c3a0a95579ab5a10b18b9b9bd43680dcb47544788a0"
   end
 
   resource "pygments" do
-    url "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz"
-    sha256 "6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f"
+    url "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz"
+    sha256 "610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c"
   end
 
   resource "rich" do
@@ -60,11 +60,6 @@ class Pinghue < Formula
   resource "typing-extensions" do
     url "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz"
     sha256 "dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5"
-  end
-
-  resource "uc-micro-py" do
-    url "https://files.pythonhosted.org/packages/78/67/9a363818028526e2d4579334460df777115bdec1bb77c08f9db88f6389f2/uc_micro_py-2.0.0.tar.gz"
-    sha256 "c53691e495c8db60e16ffc4861a35469b0ba0821fe409a8a7a0a71864d33a811"
   end
 
   def install
