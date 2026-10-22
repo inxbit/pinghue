@@ -660,6 +660,22 @@ async def test_sample_printer_says_why_when_a_write_fails_for_another_reason(
     )
 
 
+async def test_sample_printer_warning_escapes_the_error_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    printer = runner._SampleLinePrinter(
+        FailingStream(OSError(errno.ENOSPC, "No space \x1b]0;title\x07 left")),
+        on_closed=lambda: None,
+    )
+
+    printer(TargetRun("192.0.2.1", resolved_address="192.0.2.1"), ok_sample())
+
+    err = capsys.readouterr().err
+    assert "\x1b" not in err
+    assert "\x07" not in err
+    assert r"[Errno 28] No space \x1b]0;title\x07 left" in err
+
+
 async def test_run_writes_the_report_when_stdout_is_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

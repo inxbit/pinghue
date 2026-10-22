@@ -784,9 +784,10 @@ def _reader_is_gone(error: BaseException) -> bool:
 
 
 def _warn(message: str) -> None:
-    # print() to a stderr of None (closed at startup) is a no-op.
+    # print() to a stderr of None (closed at startup) is a no-op. The message
+    # carries OS error text, escaped like every other operator-visible string.
     with contextlib.suppress(OSError, ValueError):
-        print(f"pinghue: warning: {message}", file=sys.stderr, flush=True)
+        print(f"pinghue: warning: {sanitize_display(message)}", file=sys.stderr, flush=True)
 
 
 class _SampleLinePrinter:
