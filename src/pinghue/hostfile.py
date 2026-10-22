@@ -63,13 +63,21 @@ def parse_host_file(path: str | Path) -> list[str]:
 
     targets: list[str] = []
 
-    for line_number, line in enumerate(content.splitlines(), start=1):
+    # Only "\n" (optionally preceded by "\r") ends a line. str.splitlines() also
+    # splits on \v, \f, \x1c-\x1e, \x85, U+2028 and U+2029, which would turn one
+    # line into several targets and skew line numbers and the line limit; such
+    # characters stay inside the value for target validation instead.
+    lines = content.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+
+    for line_number, line in enumerate(lines, start=1):
         if line_number > MAX_HOST_FILE_LINES:
             raise ValueError(
                 f"host file has too many lines; maximum is {MAX_HOST_FILE_LINES}: {host_path}"
             )
 
-        value = line.split("#", 1)[0].strip()
+        value = line.removesuffix("\r").split("#", 1)[0].strip()
 
         if not value:
             continue

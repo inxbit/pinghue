@@ -368,6 +368,36 @@ def test_parse_args_rejects_control_characters_in_target() -> None:
         parse_args(["a\nb"])
 
 
+@pytest.mark.parametrize("separator", ["\x0b", "\x0c", "\x1c", "\x85"])
+def test_parse_args_rejects_host_file_line_with_embedded_control_separator(
+    tmp_path: Path,
+    separator: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A control separator inside one host-file line must not split it into two
+    # accepted targets; the whole line reaches target validation and is refused.
+    host_file = tmp_path / "hosts.txt"
+    host_file.write_text(f"127.0.0.1{separator}127.0.0.2\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        parse_args(["--file", str(host_file)])
+
+    err = capsys.readouterr().err
+    assert "target contains control characters" in err
+    assert separator not in err
+
+
+def test_parse_args_keeps_host_file_unicode_line_separator_in_one_target(
+    tmp_path: Path,
+) -> None:
+    host_file = tmp_path / "hosts.txt"
+    host_file.write_text("127.0.0.1\u2028127.0.0.2\n127.0.0.3\n", encoding="utf-8")
+
+    args = parse_args(["--file", str(host_file)])
+
+    assert args.targets == ["127.0.0.1\u2028127.0.0.2", "127.0.0.3"]
+
+
 def test_parse_args_sanitizes_host_file_error_control_bytes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
