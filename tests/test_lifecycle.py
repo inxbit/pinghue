@@ -110,14 +110,20 @@ async def applying_probe(target: TargetRun, **_: object) -> ProbeSample:
 # Shutdown must end loops whose probe swallows its cancellation.
 
 
+@pytest.mark.parametrize("task_cancelling", [True, False], ids=["cancelling", "stop-event-only"])
 async def test_run_no_tui_deadline_ends_a_loop_whose_probe_swallows_the_cancel(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    task_cancelling: bool,
 ) -> None:
     # tcp_probe keeps a measured success when shutdown cancels its close
     # teardown. That swallowed cancel must not keep the loop probing past the
     # deadline (the run never returned and --output was never written).
     installed = capture_stop_event(monkeypatch)
+    if not task_cancelling:
+        # As on Python 3.10, where Task.cancelling() does not exist: only the
+        # stop event, set before the loops are cancelled, can end the loop.
+        monkeypatch.setattr(runner, "_cancel_requested", lambda: False)
     probes = 0
 
     async def swallowing_probe(*_: object, **__: object) -> ProbeSample:

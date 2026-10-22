@@ -421,8 +421,11 @@ async def test_tui_resolution_does_not_redraw_the_table_per_target(monkeypatch) 
     targets = [f"127.0.{index // 250}.{index % 250 + 1}" for index in range(1000)]
     app = PinghueTextualApp(args=build_args(targets=targets, interval=60.0), mode=ProbeMode.ICMP)
     started: list[str] = []
+    loops_created_before_the_first_ran: list[int] = []
 
     async def fake_probe_target_loop(target: TargetRun, *, stop_event: Any, **_: Any) -> None:
+        if not started:
+            loops_created_before_the_first_ran.append(len(app._probe_tasks))
         started.append(target.target)
         await stop_event.wait()
 
@@ -450,6 +453,9 @@ async def test_tui_resolution_does_not_redraw_the_table_per_target(monkeypatch) 
     # Only the initial render on mount; the interval timer redraws after that.
     assert refreshes <= 1
     assert sorted(started) == sorted(targets)
+    # Lookups of IP literals finish without suspending; draining them must
+    # still give other work (input, rendering, started loops) a turn.
+    assert loops_created_before_the_first_ran[0] < len(targets)
     await app.on_unmount()
 
 
