@@ -33,7 +33,7 @@ Current version: `5.1.0`. The command-line interface and JSON output are stable 
 <table>
   <tr>
     <td width="33%" valign="top"><b>Dense at-a-glance view</b><br><br>Watch many hosts in one readable terminal table — per-host latency, loss, jitter, and a live history bar.</td>
-    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent probes.</td>
+    <td width="33%" valign="top"><b>ICMP &amp; TCP</b><br><br>Default ICMP, or TCP connect checks with <code>-p</code>. Up to 1024 concurrent TCP probes; in ICMP mode, a probe slot for every target (up to 5,000).</td>
     <td width="33%" valign="top"><b>Evidence-ready JSON</b><br><br><code>--output</code> writes a stable <code>schema_version&nbsp;1</code> summary for reports, cron, and CI.</td>
   </tr>
   <tr>
