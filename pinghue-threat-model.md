@@ -61,7 +61,7 @@ Open questions:
 | Boundary | Data crossing it | Main controls |
 | --- | --- | --- |
 | Operator shell -> CLI parser | Targets, timing, ports, concurrency, output path, labels | Type/range/finite checks; 253-character target limit; 5,000 unique-target cap |
-| Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; newline-only line splitting; BOM/error handling |
+| Local file -> host parser | UTF-8 target list | `O_NOFOLLOW` when available; descriptor type check; 1 MiB and 5,000-line limits; line splitting only at `\n`, `\r\n`, or a lone `\r`; BOM/error handling |
 | Target -> OS resolver | Hostname or numeric address | Numeric-only mode; bounded/cancellable resolution; DNS concurrency and resolver-thread caps; per-name cooldown and backoff |
 | Resolved address -> network | ICMP datagram or TCP connection | Outbound-only probes; bounded concurrency/timeouts; per-target exception containment |
 | Probe/library errors -> terminal | Target, address, status, error text; doctor OS metadata and socket errors | Central display sanitization; literal escaping of controls and non-ASCII text |
@@ -249,7 +249,7 @@ release gate.
 | --- | --- | --- | --- | --- |
 | TM-001 | Terminal/control-character injection | Central sanitization and adversarial rendering tests | A future output caller could omit sanitization | Low |
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
-| TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and newline-only line splitting | Same-user content modification remains possible | Low |
+| TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and line splitting only at `\n`, `\r\n`, or a lone `\r` | Same-user content modification remains possible | Low |
 | TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report | Medium |
 | TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats, token-matched ICMP replies, random ICMP sequence numbers | Remote routing/DNS state is inherently external; forged ICMP errors with short quotes can mark a probe `unreachable` | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
