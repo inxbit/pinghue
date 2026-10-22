@@ -27,6 +27,7 @@ from pinghue.runner import (
 from pinghue.ui import (
     CELL_PADDING,
     COLUMN_KEYS,
+    ROW_CATCH_UP_DELAY_S,
     SCROLLBAR_WIDTH,
     VIEWPORT_MARGIN_ROWS,
     TargetTable,
@@ -122,6 +123,7 @@ class PinghueTextualApp(App[None]):
             probe_count=args.count,
         )
         self._last_full_refresh = float("-inf")
+        self._catching_up = False
         self._watching_scroll = False
         self._summary_parts: list[tuple[str, str]] = []
         self._column_widths: dict[str, int] = {}
@@ -337,6 +339,23 @@ class PinghueTextualApp(App[None]):
             )
             self._summary_parts = fleet_summary_parts(summary, stale_after_s=stale_after)
             self.sub_title = "".join(text for text, _style in self._summary_parts)
+        self._schedule_row_catch_up()
+
+    def _schedule_row_catch_up(self) -> None:
+        # Rows a full pass owes beyond its time budget are refreshed in short
+        # chunks with the event loop free in between, not in one long block.
+        if self._table_renderer.behind and not self._catching_up:
+            self._catching_up = True
+            self.set_timer(ROW_CATCH_UP_DELAY_S, self._catch_up_rows)
+
+    def _catch_up_rows(self) -> None:
+        self._catching_up = False
+        try:
+            table = self.query_one("#targets", DataTable)
+        except NoMatches:
+            return
+        self._table_renderer.catch_up(table, self.targets)
+        self._schedule_row_catch_up()
 
     def _refresh_visible_rows(self) -> None:
         try:

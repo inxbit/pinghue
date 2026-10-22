@@ -128,11 +128,15 @@ SUMMARY_CATEGORIES: tuple[CellValue, ...] = (
 )
 
 # Row refresh scheduling: rows near the viewport are refreshed on every pass;
-# the rest are refreshed round-robin within a per-pass time budget, but at
-# least MIN_ROWS_PER_PASS and len(targets) / FULL_SWEEP_PASSES rows per pass,
-# so every changed row is refreshed within FULL_SWEEP_PASSES + 1 full passes
-# however large the table, and small tables are refreshed whole every pass.
+# the rest are refreshed round-robin, each call within a time budget. Every
+# full pass owes at least MIN_ROWS_PER_PASS and len(targets) /
+# FULL_SWEEP_PASSES rows; what its budget leaves over is refreshed in
+# catch-up chunks of the same budget ROW_CATCH_UP_DELAY_S apart, so the event
+# loop never blocks for much longer than the budget, every changed row is
+# refreshed within FULL_SWEEP_PASSES + 1 full passes however large the table,
+# and small tables are refreshed whole every pass.
 ROW_REFRESH_BUDGET_S = 0.02
+ROW_CATCH_UP_DELAY_S = 0.02
 FULL_SWEEP_PASSES = 8
 MIN_ROWS_PER_PASS = 256
 VIEWPORT_MARGIN_ROWS = 4
@@ -788,8 +792,8 @@ class TargetTableRenderer:
     change a target), or when the layout or the host labels changed, and only
     cells whose text or style changed are sent to the table. Rows near the
     viewport are refreshed first and the rest round-robin within a time
-    budget; a changed state label is written at once on every full pass, so
-    no state change is held back.
+    budget, continued by catch_up(); a changed state label is written at once
+    on every full pass, so no state change is held back.
     """
 
     def __init__(
@@ -827,6 +831,12 @@ class TargetTableRenderer:
         self._history_width = 0
         self._generation = 0
         self._cursor = 0
+        self._owed = 0
+
+    @property
+    def behind(self) -> bool:
+        """Whether rows owed by the last full pass are waiting for catch_up()."""
+        return self._owed > 0
 
     def set_layout(self, *, show_address: bool, widths: ColumnWidths) -> None:
         """Record the layout the cells depend on; a change re-renders every row."""
@@ -848,8 +858,11 @@ class TargetTableRenderer:
 
         ``priority`` rows (the viewport) are always refreshed. A ``full`` pass
         also writes changed state labels everywhere, refreshes the other
-        changed rows round-robin, and returns the fleet summary.
+        changed rows round-robin within the time budget, and returns the
+        fleet summary; while ``behind``, catch_up() refreshes the rest of the
+        rows the pass owes.
         """
+        deadline = time.perf_counter() + self.budget_s
         self._update_host_labels(targets)
         # Rows are added outside the batch: add_row's own repaint request
         # must not be dropped.
@@ -866,11 +879,36 @@ class TargetTableRenderer:
                 ):
                     changed.append(index)
             if full:
-                self._refresh_changed_rows(table, targets, count, changed)
+                self._refresh_changed_rows(table, targets, count, changed, deadline=deadline)
+        self._repaint(table, changed)
+        return self._summary(count, now) if full else None
+
+    def catch_up(self, table: Any, targets: Sequence[TargetRun]) -> bool:
+        """Refresh more of the rows the last full pass owes, within the time
+        budget, and return whether rows are still owed."""
+        if not self.behind:
+            return False
+        deadline = time.perf_counter() + self.budget_s
+        count = min(len(targets), len(self._rows))
+        changed: list[int] = []
+        batch = getattr(table, "batch_updates", nullcontext)
+        with batch():
+            self._render_round_robin(
+                table,
+                targets,
+                self._stale_rows(targets, count),
+                changed,
+                deadline=deadline,
+                owed_only=True,
+            )
+        self._repaint(table, changed)
+        return self.behind
+
+    @staticmethod
+    def _repaint(table: Any, changed: list[int]) -> None:
         refresh_rows = getattr(table, "refresh_rows", None)
         if changed and refresh_rows is not None:
             refresh_rows(changed)
-        return self._summary(count, now) if full else None
 
     def _update_host_labels(self, targets: Sequence[TargetRun]) -> None:
         """Recompute the host labels when a name or the host width changed.
@@ -904,24 +942,43 @@ class TargetTableRenderer:
         targets: Sequence[TargetRun],
         count: int,
         changed: list[int],
+        *,
+        deadline: float,
     ) -> None:
-        started = time.perf_counter()
-        stale = [index for index in range(count) if self._is_stale(index, targets[index])]
+        stale = self._stale_rows(targets, count)
         for index in stale:
             if self._refresh_state(table, index, targets[index]):
                 changed.append(index)
-        if not stale:
-            return
-
         minimum = max(self.min_rows_per_pass, -(-count // self.full_sweep_passes))
-        deadline = started + self.budget_s
+        self._owed = min(len(stale), self._owed + minimum)
+        self._render_round_robin(table, targets, stale, changed, deadline=deadline)
+
+    def _stale_rows(self, targets: Sequence[TargetRun], count: int) -> list[int]:
+        return [index for index in range(count) if self._is_stale(index, targets[index])]
+
+    def _render_round_robin(
+        self,
+        table: Any,
+        targets: Sequence[TargetRun],
+        stale: list[int],
+        changed: list[int],
+        *,
+        deadline: float,
+        owed_only: bool = False,
+    ) -> None:
+        """Render ``stale`` rows from the round-robin cursor on until the
+        deadline (at least one row, so every call makes progress), or with
+        ``owed_only`` also until no rows are owed."""
         start = bisect_left(stale, self._cursor)
         for done, index in enumerate(stale[start:] + stale[:start]):
-            if done >= minimum and time.perf_counter() >= deadline:
-                break
+            if (done and time.perf_counter() >= deadline) or (owed_only and not self.behind):
+                return
             if self._render_row(table, index, targets[index]):
                 changed.append(index)
+            self._owed = max(0, self._owed - 1)
             self._cursor = index + 1
+        # Every changed row is current.
+        self._owed = 0
 
     def _is_stale(self, index: int, target: TargetRun) -> bool:
         row = self._rows[index]

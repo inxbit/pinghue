@@ -249,6 +249,15 @@ def test_layout_change_rerenders_every_row() -> None:
         assert table.cell(index, "address").plain == ""
 
 
+def _refresh_interval(
+    renderer: TargetTableRenderer, table: RecordingTable, targets: list[TargetRun]
+) -> None:
+    """One refresh interval: a full pass, then the catch-up chunks it leaves."""
+    renderer.sync(table, targets)
+    while renderer.catch_up(table, targets):
+        pass
+
+
 def test_round_robin_refreshes_every_changed_row_within_the_sweep() -> None:
     targets = [healthy(f"host-{index}") for index in range(20)]
     table = RecordingTable()
@@ -262,10 +271,34 @@ def test_round_robin_refreshes_every_changed_row_within_the_sweep() -> None:
             add(target, ok(40.0 + round_number))
         passes = 0
         while any(table.cell(index, "last").plain != latency for index in range(20)):
-            renderer.sync(table, targets)
+            _refresh_interval(renderer, table, targets)
             passes += 1
             assert passes <= 4
         assert passes == 4
+
+
+def test_a_pass_stays_within_its_budget_and_catch_up_refreshes_the_rest() -> None:
+    targets = [healthy(f"host-{index}") for index in range(20)]
+    table = RecordingTable()
+    # With a zero budget every call refreshes exactly one row.
+    renderer = make_renderer(budget_s=0.0, full_sweep_passes=4, min_rows_per_pass=1)
+    renderer.sync(table, targets)
+    assert not renderer.behind
+    for target in targets:
+        add(target, ok(44.0))
+    table.updates.clear()
+
+    renderer.sync(table, targets)
+
+    assert table.updated_rows() == {target_row_key(0)}
+    assert renderer.behind
+    # The pass owes 20 / 4 rows; catch_up() refreshes the other four one by one.
+    for done in range(1, 5):
+        assert renderer.catch_up(table, targets) is (done < 4)
+        assert table.updated_rows() == {target_row_key(index) for index in range(done + 1)}
+    assert not renderer.behind
+    assert renderer.catch_up(table, targets) is False
+    assert table.updated_rows() == {target_row_key(index) for index in range(5)}
 
 
 def test_state_changes_are_written_on_the_next_full_pass() -> None:
@@ -851,3 +884,39 @@ async def test_header_keeps_the_result_age_on_screen_with_every_state(width: int
         assert ELLIPSIS in shown
         assert f"{app.title}  oldest " in shown
         assert "10 down" in shown
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_rows_a_full_pass_leaves_are_refreshed_by_catch_up_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_module, "ROW_CATCH_UP_DELAY_S", 0.001)
+    targets = [f"host-{index:02d}.example" for index in range(60)]
+    app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 20)) as pilot:
+        table = await _start(pilot, app)
+        renderer = app._table_renderer
+        catch_ups: list[bool] = []
+        catch_up = renderer.catch_up
+
+        def counting_catch_up(*args: Any) -> bool:
+            catch_ups.append(catch_up(*args))
+            return catch_ups[-1]
+
+        monkeypatch.setattr(renderer, "catch_up", counting_catch_up)
+        # With a zero budget a full pass refreshes the viewport and one more
+        # row; the rest of the table is left to the catch-up chunks.
+        renderer.budget_s = 0.0
+        for target in app.targets:
+            add(target, ok(321.0))
+        app._last_full_refresh = float("-inf")
+        app._refresh_table()
+        assert renderer.behind
+        assert table.get_cell(target_row_key(59), "last").plain != "321.00"
+
+        assert await _wait_until(pilot, lambda: not renderer.behind, ticks=200)
+        assert len(catch_ups) > 1
+        assert catch_ups[-1] is False
+        assert all(
+            table.get_cell(target_row_key(index), "last").plain == "321.00" for index in range(60)
+        )

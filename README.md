@@ -239,7 +239,7 @@ The header shows a fleet summary next to the title: how long ago the stalest hos
 
 Columns follow the terminal width so the newest history glyphs stay on screen without horizontal scrolling. On narrow terminals the history column shrinks first, then the hidden address placeholder and the mode column collapse before host names are shortened, then the host column shrinks down to 12 characters; below that the min and max columns collapse instead of squeezing host names further. Host names longer than their column keep their start and the part that tells them apart from the other hosts, with a `…` at each cut: `db-primary-001.dc1.exam…`, or `db-primar…001…` on a narrow terminal.
 
-With thousands of hosts, rows on screen refresh every half second, state changes reach every row and the header summary on the next refresh, and other values in rows scrolled out of view catch up within a few seconds, or as soon as they scroll into view.
+With thousands of hosts, rows on screen refresh every half second, state changes reach every row and the header summary on the next refresh, and other values in rows scrolled out of view catch up within a few seconds, or as soon as they scroll into view. That catch-up runs in short chunks, so redrawing the table never holds up probes for long.
 
 ## History Legend
 

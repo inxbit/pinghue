@@ -13,7 +13,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ### Changed
 
-- The TUI refresh no longer rebuilds every row: only rows whose target changed are re-rendered, only changed rows on screen are repainted, and with thousands of hosts the rows out of view are refreshed round-robin within a few seconds (immediately when scrolled into view) while state changes reach every row on the next refresh. At 5,000 hosts the event loop stalls far less, so probes keep their cadence.
+- The TUI refresh no longer rebuilds every row: only rows whose target changed are re-rendered, only changed rows on screen are repainted, and with thousands of hosts the rows out of view are refreshed round-robin within a few seconds (immediately when scrolled into view) while state changes reach every row on the next refresh. That catch-up runs in time-bounded chunks: at 5,000 hosts a steady-state refresh blocks the event loop for about 20 ms at a time instead of several hundred milliseconds, so probes keep their cadence.
 - Long host names are shortened around the part that tells each host apart from the rest of the fleet, such as the number in `db-primary-001.dc1.example.net`, so numbered hosts that share a domain stay distinguishable at every width.
 - On narrow terminals the hidden address placeholder and the mode column collapse before host names are shortened, and the min and max columns before the host column drops below 12 characters.
 
