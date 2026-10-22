@@ -6,6 +6,14 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Changed
+
+- `--concurrency` now defaults to a value sized from the run instead of a fixed `64`: enough probe slots for every target to time out once per probe cycle (`targets × timeout ÷ max(interval, timeout + 0.1)`, plus 25% headroom), at least `64` and at most `1024`. An explicit `--concurrency N` still accepts `1-1024` and is used as given.
+
+### Fixed
+
+- Silent targets no longer stretch every target's probe cadence at the default concurrency. Each probe holds its slot until the reply or the timeout, so with the old fixed 64 slots a large inventory with many unresponsive hosts sampled healthy hosts every several seconds instead of every interval (500 targets with 250 silent: every 3 s; 1,000 targets with 500 silent: every 7 s), and delayed down detection by the same factor.
+
 ## 5.1.0 - 2026-08-18
 
 ### Added

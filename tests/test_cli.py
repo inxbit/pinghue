@@ -67,7 +67,7 @@ def test_help_describes_every_option_and_shows_defaults() -> None:
     help_text = " ".join(parser.format_help().split())
     for default in (
         "(default: 1.0)",
-        "default: 64)",
+        "(default: automatic, sized from the target count, timeout and interval within 64-1024)",
         "(default: 3)",
         "(default: 50.0)",
         "(default: local)",

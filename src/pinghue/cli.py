@@ -16,9 +16,14 @@ from pinghue.display import sanitize_display
 from pinghue.doctor import run_check
 from pinghue.hostfile import TARGET_COUNT_MAXIMUM, TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
+from pinghue.runner import MIN_OVERRUN_SLEEP
 
 INTERVAL_MINIMUM = 0.1
+CONCURRENCY_DEFAULT_MINIMUM = 64
 CONCURRENCY_MAXIMUM = 1024
+# Spare slots above the all-silent estimate, so queueing jitter near saturation
+# does not stretch the probe cadence.
+CONCURRENCY_HEADROOM = 1.25
 HOST_LABEL_MAXIMUM = 128
 HISTORY_STYLES = ("bar", "dots", "sparkline", "none")
 
@@ -83,11 +88,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=64,
         help=(
-            "maximum concurrent probes, 1-"
-            f"{CONCURRENCY_MAXIMUM} "
-            "(ICMP daemon workers are bounded by this limit; default: %(default)s)"
+            f"maximum concurrent probes, 1-{CONCURRENCY_MAXIMUM}; ICMP daemon workers are "
+            "bounded by this limit (default: automatic, sized from the target count, "
+            f"timeout and interval within {CONCURRENCY_DEFAULT_MINIMUM}-{CONCURRENCY_MAXIMUM})"
         ),
     )
     parser.add_argument(
@@ -157,6 +161,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     return parser
+
+
+def default_concurrency(target_count: int, *, interval: float, timeout: float) -> int:
+    """Return enough probe slots to keep every target on cadence even when all are silent.
+
+    A silent target holds its slot for the whole timeout, then sleeps out the rest of
+    its cycle: the interval, or the timeout plus the minimum overrun sleep when the
+    timeout fills the interval. Fewer slots than targets x timeout / cycle make every
+    target, healthy ones included, queue for a slot and fall behind the interval.
+    """
+    cycle = max(interval, timeout + MIN_OVERRUN_SLEEP)
+    needed = math.ceil(target_count * (timeout / cycle) * CONCURRENCY_HEADROOM)
+    return max(CONCURRENCY_DEFAULT_MINIMUM, min(CONCURRENCY_MAXIMUM, needed))
 
 
 def dedupe_targets(targets: list[str]) -> list[str]:
@@ -239,10 +256,10 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
     if args.duration is not None:
         _validate_finite(parser, "duration", args.duration)
 
-    if args.concurrency <= 0:
+    if args.concurrency is not None and args.concurrency <= 0:
         parser.error("concurrency must be greater than 0")
 
-    if args.concurrency > CONCURRENCY_MAXIMUM:
+    if args.concurrency is not None and args.concurrency > CONCURRENCY_MAXIMUM:
         parser.error(f"concurrency must not exceed {CONCURRENCY_MAXIMUM}")
 
     if args.fail_threshold <= 0:
@@ -282,6 +299,11 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
         args.host_label,
         maximum=HOST_LABEL_MAXIMUM,
     )
+
+    if args.concurrency is None:
+        args.concurrency = default_concurrency(
+            len(args.targets), interval=args.interval, timeout=args.timeout
+        )
 
     if args.numeric:
         args.address_family = _numeric_address_family(
