@@ -192,7 +192,7 @@ def test_tui_exits_at_once_when_stderr_is_closed(tmp_path: Path) -> None:
     # thread died, the app hung before probing and ignored SIGTERM and SIGHUP.
     report = tmp_path / "report.json"
     result = subprocess.run(
-        _cli_command("-c", "1", "-i", "0.2", "--output", str(report)),
+        _cli_command("--tui", "-c", "1", "-i", "0.2", "--output", str(report)),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         env=_cli_env(),
@@ -204,6 +204,29 @@ def test_tui_exits_at_once_when_stderr_is_closed(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert result.stdout == b""
     assert not report.exists()
+
+
+def test_a_run_without_a_terminal_prints_lines_instead_of_drawing_the_tui(
+    tmp_path: Path,
+) -> None:
+    # Under cron or CI neither stdout nor stderr is a terminal. Before 7.0.0
+    # the TUI started anyway: stdout stayed empty and stderr got a warning
+    # and screens of escape sequences.
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        _cli_command("-c", "1", "--output", str(report)),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        env=_cli_env(),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert b"127.0.0.1 refused" in result.stdout
+    assert b"\x1b" not in result.stdout
+    assert json.loads(report.read_text())["run"]["exit_reason"] == "completed"
 
 
 @pytest.mark.skipif(
@@ -300,8 +323,8 @@ def test_a_refused_output_path_is_not_reported_on_stdout_when_stderr_is_closed(
 
 @pytest.mark.parametrize(
     "arguments",
-    [("--no-tui", "--output", "-", "--interval", "0"), ("--output", "-", "--count", "1")],
-    ids=["invalid-value", "output-dash-without-no-tui"],
+    [("--no-tui", "--output", "-", "--interval", "0"), ("--tui", "--output", "-", "--count", "1")],
+    ids=["invalid-value", "output-dash-with-tui"],
 )
 def test_a_usage_error_prints_nothing_on_stdout_when_stderr_is_closed(
     arguments: tuple[str, ...],

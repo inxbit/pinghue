@@ -21,6 +21,7 @@ class RunConfig(argparse.Namespace):
     count: int | None
     duration: float | None
     no_tui: bool
+    tui: bool
     output: Path | None
     overwrite: bool
     output_mode: str
