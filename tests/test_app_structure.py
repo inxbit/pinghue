@@ -336,6 +336,8 @@ def test_burst_all_wakes_every_target_loop() -> None:
 class _TestEvent:
     def __init__(self, key: str) -> None:
         self.key = key
+        # The widget under the mouse, for clicks.
+        self.widget = None
         self.prevented = False
 
     def prevent_default(self) -> None:

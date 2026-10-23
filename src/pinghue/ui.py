@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import time
 from bisect import bisect_left
 from collections import Counter
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -103,6 +104,8 @@ HISTORY_INDEX = COLUMN_KEYS.index("history")
 _COLUMN_KEY_OBJECTS = tuple(ColumnKey(key) for key in COLUMN_KEYS)
 _HISTORY_CODE_STYLES = {HISTORY_OK: GREEN, HISTORY_SLOW: AMBER, HISTORY_FAILED: RED}
 _STYLE_RUNS = re.compile(r"(.)\1*", re.DOTALL)
+_DIGIT_RUNS = re.compile(r"(\d+)")
+_SEARCH_SEPARATORS = re.compile(r"[\s,]+")
 
 _STATE_LABELS: dict[TargetStatus, CellValue] = {
     TargetStatus.RESOLVING: ("resolving", MUTED),
@@ -321,6 +324,166 @@ def target_state(target: TargetRun) -> CellValue:
     if status == TargetStatus.RESOLVING and target.resolved_address:
         return PENDING_LABEL, MUTED
     return _STATE_LABELS.get(status, (status.value, RED))
+
+
+def _name_sort_key(name: str) -> tuple[Any, ...]:
+    """Return a key that orders IP addresses by value and names naturally.
+
+    IPv4 sorts before IPv6 and both before names, so 10.1.9.9 comes before
+    10.1.10.10 and host-2 before host-10.
+    """
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        pass
+    else:
+        return (0, address.version, int(address))
+    # The split leaves the digit runs at the odd positions.
+    parts = _DIGIT_RUNS.split(name.lower())
+    return (
+        1,
+        *(
+            (0, int(part), "") if position % 2 else (1, 0, part)
+            for position, part in enumerate(parts)
+            if part
+        ),
+    )
+
+
+def _canonical_ip(value: str) -> str | None:
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
+def search_matcher(query: str) -> Callable[[TargetRun], bool]:
+    """Return a test for whether a host matches the / search ``query``.
+
+    The query is split at spaces and commas, and a host matches when any
+    term does: a full IP address matches that address exactly (10.0.0.5
+    is not 10.0.0.50), anything else matches part of the host name or its
+    address, ignoring case. An empty query matches every host.
+    """
+    terms = [term for term in _SEARCH_SEPARATORS.split(query.lower()) if term]
+    if not terms:
+        return lambda _target: True
+    # Resolved addresses are already canonical, so comparing strings is
+    # enough and stays cheap on every refresh of a large fleet.
+    addresses: set[str] = set()
+    fragments: list[str] = []
+    for term in terms:
+        address = _canonical_ip(term)
+        if address is None:
+            fragments.append(term)
+        else:
+            addresses.add(address)
+
+    def matches(target: TargetRun) -> bool:
+        name = target.target.lower()
+        address = (target.resolved_address or "").lower()
+        if name in addresses or address in addresses:
+            return True
+        return any(fragment in name or fragment in address for fragment in fragments)
+
+    return matches
+
+
+def display_order(
+    targets: Sequence[TargetRun],
+    *,
+    sort_column: str | None,
+    descending: bool,
+    query: str,
+) -> list[int]:
+    """Return the indices of ``targets`` in the order the table shows them.
+
+    Sorting is stable, so equal rows keep their input order, and rows with
+    nothing to sort by (no address yet, no reply yet) stay last in either
+    direction.
+    """
+    matches = search_matcher(query)
+    order = [index for index, target in enumerate(targets) if matches(target)]
+    sort_key = _SORT_KEYS.get(sort_column or "")
+    if sort_key is None:
+        return order
+    keyed: list[tuple[Any, int]] = []
+    missing: list[int] = []
+    for index in order:
+        key = sort_key(targets[index])
+        if key is None:
+            missing.append(index)
+        else:
+            keyed.append((key, index))
+    keyed.sort(key=lambda item: item[0], reverse=descending)
+    return [index for _key, index in keyed] + missing
+
+
+def _address_sort_key(target: TargetRun) -> tuple[Any, ...] | None:
+    address = target.resolved_address
+    return None if address is None else _name_sort_key(address)
+
+
+# Higher is worse, in the fleet summary's problems-first order.
+_STATE_SEVERITY = {
+    category: len(SUMMARY_CATEGORIES) - position
+    for position, (category, _style) in enumerate(SUMMARY_CATEGORIES)
+}
+
+
+def _state_sort_key(target: TargetRun) -> int:
+    category = _summary_category(target_state(target)[0])
+    return _STATE_SEVERITY.get(category, len(SUMMARY_CATEGORIES) + 1)
+
+
+def _loss_sort_key(target: TargetRun) -> float | None:
+    stats = target.stats
+    return stats.loss_pct if stats.sent else None
+
+
+def next_sort(column: str, sort_column: str | None, descending: bool) -> tuple[str | None, bool]:
+    """Return the sort after a click on ``column``'s header.
+
+    The first click sorts host names and addresses up and every other column
+    worst first (down hosts, full loss, the slowest replies), the second
+    reverses it and the third goes back to the input order. Columns that
+    cannot be sorted leave the sort as it is.
+    """
+    if column not in _SORT_KEYS:
+        return sort_column, descending
+    first = column not in _ASCENDING_FIRST
+    if column != sort_column:
+        return column, first
+    if descending == first:
+        return column, not first
+    return None, False
+
+
+def column_label(column: str, sort_column: str | None, descending: bool) -> str:
+    """Return a column header, with an arrow on the column the rows are sorted by."""
+    if column != sort_column:
+        return column
+    arrow = "▼" if descending else "▲"
+    # The narrowest metric columns have no room for the space.
+    if len(column) + 2 > _NARROWEST_WIDTH.get(column, 0):
+        return f"{column}{arrow}"
+    return f"{column} {arrow}"
+
+
+_ASCENDING_FIRST = frozenset({"host", "address"})
+_NARROWEST_WIDTH = {**FIXED_COLUMN_WIDTHS, "host": MIN_HOST_WIDTH, "address": IPV4_ADDRESS_WIDTH}
+
+_SORT_KEYS: dict[str, Callable[[TargetRun], Any]] = {
+    "host": lambda target: _name_sort_key(target.target),
+    "address": _address_sort_key,
+    "state": _state_sort_key,
+    "last": lambda target: _last_latency(target.samples),
+    "min": lambda target: target.stats.min_ms,
+    "avg": lambda target: target.stats.avg_ms,
+    "max": lambda target: target.stats.max_ms,
+    "jitter": lambda target: target.stats.jitter_ms,
+    "loss": _loss_sort_key,
+}
 
 
 def history_text(glyphs: str, codes: str) -> Text:
@@ -688,6 +851,9 @@ class TargetTableRenderer:
         self._safe_names: list[str] = []
         self._name_spans: list[tuple[int, int]] = []
         self._host_labels: list[str] = []
+        self._fleet_labels: list[str] = []
+        self._label_by_name: dict[str, str] = {}
+        self._row_names: list[str] | None = None
         self._labels_width: int | None = None
         self._show_address = False
         self._host_width: int | None = None
@@ -713,20 +879,29 @@ class TargetTableRenderer:
         table: Any,
         targets: Sequence[TargetRun],
         *,
+        fleet: Sequence[TargetRun] | None = None,
         priority: range = range(0),
         full: bool = True,
         now: datetime | None = None,
     ) -> FleetSummary | None:
-        """Bring the table up to date with ``targets``.
+        """Bring the table up to date with ``targets``, one row each in order.
 
-        ``priority`` rows (the viewport) are always refreshed. A ``full`` pass
-        also writes changed state labels everywhere, refreshes the other
-        changed rows round-robin within the time budget, and returns the
-        fleet summary; while ``behind``, catch_up() refreshes the rest of the
-        rows the pass owes.
+        ``fleet`` is every target of the run when ``targets`` is a sorted or
+        filtered view of it: host labels and the fleet summary then come from
+        the whole fleet. ``priority`` rows (the viewport) are always
+        refreshed. A ``full`` pass also writes changed state labels
+        everywhere, refreshes the other changed rows round-robin within the
+        time budget, and returns the fleet summary; while ``behind``,
+        catch_up() refreshes the rest of the rows the pass owes.
         """
         deadline = time.perf_counter() + self.budget_s
-        self._update_host_labels(targets)
+        if fleet is None:
+            fleet = targets
+        self._update_host_labels(targets, fleet)
+        if len(targets) < len(self._rows):
+            # Removing DataTable rows one at a time renumbers every row each
+            # time; rebuilding is linear.
+            self._clear_rows(table)
         # Rows are added outside the batch: add_row's own repaint request
         # must not be dropped.
         self._add_missing_rows(table, targets)
@@ -744,7 +919,11 @@ class TargetTableRenderer:
             if full:
                 self._refresh_changed_rows(table, targets, count, changed, deadline=deadline)
         self._repaint(table, changed)
-        return self._summary(count, now) if full else None
+        if not full:
+            return None
+        if fleet is targets:
+            return self._summary(self._categories[:count], self._newest[:count], now)
+        return self._fleet_summary(fleet, now)
 
     def catch_up(self, table: Any, targets: Sequence[TargetRun]) -> bool:
         """Refresh more of the rows the last full pass owes, within the time
@@ -773,14 +952,16 @@ class TargetTableRenderer:
         if changed and refresh_rows is not None:
             refresh_rows(changed)
 
-    def _update_host_labels(self, targets: Sequence[TargetRun]) -> None:
+    def _update_host_labels(self, targets: Sequence[TargetRun], fleet: Sequence[TargetRun]) -> None:
         """Recompute the host labels when a name or the host width changed.
 
         Comparing the names is cheap (they are the same string objects from
         one call to the next); telling the names apart is O(N log N) and only
-        redone when one changed.
+        redone when one changed. Labels are worked out over the whole fleet,
+        so sorting or filtering the rows only looks them up again: a row
+        that shows another target is re-rendered anyway.
         """
-        names = [target.target for target in targets]
+        names = [target.target for target in fleet]
         names_changed = names != self._names
         if names_changed:
             self._names = names
@@ -788,8 +969,27 @@ class TargetTableRenderer:
         width = self._host_width
         if names_changed or width != self._labels_width:
             self._labels_width = width
-            self._host_labels = fit_host_labels(self._safe_names, self._name_spans, width)
+            self._fleet_labels = fit_host_labels(self._safe_names, self._name_spans, width)
+            self._label_by_name = dict(zip(names, self._fleet_labels, strict=True))
+            self._row_names = None
             self._generation += 1
+        if targets is fleet:
+            self._host_labels = self._fleet_labels
+            self._row_names = None
+            return
+        row_names = [target.target for target in targets]
+        if row_names != self._row_names:
+            self._row_names = row_names
+            self._host_labels = [self._label_by_name[name] for name in row_names]
+
+    def _clear_rows(self, table: Any) -> None:
+        table.clear()
+        self._rows.clear()
+        self._row_keys.clear()
+        self._categories.clear()
+        self._newest.clear()
+        self._cursor = 0
+        self._owed = 0
 
     def _refresh_changed_rows(
         self,
@@ -922,10 +1122,13 @@ class TargetTableRenderer:
     def _remember_state(self, index: int, state: CellValue, samples: SampleWindow) -> None:
         category = _summary_category(state[0])
         self._categories[index] = category
+        self._newest[index] = self._newest_result(category, samples)
+
+    def _newest_result(self, category: str, samples: SampleWindow) -> datetime:
         # Only a dead probe loop sets ERROR (record_probe_loop_failure): that
         # host is counted as an error, and its last result says nothing about
         # whether the hosts still being probed keep up.
-        self._newest[index] = (
+        return (
             samples[-1].timestamp
             if samples and category != "error" and not self._probes_done(samples)
             else _NO_SAMPLE
@@ -975,9 +1178,21 @@ class TargetTableRenderer:
         self._mark_rendered(index, target)
         return changed
 
-    def _summary(self, count: int, now: datetime | None) -> FleetSummary:
-        counts = Counter(self._categories[:count])
-        oldest = min(self._newest[:count], default=_NO_SAMPLE)
+    def _fleet_summary(self, fleet: Sequence[TargetRun], now: datetime | None) -> FleetSummary:
+        """The fleet summary of targets that do not all have a row."""
+        categories = [_summary_category(target_state(target)[0]) for target in fleet]
+        newest = [
+            self._newest_result(category, target.samples)
+            for category, target in zip(categories, fleet, strict=True)
+        ]
+        return self._summary(categories, newest, now)
+
+    @staticmethod
+    def _summary(
+        categories: Sequence[str], newest: Sequence[datetime], now: datetime | None
+    ) -> FleetSummary:
+        counts = Counter(categories)
+        oldest = min(newest, default=_NO_SAMPLE)
         age = None
         if oldest is not _NO_SAMPLE:
             current = datetime.now(timezone.utc) if now is None else now

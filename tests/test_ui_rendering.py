@@ -107,6 +107,9 @@ class RecordingTable:
         self.rows[row][column] = value
         self.updates.append((row, column))
 
+    def clear(self) -> None:
+        self.rows.clear()
+
     def cell(self, index: int, column: str) -> Any:
         return self.rows[target_row_key(index)][column]
 
@@ -503,6 +506,68 @@ def test_host_cell_escapes_control_characters_before_truncating() -> None:
     assert "\x1b" not in host
     assert host.startswith("evi")
     assert host.endswith("xxxx.example")
+
+
+def test_reordered_rows_show_each_target_as_it_was_drawn_before() -> None:
+    fleet = [
+        healthy("db-primary-001.dc1.example.net", ok(5.0)),
+        TargetRun("db-primary-002.dc1.example.net", status=TargetStatus.DNS_FAILURE),
+        healthy("db-primary-003.dc1.example.net", ok(250.0), lost()),
+    ]
+    table = RecordingTable()
+    renderer = make_renderer()
+    renderer.sync(table, fleet)
+    table.updates.clear()
+
+    renderer.sync(table, fleet[::-1])
+
+    assert [shown_cells(table, row) for row in range(3)] == [
+        fresh_cells(fleet, index) for index in (2, 1, 0)
+    ]
+    # The middle row shows the same target as before, so it is left alone.
+    assert target_row_key(1) not in table.updated_rows()
+
+
+def test_fewer_rows_than_before_rebuild_the_table_with_only_those_rows() -> None:
+    fleet = [healthy(f"host-{number}.example", ok(5.0 + number)) for number in range(4)]
+    table = RecordingTable()
+    renderer = make_renderer()
+    renderer.sync(table, fleet)
+
+    renderer.sync(table, [fleet[3], fleet[1]], fleet=fleet)
+
+    assert list(table.rows) == [target_row_key(0), target_row_key(1)]
+    assert [shown_cells(table, row) for row in range(2)] == [
+        fresh_cells(fleet, index) for index in (3, 1)
+    ]
+
+    renderer.sync(table, fleet)
+
+    assert [shown_cells(table, row) for row in range(4)] == [
+        fresh_cells(fleet, index) for index in range(4)
+    ]
+
+
+def test_fleet_summary_counts_the_whole_fleet_while_rows_show_part_of_it() -> None:
+    fleet = [
+        healthy("a.example", ok(5.0, at=9.0)),
+        TargetRun(
+            "b.example",
+            resolved_address="127.0.253.3",
+            status=TargetStatus.DOWN,
+            samples=[lost(at=4.0)],
+        ),
+        TargetRun("c.example", status=TargetStatus.DNS_FAILURE),
+    ]
+
+    summary = make_renderer().sync(
+        RecordingTable(), [fleet[0]], fleet=fleet, now=T0 + timedelta(seconds=10)
+    )
+
+    assert summary == FleetSummary(
+        counts={"healthy": 1, "down": 1, "dns": 1},
+        oldest_result_age_s=6.0,
+    )
 
 
 def test_fleet_summary_counts_states_and_the_oldest_result() -> None:

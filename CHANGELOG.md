@@ -6,6 +6,11 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Added
+
+- TUI: click a column header to sort the hosts by it, worst first for state, loss and latency, then reversed, then back to the input order. Host names and addresses sort by value, so `10.1.9.9` comes before `10.1.10.10` and `host-2` before `host-10`. The sort follows the values as they change.
+- TUI: `/` searches host names and addresses. A full IP address matches only that address, several terms separated by spaces or commas show every host that matches any of them, and `Esc` clears the search. The header summary keeps counting the whole fleet.
+
 ## 7.0.0 - 2026-10-23
 
 ### Breaking

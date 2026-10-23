@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from textual.widgets import DataTable, Header
+from textual.widgets import DataTable, Header, Input, Static
 
 import pinghue.app as app_module
 import pinghue.runner as runner_module
@@ -205,3 +205,258 @@ async def test_pilot_arrow_navigation_recovers_after_bottom_corner_click() -> No
         await pilot.pause()
 
         assert table.cursor_row == 1
+
+
+def _hosts(table: DataTable[Any]) -> list[str]:
+    return [table.get_row_at(row)[0].plain for row in range(table.row_count)]
+
+
+async def _probe_every_target(pilot: Any) -> None:
+    """First probes are spread over the interval; probe every target now."""
+    app = pilot.app
+    assert await _wait_until(pilot, lambda: all(t.resolved_address for t in app.targets))
+    await pilot.press("B")
+    assert await _wait_until(pilot, lambda: all(len(t.samples) for t in app.targets))
+
+
+async def _click_header(pilot: Any, column: str) -> None:
+    """Click a column header: the header row sits just inside the top border."""
+    table = pilot.app.query_one("#targets", DataTable)
+    x = 1
+    for key, header in table.columns.items():
+        if key.value == column:
+            break
+        x += header.get_render_width(table)
+    await pilot.click("#targets", offset=(x + 1, 1))
+    await pilot.pause()
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_header_clicks_sort_by_ip_reverse_then_restore_the_input_order() -> None:
+    targets = ["10.1.10.10", "10.1.9.9", "10.1.1.2"]
+    app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        assert _hosts(table) == targets
+
+        await _click_header(pilot, "host")
+        assert _hosts(table) == ["10.1.1.2", "10.1.9.9", "10.1.10.10"]
+        assert table.ordered_columns[0].label.plain == "host ▲"
+
+        await _click_header(pilot, "host")
+        assert _hosts(table) == ["10.1.10.10", "10.1.9.9", "10.1.1.2"]
+        assert table.ordered_columns[0].label.plain == "host ▼"
+
+        await _click_header(pilot, "host")
+        assert _hosts(table) == targets
+        assert table.ordered_columns[0].label.plain == "host"
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_reset_after_sorting_clears_the_highlighted_host() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["b.example", "c.example", "a.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await _probe_every_target(pilot)
+        table = app.query_one("#targets", DataTable)
+
+        await _click_header(pilot, "host")
+        assert _hosts(table)[0] == "a.example"
+        await pilot.press("r")
+        await pilot.pause()
+
+        # a.example is the third target but the first row once sorted.
+        assert [len(target.samples) > 0 for target in app.targets] == [True, True, False]
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_search_filters_rows_without_triggering_bindings() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["db-1.example", "web.example", "db-2.example", "queue.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await _probe_every_target(pilot)
+        table = app.query_one("#targets", DataTable)
+
+        await pilot.press("slash", "d", "b")
+        await pilot.pause()
+        assert _hosts(table) == ["db-1.example", "db-2.example"]
+
+        # Typed into the search, not the q (quit) and a (address) bindings.
+        await pilot.press("backspace", "backspace", "a")
+        await pilot.pause()
+        assert app.show_address is False
+        await pilot.press("backspace", "q", "u", "e")
+        await pilot.pause()
+        assert app.is_running
+        assert _hosts(table) == ["queue.example"]
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert table.has_focus
+        assert _hosts(table) == ["queue.example"]
+        # The header keeps counting the whole fleet.
+        assert app.sub_title.endswith("  4 healthy")
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _hosts(table) == ["db-1.example", "web.example", "db-2.example", "queue.example"]
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_escape_in_the_search_box_clears_it_and_returns_to_the_table() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["db-1.example", "web.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        search = app.query_one("#search", Input)
+
+        await pilot.press("slash", "w", "e", "b")
+        await pilot.pause()
+        assert _hosts(table) == ["web.example"]
+        assert search.has_focus
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _hosts(table) == ["db-1.example", "web.example"]
+        assert search.value == ""
+        assert table.has_focus
+        assert not search.is_on_screen
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_clicking_the_search_box_keeps_it_focused() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["db-1.example", "web.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        search = app.query_one("#search", Input)
+        await pilot.press("slash", "d", "b", "enter")
+        await pilot.pause()
+        assert table.has_focus
+
+        await pilot.click("#search")
+        await pilot.press("end", "backspace", "backspace", "w")
+        await pilot.pause()
+
+        assert search.has_focus
+        assert _hosts(table) == ["web.example"]
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_sorting_by_address_shows_the_address_column() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        assert app.show_address is False
+
+        await _click_header(pilot, "address")
+
+        assert app.show_address is True
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_a_sorted_table_follows_the_values_as_they_change() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["a.example", "b.example", "c.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await _probe_every_target(pilot)
+        table = app.query_one("#targets", DataTable)
+        await _click_header(pilot, "loss")
+        assert _hosts(table) == ["a.example", "b.example", "c.example"]
+
+        lost = ProbeSample(
+            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=timezone.utc),
+            latency_ms=None,
+            status=SampleStatus.TIMEOUT,
+        )
+        app.targets[2].apply_sample(lost, fail_threshold=3, jitter_threshold_ms=50.0)
+
+        assert await _wait_until(pilot, lambda: _hosts(table)[0] == "c.example", ticks=200), (
+            "the sort did not follow the new loss"
+        )
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_escape_without_a_search_leaves_the_selection_alone() -> None:
+    app = PinghueTextualApp(
+        args=build_args(targets=["a.example", "b.example", "c.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        await pilot.press("down", "down", "escape")
+        await pilot.pause()
+
+        assert table.cursor_row == 2
+
+
+def _footer_actions(app: PinghueTextualApp) -> set[str]:
+    return {
+        active.binding.action
+        for active in app.active_bindings.values()
+        if active.enabled and active.binding.show
+    }
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_the_footer_offers_clearing_only_while_a_search_is_open() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        assert "clear_search" not in _footer_actions(app)
+
+        await pilot.press("slash", "a", "enter")
+        await pilot.pause()
+        assert "clear_search" in _footer_actions(app)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "clear_search" not in _footer_actions(app)
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_searching_a_scrolled_table_rebuilds_it_cleanly() -> None:
+    targets = [f"host-{number:03}.example" for number in range(120)]
+    app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        table.move_cursor(row=len(targets) - 1, animate=False)
+        await pilot.pause()
+        assert table.scroll_y > 0
+
+        await pilot.press("slash", "1", "1")
+        await pilot.pause()
+
+        assert _hosts(table) == [name for name in targets if "11" in name]
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_pilot_a_search_with_no_match_empties_the_table_until_cleared() -> None:
+    app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+
+        await pilot.press("slash", "z", "z", "z")
+        await pilot.pause()
+        assert table.row_count == 0
+        assert str(app.query_one("#search-count", Static).render()) == "0 of 2"
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _hosts(table) == ["a.example", "b.example"]
