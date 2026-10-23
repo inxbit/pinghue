@@ -861,6 +861,7 @@ class TargetTableRenderer:
         self._generation = 0
         self._cursor = 0
         self._owed = 0
+        self._syncing = False
 
     @property
     def behind(self) -> bool:
@@ -893,7 +894,30 @@ class TargetTableRenderer:
         everywhere, refreshes the other changed rows round-robin within the
         time budget, and returns the fleet summary; while ``behind``,
         catch_up() refreshes the rest of the rows the pass owes.
+
+        A sync started while one runs does nothing: DataTable.clear() resets
+        the scroll position, and Textual runs the app's scroll watcher, which
+        syncs the visible rows, inside that call. The running sync draws
+        every row it adds.
         """
+        if self._syncing:
+            return None
+        self._syncing = True
+        try:
+            return self._sync(table, targets, fleet=fleet, priority=priority, full=full, now=now)
+        finally:
+            self._syncing = False
+
+    def _sync(
+        self,
+        table: Any,
+        targets: Sequence[TargetRun],
+        *,
+        fleet: Sequence[TargetRun] | None,
+        priority: range,
+        full: bool,
+        now: datetime | None,
+    ) -> FleetSummary | None:
         deadline = time.perf_counter() + self.budget_s
         if fleet is None:
             fleet = targets
