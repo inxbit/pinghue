@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; verification evidence refreshed for 6.0.0 on 2026-10-22
+Review date: 2026-07-11; verification evidence refreshed for 7.0.0 on 2026-10-23
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -152,29 +152,29 @@ requires the next major release; it must not ship as a patch or minor version.
 
 ## Verification evidence
 
-Refreshed for the 6.0.0 release candidate on 2026-10-22 (the 5.1.0 evidence
+Refreshed for the 7.0.0 release candidate on 2026-10-23 (the 6.0.0 evidence
 this section previously recorded is superseded):
 
-- Full tests: 697 passed and 8 skipped (Linux-only kernel features, a
+- Full tests: 706 passed and 8 skipped (Linux-only kernel features, a
   Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.15, with total branch-aware coverage of 93.97% against the 85% floor;
+  3.12.15, with total branch-aware coverage of 93.98% against the 85% floor;
   localhost TCP and Unix-socket cases executed. The same suite passed under
-  CPython 3.11.15, the new supported floor, and 3.14.9.
+  CPython 3.11.15, the supported floor, and 3.14.9, each from fresh
+  `--require-hashes` installs.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
 - Mypy strict mode: no issues across 16 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 26 Node tests passed. The 6.0.0 site change adds the
-  TUI's fleet summary to the hero title bar, shows a reset host as `pending`
-  like the TUI, and updates the version strings and the supported Python
-  range.
+- Static site contract: 26 Node tests passed. The 7.0.0 site change notes
+  that line output is the default when stdout is not a terminal and updates
+  the version strings.
 - Semgrep 1.182.0 Python, security-audit, and secrets rule packs: 0 findings
   across 85 scanned files.
 - Bandit 1.9.4 recursive runtime/script scan: one low-severity B311 note for
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 132-commit history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 136-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -182,29 +182,29 @@ this section previously recorded is superseded):
   `--require-hashes` entry.
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
-- The final normalized sdist and wheel passed `twine check`; all 604 tests
-  shipped in the unpacked sdist passed (8 skipped as above); fresh wheel and
-  sdist installs both reported `pinghue 6.0.0` through the console-script
-  entry point and completed the localhost TCP smoke test.
+- The final normalized sdist and wheel passed `twine check`; all 613 tests
+  shipped in the unpacked sdist passed against its own sources (8 skipped as
+  above); fresh wheel and sdist installs both reported `pinghue 7.0.0`
+  through the console-script entry point and completed the localhost TCP
+  smoke test, choosing line output without `--no-tui` because stdout was a
+  pipe.
 - ShellCheck and Bash syntax checks passed for shell scripts; Homebrew formula
   Ruby syntax passed.
 - The administration-readable hosted-hardening check passed against the
-  tracked baseline, including the Python 3.14 required checks.
+  tracked baseline; this release changes no hosted setting.
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 6.0.0 is a
-major release: it drops Python 3.10, which reached end of life in October
-2026, `--output` refuses FIFOs and `--overwrite` targets that another
-local user controls, host files split lines only at `\n`, `\r\n`, or a lone
-`\r`, and `./-` names a file. Those changes invoke the documented security
-exception to the deprecation window. The release also closes DNS-sinkhole
-answers being probed as healthy, predictable ICMP sequence numbers, unescaped
-OS-supplied text in `--check`, stderr-bound output reaching stdout, and an
-inline expression in a workflow `run:` step; no new finding was raised. The
-local candidate passed the security, QA, deterministic-artifact,
-installed-artifact, and staged-formula gates. Publishing remains gated on
-release-PR review and exact-head CI.
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.0.0 is a
+major release with one breaking change, deprecated in 5.1.0: without the new
+`--tui`, PingHue prints line output instead of starting the TUI when stdout is
+not a terminal. The change adds no input, output path, privilege, or network
+behavior. `--output -` is now accepted without `--no-tui` when stdout is not a
+terminal; the per-probe lines still go to stderr, so the JSON document on
+stdout stays parseable, and the TUI still refuses `--output -`. No new finding
+was raised. The local candidate passed the security, QA,
+deterministic-artifact, installed-artifact, and staged-formula gates.
+Publishing remains gated on release-PR review and exact-head CI.
 
 Revisit this report if PingHue gains a listener, privileged wrapper, remote
 inventory source, credential handling, plugin execution, subprocess probes, a
