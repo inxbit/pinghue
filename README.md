@@ -266,6 +266,11 @@ so both `--fail-on-*` options count it as down.
 | `R` | Reset all hosts. |
 | `b` | Probe the selected host immediately. |
 | `B` | Probe all hosts immediately. |
+| `/` | Search hosts and addresses. `Enter` returns to the table with the search kept, `Esc` clears it. |
+
+Click a column header to sort by it. The first click sorts host names and addresses up and every other column worst first (down hosts, full loss, the slowest replies), the second click reverses it, and the third goes back to the input order. Host names and addresses sort by value: `10.1.9.9` comes before `10.1.10.10`, `host-2` before `host-10`, IPv4 before IPv6 and both before names. Rows with nothing to sort by, such as a host with no reply yet, stay last either way, and sorting by address also shows the address column. The sort follows the values as they change, so a host that starts losing packets moves up on the next refresh while the selection stays on its row. Header clicks need a terminal that passes mouse clicks through (in tmux, `set -g mouse on`).
+
+`/` opens a search line under the table: only hosts whose name or address contains what you type stay in the table, ignoring case, with a count of how many match. A full IP address matches only that address, so `10.0.0.5` does not also show `10.0.0.50`. Separate several hosts with spaces or commas to watch them together, for example `10.0.0.5 10.0.0.9 db-2`. A search and a sort work together, and the header summary keeps counting the whole fleet.
 
 The header shows a fleet summary next to the title: how long ago the stalest host's newest result arrived (`oldest 1.2s`), then how many hosts are in each state, problems first and healthy last, so a narrow terminal cuts the least useful part. That age turns amber once it falls well behind `--interval` and `--timeout`, which means probes are not keeping up. Hosts that have sent all their `--count` probes, and hosts whose probe loop failed (counted as `error`), no longer count toward it.
 

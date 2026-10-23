@@ -10,12 +10,14 @@ from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.content import Content
 from textual.css.query import NoMatches
 from textual.events import Click, Key, Resize
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from pinghue import __version__
 from pinghue.config import RunConfig
@@ -41,10 +43,14 @@ from pinghue.ui import (
     TargetTable,
     TargetTableRenderer,
     apply_column_widths,
+    column_label,
     compute_table_layout,
+    display_order,
     fleet_summary_parts,
     focus_table,
     format_history_legend,
+    next_sort,
+    restore_cursor_row,
 )
 
 SLOW_LATENCY_MS = 100.0
@@ -105,6 +111,31 @@ class PinghueTextualApp(App[None]):
         height: 1;
         padding: 0 1;
     }
+
+    #search-bar {
+        display: none;
+        height: 1;
+        background: #101418;
+        color: #8ea0b8;
+        padding: 0 1;
+    }
+
+    #search-bar.shown {
+        display: block;
+    }
+
+    #search-bar Static {
+        width: auto;
+    }
+
+    #search {
+        width: 1fr;
+        height: 1;
+        border: none;
+        padding: 0 1;
+        background: #101418;
+        color: #e6edf3;
+    }
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -113,6 +144,9 @@ class PinghueTextualApp(App[None]):
         Binding("R", "reset_all", "Reset all"),
         Binding("b", "burst_selected", "Probe now"),
         Binding("B", "burst_all", "Probe all"),
+        Binding("slash", "search", "Search", key_display="/"),
+        # Shown, and enabled, only while the search line is open.
+        Binding("escape", "clear_search", "Clear search"),
     ]
 
     def __init__(self, *, args: RunConfig, mode: ProbeMode) -> None:
@@ -125,6 +159,13 @@ class PinghueTextualApp(App[None]):
         self._deadline_at = None if args.duration is None else _monotonic_time() + args.duration
         self.exit_reason = "user_quit"
         self.show_address = False
+        self._sort_column: str | None = None
+        self._sort_descending = False
+        self._search_query = ""
+        self._search_open = False
+        # The rows the table shows: target indices in display order, or None
+        # for every target in input order (no sort, no search).
+        self._display_order: list[int] | None = None
         self._semaphore = asyncio.Semaphore(args.concurrency)
         self._stop_event = asyncio.Event()
         self._probe_tasks: list[asyncio.Task[None]] = []
@@ -151,6 +192,12 @@ class PinghueTextualApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield TargetTable(id="targets")
+        yield Horizontal(
+            Static("/"),
+            Input(placeholder="host or address, several with spaces", id="search"),
+            Static(id="search-count"),
+            id="search-bar",
+        )
         if self.args_config.history_style != "none":
             yield Static(
                 format_history_legend(self.args_config.history_style),
@@ -400,18 +447,30 @@ class PinghueTextualApp(App[None]):
         full = now - self._last_full_refresh >= UI_REFRESH_INTERVAL / 2
         if full:
             self._last_full_refresh = now
+            # A sort follows the values as they change, and a search the
+            # addresses as targets resolve.
+            self._update_display_order()
+        rows, fleet = self._view()
+        row_count = table.row_count if isinstance(table, DataTable) else 0
+        cursor_row = table.cursor_row if isinstance(table, DataTable) else 0
         summary = self._table_renderer.sync(
             table,
-            self.targets,
+            rows,
+            fleet=fleet,
             priority=self._priority_rows(table),
             full=full,
         )
+        if isinstance(table, DataTable) and table.row_count < row_count:
+            # Fewer rows rebuild the table, which moves the cursor to the top.
+            restore_cursor_row(table, preferred_row=cursor_row, row_count=table.row_count)
         if summary is not None:
             stale_after = 2 * (
                 max(self.args_config.interval, self.args_config.timeout) + self.args_config.timeout
             )
             self._summary_parts = fleet_summary_parts(summary, stale_after_s=stale_after)
             self.sub_title = "".join(text for text, _style in self._summary_parts)
+            if self._search_query:
+                self._update_search_count()
         self._schedule_row_catch_up()
 
     def _schedule_row_catch_up(self) -> None:
@@ -427,7 +486,7 @@ class PinghueTextualApp(App[None]):
             table = self.query_one("#targets", DataTable)
         except NoMatches:
             return
-        self._table_renderer.catch_up(table, self.targets)
+        self._table_renderer.catch_up(table, self._view()[0])
         self._schedule_row_catch_up()
 
     def _refresh_visible_rows(self) -> None:
@@ -435,12 +494,58 @@ class PinghueTextualApp(App[None]):
             table = self.query_one("#targets", DataTable)
         except NoMatches:
             return
+        rows, fleet = self._view()
         self._table_renderer.sync(
             table,
-            self.targets,
+            rows,
+            fleet=fleet,
             priority=self._priority_rows(table),
             full=False,
         )
+
+    def _view(self) -> tuple[list[TargetRun], list[TargetRun] | None]:
+        """Return the targets the rows show, and the whole fleet when that
+        is not all of them in input order."""
+        if self._display_order is None:
+            return self.targets, None
+        return [self.targets[index] for index in self._display_order], self.targets
+
+    def _update_display_order(self) -> None:
+        if self._sort_column is None and not self._search_query.strip():
+            self._display_order = None
+            return
+        self._display_order = display_order(
+            self.targets,
+            sort_column=self._sort_column,
+            descending=self._sort_descending,
+            query=self._search_query,
+        )
+
+    def _target_index(self, row: int | None) -> int | None:
+        """Return the index in ``self.targets`` of the target a row shows."""
+        order = self._display_order
+        count = len(self.targets) if order is None else len(order)
+        if row is None or not 0 <= row < count:
+            return None
+        return row if order is None else order[row]
+
+    def _show_new_view(self) -> None:
+        """Apply a changed sort or search at once, from the top of the table."""
+        self._update_display_order()
+        self._refresh_table()
+        table = self.query_one("#targets", DataTable)
+        for key, column in table.columns.items():
+            column.label = Text(
+                column_label(str(key.value), self._sort_column, self._sort_descending)
+            )
+        table.notify_style_update()
+        if table.row_count:
+            table.move_cursor(row=0, animate=False)
+        self._update_search_count()
+
+    def _update_search_count(self) -> None:
+        shown = len(self.targets) if self._display_order is None else len(self._display_order)
+        self.query_one("#search-count", Static).update(f"{shown} of {len(self.targets)}")
 
     def format_title(self, title: str, sub_title: str) -> Content:
         # The header shows the fleet summary in color after the title.
@@ -454,7 +559,56 @@ class PinghueTextualApp(App[None]):
         self._refresh_table(width=event.size.width)
 
     def on_click(self, event: Click) -> None:
+        if isinstance(event.widget, Input):
+            return
         event.prevent_default()
+        self._focus_target_table()
+
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        column = str(event.column_key.value)
+        self._sort_column, self._sort_descending = next_sort(
+            column, self._sort_column, self._sort_descending
+        )
+        if self._sort_column == "address":
+            # Rows sorted by an address nobody can see would look shuffled.
+            self.show_address = True
+        self._show_new_view()
+
+    def check_action(
+        self,
+        action: str,
+        parameters: tuple[object, ...],  # noqa: ARG002 - Textual's signature
+    ) -> bool | None:
+        if action == "clear_search":
+            return self._search_open
+        return True
+
+    def action_search(self) -> None:
+        self._search_open = True
+        self.query_one("#search-bar").add_class("shown")
+        self.query_one("#search", Input).focus()
+        self._update_search_count()
+        self.refresh_bindings()
+
+    def action_clear_search(self) -> None:
+        if not self._search_open:
+            return
+        self._search_open = False
+        self.query_one("#search", Input).value = ""
+        self._search_query = ""
+        self.query_one("#search-bar").remove_class("shown")
+        self._focus_target_table()
+        self._show_new_view()
+        self.refresh_bindings()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._search_query = event.value
+        self._show_new_view()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if not event.value.strip():
+            self.action_clear_search()
+            return
         self._focus_target_table()
 
     def on_key(self, event: Key) -> None:
@@ -478,9 +632,9 @@ class PinghueTextualApp(App[None]):
 
     def action_reset_selected(self) -> None:
         table = self.query_one("#targets", DataTable)
-        row = table.cursor_row
-        if row is not None and 0 <= row < len(self.targets):
-            self._reset_target_samples(self.targets[row])
+        index = self._target_index(table.cursor_row)
+        if index is not None:
+            self._reset_target_samples(self.targets[index])
         self._refresh_table()
 
     def action_reset_all(self) -> None:
@@ -503,9 +657,9 @@ class PinghueTextualApp(App[None]):
         # Wake the selected target's existing probe loop instead of starting a
         # second concurrent probe on the same TargetRun (which double-counts).
         table = self.query_one("#targets", DataTable)
-        row = table.cursor_row
-        if row is not None and 0 <= row < len(self._immediate_events):
-            self._immediate_events[row].set()
+        index = self._target_index(table.cursor_row)
+        if index is not None and index < len(self._immediate_events):
+            self._immediate_events[index].set()
 
     def action_burst_all(self) -> None:
         for event in self._immediate_events:
