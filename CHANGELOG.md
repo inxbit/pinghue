@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 7.0.0 - 2026-10-23
+
 ### Breaking
 
 - PingHue now prints line output instead of starting the TUI when stdout is not a terminal, as announced in 5.1.0: under cron, CI, or systemd, in a pipe (`pinghue host | tee probes.log`), or with stdout redirected to a file. Before, the TUI started anyway with a warning on stderr, left stdout empty, and drew its screens on stderr as escape sequences, which a cron mail or CI log captured whole. A run on a terminal still starts the TUI, and scripts that already pass `--no-tui` behave as before. Pass the new `--tui` to keep the TUI when stdout is not a terminal, for example when a wrapper redirects stdout but stderr is still your terminal. A run without `--count` or `--duration` still runs until it is stopped; in line output, Ctrl-C, `SIGTERM`, or `SIGHUP` ends it as `interrupted` and still writes `--output`, where the TUI's `q` recorded `user_quit`. The JSON report and the `--fail-on-*` exit codes work the same in both modes.
