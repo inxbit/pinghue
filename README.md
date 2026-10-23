@@ -120,7 +120,7 @@ internal-db.corp
 
 - A focused terminal monitor for maintenance windows, migrations, and quick reachability checks.
 - A concurrent ICMP/TCP probe runner with a readable Textual TUI.
-- A scriptable probe tool with `--no-tui`, `--count`, `--duration`, and `--output`.
+- A scriptable probe tool with line output (`--no-tui`, automatic when stdout is not a terminal), `--count`, `--duration`, and `--output`.
 - A JSON-producing report helper for post-maintenance evidence.
 - A local operator tool designed for macOS and Linux.
 
@@ -170,17 +170,23 @@ ICMP probes run on the event loop over a few shared unprivileged datagram socket
 
 TCP latency is the connect time. On Linux it is the kernel's handshake RTT (`TCP_INFO`) when that is smaller and no SYN was retransmitted, so a busy event loop is not reported as network latency; after a SYN retransmission the full connect time is kept so the delay stays visible.
 
-Use no-TUI mode for scripts, cron, CI, and package smoke tests:
+Use no-TUI mode (line output) for scripts, cron, CI, and package smoke tests.
+It is the default whenever stdout is not a terminal: under cron, CI, or
+systemd, in a pipe, or with stdout redirected to a file. On a terminal, pass
+`--no-tui`:
 
 ```sh
 pinghue -p 443 example.com -c 3 --no-tui
+pinghue -p 443 example.com -c 3 | tee probes.log
+pinghue -p 443 example.com -c 3 --output - | jq '.targets[].status'
 ```
 
-Starting the TUI while stdout is not a terminal (for example under cron or a
-pipe) prints a warning on stderr; a future major release will switch to
-`--no-tui` automatically in that case.
-The TUI draws on stderr, so with stderr closed (for example `2>&-`) it does
-not start and pinghue exits with status `1`.
+Pass `--tui` to start the TUI even though stdout is not a terminal, for example
+when a wrapper redirects stdout but stderr is still your terminal. The TUI
+draws on stderr, so with stderr closed (for example `2>&-`) it does not start
+and pinghue exits with status `1`; line output does not need stderr and runs.
+Before 7.0.0 the TUI started whenever `--no-tui` was not given, with a warning
+on stderr when stdout was not a terminal.
 
 Example no-TUI output:
 
@@ -218,8 +224,9 @@ pinghue [OPTIONS] [TARGET ...]
 | `--timeout SEC` | interval | Per-probe timeout in seconds. Must be greater than `0`. |
 | `-c, --count N` | continuous | Stop after `N` probes per target. First probes are spread across one interval, so a run with several targets can take up to one interval longer. A probe that could not run because no resolver thread was free does not count. Intentionally has no upper bound. |
 | `--duration SEC` | continuous | Stop after elapsed seconds. Intentionally has no upper bound. |
-| `--no-tui` | off | Print one line per probe instead of launching the TUI. |
-| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout, requires `--no-tui`, and moves per-probe lines to stderr so stdout carries only the JSON document; `./-` names a file. Existing regular files are not replaced unless `--overwrite` is set. A path that would be refused is reported before probing starts. |
+| `--no-tui` | on when stdout is not a terminal | Print one line per probe instead of launching the TUI. This is the default under cron, CI, a pipe, or a redirect; pass it on a terminal. |
+| `--tui` | off | Start the TUI even when stdout is not a terminal. The TUI draws on stderr. Cannot be combined with `--no-tui` or `--output -`. |
+| `--output PATH` | none | Write a JSON run summary on exit. `-` writes to stdout and needs line output: it works as written when stdout is not a terminal (for example piped into `jq`), needs `--no-tui` on a terminal, and is refused with `--tui`. It moves per-probe lines to stderr so stdout carries only the JSON document; `./-` names a file. Existing regular files are not replaced unless `--overwrite` is set. A path that would be refused is reported before probing starts. |
 | `--overwrite` | off | Allow `--output` to rewrite an existing single-link regular file owned by the current user in place. The rewrite is type-safe but not crash-atomic. |
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). `private` also refuses an existing FIFO that group or other users can open. |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |

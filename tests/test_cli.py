@@ -19,7 +19,10 @@ from pinghue.cli import (
 )
 
 
-def test_parse_args_defaults_to_icmp_auto_family_and_tui() -> None:
+def test_parse_args_defaults_to_icmp_auto_family_and_tui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     args = parse_args(["1.1.1.1"])
 
     assert args.targets == ["1.1.1.1"]
@@ -37,6 +40,36 @@ def test_parse_args_tcp_count_and_no_tui() -> None:
     assert args.port == 443
     assert args.count == 2
     assert args.no_tui is True
+
+
+@pytest.mark.parametrize(
+    ("argv", "stdout_is_terminal", "no_tui"),
+    [
+        (["1.1.1.1"], False, True),
+        (["--tui", "1.1.1.1"], False, False),
+        (["--tui", "1.1.1.1"], True, False),
+        (["--no-tui", "1.1.1.1"], True, True),
+        (["--check"], False, False),
+    ],
+    ids=["no-terminal", "tui-without-terminal", "tui-on-terminal", "no-tui-on-terminal", "check"],
+)
+def test_parse_args_picks_line_output_when_stdout_is_not_a_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    stdout_is_terminal: bool,
+    no_tui: bool,
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: stdout_is_terminal)
+
+    assert parse_args(argv).no_tui is no_tui
+
+
+def test_parse_args_rejects_tui_with_no_tui(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--tui", "--no-tui", "1.1.1.1"])
+
+    assert excinfo.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
 
 
 def test_help_explains_that_no_samples_emits_empty_arrays(
@@ -315,11 +348,23 @@ def test_main_accepts_new_output_path_and_runs(
     assert len(calls) == 1
 
 
-def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
+@pytest.mark.parametrize(
+    ("argv", "no_tui"),
+    [(["1.1.1.1"], True), (["--tui", "1.1.1.1"], False)],
+    ids=["default", "tui"],
+)
+def test_main_runs_without_a_warning_when_stdout_is_not_a_terminal(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    no_tui: bool,
 ) -> None:
-    async def fake_run(*_: object, **__: object) -> int:
+    # 5.1.0 warned here that a major release would switch to line output;
+    # 7.0.0 does, and --tui keeps the TUI.
+    calls: list[bool] = []
+
+    async def fake_run(args: object, **__: object) -> int:
+        calls.append(bool(getattr(args, "no_tui", False)))
         return 0
 
     import pinghue.runner as runner
@@ -327,16 +372,16 @@ def test_main_warns_when_tui_starts_without_a_terminal_on_stdout(
     monkeypatch.setattr(runner, "run", fake_run)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
 
-    assert main(["1.1.1.1"]) == 0
-    assert "stdout is not a terminal; pass --no-tui" in capsys.readouterr().err
+    assert main(argv) == 0
+    assert calls == [no_tui]
+    assert capsys.readouterr().err == ""
 
 
-def test_main_refuses_output_path_before_warning_about_the_tui(
+def test_main_refuses_an_existing_output_path_before_running(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # A run that cannot start says only why, not how the TUI would have behaved.
     output_path = tmp_path / "out.json"
     output_path.write_text("previous\n", encoding="utf-8")
     calls: list[object] = []
@@ -348,13 +393,10 @@ def test_main_refuses_output_path_before_warning_about_the_tui(
     import pinghue.runner as runner
 
     monkeypatch.setattr(runner, "run", fake_run)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
 
     assert main(["--output", str(output_path), "1.1.1.1"]) == 1
 
-    err = capsys.readouterr().err
-    assert err.startswith("pinghue: error: output file already exists")
-    assert "stdout is not a terminal" not in err
+    assert capsys.readouterr().err.startswith("pinghue: error: output file already exists")
     assert calls == []
 
 
@@ -363,7 +405,8 @@ def test_main_refuses_the_tui_when_stderr_is_closed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # With descriptor 2 closed at startup the TUI has nowhere to draw and hung;
-    # line output does not need stderr and still runs.
+    # line output does not need stderr and still runs, and it is what runs by
+    # default when stdout is not a terminal either.
     calls: list[bool] = []
 
     async def fake_run(args: object, **__: object) -> int:
@@ -377,27 +420,12 @@ def test_main_refuses_the_tui_when_stderr_is_closed(
     monkeypatch.setattr(sys, "__stderr__", None)
     monkeypatch.setattr(sys, "stderr", None)
 
-    assert main(["127.0.0.1"]) == 1
+    assert main(["--tui", "127.0.0.1"]) == 1
     assert calls == []
     assert main(["--no-tui", "127.0.0.1"]) == 0
-    assert calls == [True]
+    assert main(["127.0.0.1"]) == 0
+    assert calls == [True, True]
     assert capsys.readouterr().out == ""
-
-
-def test_main_does_not_warn_about_stdout_when_no_tui_is_requested(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    async def fake_run(*_: object, **__: object) -> int:
-        return 0
-
-    import pinghue.runner as runner
-
-    monkeypatch.setattr(runner, "run", fake_run)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-
-    assert main(["--no-tui", "1.1.1.1"]) == 0
-    assert capsys.readouterr().err == ""
 
 
 def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
@@ -418,14 +446,36 @@ def test_main_no_tui_output_dash_keeps_stdout_json_parseable(
     assert "127.0.0.1" in captured.err
 
 
-def test_parse_args_rejects_output_dash_without_no_tui(
+@pytest.mark.parametrize(
+    ("argv", "stdout_is_terminal"),
+    [(["--output", "-", "1.1.1.1"], True), (["--tui", "--output", "-", "1.1.1.1"], False)],
+    ids=["terminal", "tui"],
+)
+def test_parse_args_rejects_output_dash_with_the_tui(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    stdout_is_terminal: bool,
 ) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: stdout_is_terminal)
+
     with pytest.raises(SystemExit) as excinfo:
-        parse_args(["--output", "-", "1.1.1.1"])
+        parse_args(argv)
 
     assert excinfo.value.code == 2
     assert "--output - requires --no-tui" in capsys.readouterr().err
+
+
+def test_parse_args_accepts_output_dash_when_stdout_is_not_a_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `pinghue host --output - | jq` needs no --no-tui: stdout is a pipe.
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    args = parse_args(["--output", "-", "1.1.1.1"])
+
+    assert str(args.output) == "-"
+    assert args.no_tui is True
 
 
 def test_parse_args_accepts_output_dash_with_no_tui() -> None:
@@ -443,7 +493,7 @@ def test_parse_args_keeps_dot_slash_dash_as_a_file(
     # file instead of selecting stdout (or failing the TUI's stdout rule).
     monkeypatch.chdir(tmp_path)
 
-    for argv in (["--no-tui"], []):
+    for argv in (["--no-tui"], ["--tui"]):
         args = parse_args(["--output", "./-", *argv, "1.1.1.1"])
         assert args.output == tmp_path / "-"
         assert str(args.output) != "-"

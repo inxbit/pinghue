@@ -80,10 +80,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-c", "--count", type=int, help="number of probes per target before exit")
     parser.add_argument("--duration", type=float, help="maximum run duration in seconds")
-    parser.add_argument(
+    interface = parser.add_mutually_exclusive_group()
+    interface.add_argument(
         "--no-tui",
         action="store_true",
-        help="print one line per probe instead of the TUI",
+        help="print one line per probe instead of the TUI (default when stdout is not a terminal)",
+    )
+    interface.add_argument(
+        "--tui",
+        action="store_true",
+        help="start the TUI even when stdout is not a terminal",
     )
     parser.add_argument(
         "--output",
@@ -369,6 +375,14 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
     if not args.check and not args.targets:
         parser.error("at least one target is required unless --check is used")
 
+    # Under cron, CI, a pipe or a redirect the caller wants the per-probe lines:
+    # the TUI would leave stdout empty and draw escape sequences on stderr.
+    # A stdout closed at startup is None, with no terminal either. --tui starts
+    # the TUI anyway.
+    stdout_is_terminal = sys.stdout is not None and sys.stdout.isatty()
+    if not args.check and not args.tui and not stdout_is_terminal:
+        args.no_tui = True
+
     if not args.check and not args.no_tui and args.output is not None and str(args.output) == "-":
         parser.error("--output - requires --no-tui; the TUI owns stdout while it runs")
 
@@ -411,14 +425,6 @@ def main(argv: list[str] | None = None) -> int:
             return _report_error(exc)
 
     from pinghue.runner import run
-
-    if not args.no_tui and not sys.stdout.isatty():
-        # The TUI draws on stderr and leaves stdout empty; scripts and cron
-        # jobs almost always want the per-probe line output instead.
-        _print_stderr(
-            "pinghue: warning: stdout is not a terminal; pass --no-tui for line output "
-            "(a future major release will make this the default)"
-        )
 
     mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
     try:
