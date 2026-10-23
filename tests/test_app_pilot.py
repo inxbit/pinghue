@@ -430,7 +430,9 @@ async def test_pilot_the_footer_offers_clearing_only_while_a_search_is_open() ->
 
 @pytest.mark.usefixtures("stub_network")
 async def test_pilot_searching_a_scrolled_table_rebuilds_it_cleanly() -> None:
-    targets = [f"host-{number:03}.example" for number in range(120)]
+    # Every stubbed host resolves to 1.1.1.1, so the search term must not
+    # match that address: the first key has to shrink the scrolled table.
+    targets = [f"{'web' if number % 2 else 'db'}-{number:03}.example" for number in range(120)]
     app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
     async with app.run_test(size=(140, 24)) as pilot:
         await pilot.pause()
@@ -439,10 +441,11 @@ async def test_pilot_searching_a_scrolled_table_rebuilds_it_cleanly() -> None:
         await pilot.pause()
         assert table.scroll_y > 0
 
-        await pilot.press("slash", "1", "1")
+        await pilot.press("slash", "w")
         await pilot.pause()
 
-        assert _hosts(table) == [name for name in targets if "11" in name]
+        assert app.is_running
+        assert _hosts(table) == [name for name in targets if "w" in name]
 
 
 @pytest.mark.usefixtures("stub_network")

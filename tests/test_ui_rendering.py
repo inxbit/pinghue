@@ -548,6 +548,30 @@ def test_fewer_rows_than_before_rebuild_the_table_with_only_those_rows() -> None
     ]
 
 
+def test_a_sync_started_while_the_table_is_cleared_leaves_one_row_per_target() -> None:
+    """DataTable.clear() resets scroll_y, and Textual runs the app's scroll
+    watcher, which syncs the visible rows, inside that call."""
+    fleet = [healthy(f"host-{number}.example", ok(5.0)) for number in range(4)]
+    renderer = make_renderer()
+
+    class ScrollWatchingTable(RecordingTable):
+        def add_row(self, *cells: Any, key: str) -> str:
+            assert key not in self.rows, f"duplicate row {key}"
+            return super().add_row(*cells, key=key)
+
+        def clear(self) -> None:
+            super().clear()
+            renderer.sync(self, [fleet[0]], fleet=fleet, full=False)
+
+    table = ScrollWatchingTable()
+    renderer.sync(table, fleet)
+
+    renderer.sync(table, [fleet[0]], fleet=fleet)
+
+    assert list(table.rows) == [target_row_key(0)]
+    assert shown_cells(table, 0) == fresh_cells(fleet, 0)
+
+
 def test_fleet_summary_counts_the_whole_fleet_while_rows_show_part_of_it() -> None:
     fleet = [
         healthy("a.example", ok(5.0, at=9.0)),
