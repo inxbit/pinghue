@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import selectors
 import signal
 import socket
@@ -273,6 +274,85 @@ def test_tui_exits_cleanly_when_its_terminal_hangs_up(tmp_path: Path) -> None:
 
     assert returncode == 0
     assert _exit_reason(report) == "interrupted"
+
+
+def test_the_mouse_wheel_scrolls_the_tui_at_startup_in_iterm2() -> None:
+    # iTerm2 answers that it supports in-band resize reports (mode 2048) but
+    # sends none until its window is resized. Textual then switched the mouse
+    # to pixel coordinates and read them as cells, so every wheel turn, click,
+    # and scrollbar drag landed off screen until the first resize. Textual
+    # skips this only when TERM_PROGRAM or LC_TERMINAL names iTerm2.
+    pty = pytest.importorskip("pty")
+    termios = pytest.importorskip("termios")
+    fcntl = pytest.importorskip("fcntl")
+    cell_width, cell_height = 8, 17
+
+    controller, terminal = pty.openpty()
+    fcntl.ioctl(terminal, termios.TIOCSWINSZ, bytes([30, 0, 120, 0, 0, 0, 0, 0]))
+    env = _cli_env(TERM="xterm-256color")
+    for name in ("TERM_PROGRAM", "LC_TERMINAL", "TEXTUAL_SMOOTH_SCROLL"):
+        env.pop(name, None)
+    proc = subprocess.Popen(
+        _cli_command("-i", "0.2", *(f"127.0.0.{n}" for n in range(2, 101))),
+        stdin=terminal,
+        stdout=terminal,
+        stderr=terminal,
+        env=env,
+        start_new_session=True,
+    )
+    os.close(terminal)
+    screen = bytearray()
+
+    def answer_like_iterm2() -> None:
+        answered = False
+        while True:
+            try:
+                chunk = os.read(controller, 65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            screen.extend(chunk)
+            if not answered and b"\x1b[?2048$p" in screen:
+                os.write(controller, b"\x1b[?2048;2$y")
+                answered = True
+
+    def addresses_drawn_since(mark: int) -> set[int]:
+        drawn = re.findall(rb"127\.0\.0\.(\d+)[ \x1b]", bytes(screen[mark:]))
+        return {int(last_octet) for last_octet in drawn}
+
+    reader = threading.Thread(target=answer_like_iterm2, daemon=True)
+    reader.start()
+    try:
+        deadline = time.monotonic() + STARTUP_TIMEOUT
+        while b"127.0.0.2 " not in screen and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert b"127.0.0.2 " in screen, "the TUI never rendered its first row"
+        # Give the terminal handshake time to switch the mouse mode, if it does.
+        deadline = time.monotonic() + 2.0
+        while b"\x1b[?1016h" not in screen and time.monotonic() < deadline:
+            time.sleep(0.05)
+        column, row = 10, 15
+        if b"\x1b[?1016h" in screen:
+            column, row = column * cell_width, row * cell_height
+        first_screen_ends_at = max(addresses_drawn_since(0))
+        mark = len(screen)
+        for _ in range(10):
+            os.write(controller, f"\x1b[<65;{column};{row}M".encode())
+            time.sleep(0.05)
+        wanted = first_screen_ends_at + 10
+        deadline = time.monotonic() + 5.0
+        while max(addresses_drawn_since(mark), default=0) < wanted and time.monotonic() < deadline:
+            time.sleep(0.05)
+        scrolled_to = max(addresses_drawn_since(mark), default=0)
+    finally:
+        _stop(proc)
+        os.close(controller)
+
+    assert scrolled_to >= wanted, (
+        f"the first screen ended at 127.0.0.{first_screen_ends_at}, "
+        f"ten wheel turns drew rows only up to 127.0.0.{scrolled_to}"
+    )
 
 
 def _close_stderr_under_a_low_open_file_limit() -> None:
