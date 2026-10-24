@@ -11,6 +11,10 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - TUI: click a column header to sort the hosts by it, worst first for state, loss and latency, then reversed, then back to the input order. Host names and addresses sort by value, so `10.1.9.9` comes before `10.1.10.10` and `host-2` before `host-10`. The sort follows the values as they change.
 - TUI: `/` searches host names and addresses. A full IP address matches only that address, several terms separated by spaces or commas show every host that matches any of them, and `Esc` clears the search. The header summary keeps counting the whole fleet.
 
+### Fixed
+
+- TUI: in iTerm2, the mouse wheel, clicks, and the scroll bar now work as soon as the TUI starts. Before, they did nothing until the window was resized whenever neither `TERM_PROGRAM` nor `LC_TERMINAL` named iTerm2: Textual's smooth scrolling asked for in-band resize reports, which iTerm2 does not send until a resize, and read mouse positions in pixels without them. PingHue now turns smooth scrolling off by default; `TEXTUAL_SMOOTH_SCROLL=1` turns it back on.
+
 ## 7.0.0 - 2026-10-23
 
 ### Breaking

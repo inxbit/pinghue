@@ -915,6 +915,12 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
     if args.no_tui:
         targets, exit_reason, started_at, ended_at = await run_no_tui(args, mode)
     else:
+        # Textual reads this when first imported. Its smooth scrolling asks the
+        # terminal for in-band resize reports and then reads mouse positions in
+        # pixels, but iTerm2 sends no report until its window is resized, so every
+        # click and wheel turn landed off screen. Textual skips this only when
+        # TERM_PROGRAM or LC_TERMINAL names iTerm2, and neither is always set.
+        os.environ.setdefault("TEXTUAL_SMOOTH_SCROLL", "0")
         from pinghue.app import PinghueApp
 
         app = PinghueApp(args=args, mode=mode)
