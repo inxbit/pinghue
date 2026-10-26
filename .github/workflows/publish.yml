@@ -358,9 +358,27 @@ jobs:
             echo "::error::release tag target no longer matches the published commit"
             exit 1
           fi
+      - name: Write release notes from the changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        # The notes come from CHANGELOG.md inside the verified sdist, so they
+        # match what was published; a release without its section fails here.
+        run: |
+          version="${TAG#v}"
+          tar -xzOf "dist/pinghue-${version}.tar.gz" "pinghue-${version}/CHANGELOG.md" > "${RUNNER_TEMP}/CHANGELOG.md"
+          awk -v heading="## ${version} - " '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' "${RUNNER_TEMP}/CHANGELOG.md" | sed -e '/./,$!d' > "${RUNNER_TEMP}/release-notes.md"
+          if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/release-notes.md"; then
+            echo "::error::CHANGELOG.md in the sdist has no section for ${version}"
+            exit 1
+          fi
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/* --verify-tag --title "$TAG" --generate-notes
+        # The changelog section comes first; GitHub's list of merged pull requests follows it.
+        run: gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes-file "${RUNNER_TEMP}/release-notes.md" --generate-notes

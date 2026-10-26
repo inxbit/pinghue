@@ -263,6 +263,11 @@ def test_publish_workflow_verifies_tag_and_hash_pins_build() -> None:
     # I3: GitHub release is created with the built-in gh CLI, not a third-party action.
     assert "gh release create" in workflow
     assert "softprops/action-gh-release" not in workflow
+    # The release notes are the version's CHANGELOG.md section from the verified sdist.
+    sdist_changelog = 'tar -xzOf "dist/pinghue-${version}.tar.gz" "pinghue-${version}/CHANGELOG.md"'
+    assert sdist_changelog in workflow
+    assert "has no section for ${version}" in workflow
+    assert '--notes-file "${RUNNER_TEMP}/release-notes.md" --generate-notes' in workflow
 
 
 def test_publish_workflow_verifies_annotated_tag_identity_and_main_ancestry() -> None:
