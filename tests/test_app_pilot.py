@@ -332,6 +332,35 @@ async def test_pilot_escape_in_the_search_box_clears_it_and_returns_to_the_table
 
 
 @pytest.mark.usefixtures("stub_network")
+async def test_pilot_the_number_pads_symbol_keys_type_into_the_search() -> None:
+    # iTerm2 sends the number pad's keys in the kitty keyboard protocol
+    # without their text. Textual turns its digits into characters but its
+    # ., -, +, *, /, = and , into named keys with none, so the search box
+    # ignored them.
+    app = PinghueTextualApp(
+        args=build_args(targets=["10.0.0.5", "10.0.0.6", "db-1.example"]),
+        mode=ProbeMode.ICMP,
+    )
+    async with app.run_test(size=(140, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        search = app.query_one("#search", Input)
+
+        await pilot.press("slash", "1", "0", "decimal", "0", "decimal", "0", "decimal", "5")
+        await pilot.pause()
+        assert search.value == "10.0.0.5"
+        assert _hosts(table) == ["10.0.0.5"]
+
+        await pilot.press("escape", "slash", "d", "b", "subtract", "1")
+        await pilot.pause()
+        assert search.value == "db-1"
+
+        await pilot.press("escape", "slash", "add", "multiply", "divide", "equal", "separator")
+        await pilot.pause()
+        assert search.value == "+*/=,"
+
+
+@pytest.mark.usefixtures("stub_network")
 async def test_pilot_clicking_the_search_box_keeps_it_focused() -> None:
     app = PinghueTextualApp(
         args=build_args(targets=["db-1.example", "web.example"]),
