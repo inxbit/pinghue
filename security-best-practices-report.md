@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; verification evidence refreshed for 7.0.0 on 2026-10-23
+Review date: 2026-07-11; verification evidence refreshed for 7.1.0 on 2026-10-26
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -152,21 +152,20 @@ requires the next major release; it must not ship as a patch or minor version.
 
 ## Verification evidence
 
-Refreshed for the 7.0.0 release candidate on 2026-10-23 (the 6.0.0 evidence
+Refreshed for the 7.1.0 release candidate on 2026-10-26 (the 7.0.0 evidence
 this section previously recorded is superseded):
 
-- Full tests: 706 passed and 8 skipped (Linux-only kernel features, a
+- Full tests: 738 passed and 8 skipped (Linux-only kernel features, a
   Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.15, with total branch-aware coverage of 93.98% against the 85% floor;
+  3.12.16, with total branch-aware coverage of 94.28% against the 85% floor;
   localhost TCP and Unix-socket cases executed. The same suite passed under
-  CPython 3.11.15, the supported floor, and 3.14.9, each from fresh
+  CPython 3.11.15, the supported floor, and 3.14.10, each from fresh
   `--require-hashes` installs.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
 - Mypy strict mode: no issues across 16 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 26 Node tests passed. The 7.0.0 site change notes
-  that line output is the default when stdout is not a terminal and updates
+- Static site contract: 26 Node tests passed. The 7.1.0 site change updates
   the version strings.
 - Semgrep 1.182.0 Python, security-audit, and secrets rule packs: 0 findings
   across 85 scanned files.
@@ -174,7 +173,7 @@ this section previously recorded is superseded):
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 136-commit history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 146-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -182,9 +181,9 @@ this section previously recorded is superseded):
   `--require-hashes` entry.
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
-- The final normalized sdist and wheel passed `twine check`; all 613 tests
+- The final normalized sdist and wheel passed `twine check`; all 645 tests
   shipped in the unpacked sdist passed against its own sources (8 skipped as
-  above); fresh wheel and sdist installs both reported `pinghue 7.0.0`
+  above); fresh wheel and sdist installs both reported `pinghue 7.1.0`
   through the console-script entry point and completed the localhost TCP
   smoke test, choosing line output without `--no-tui` because stdout was a
   pipe.
@@ -195,15 +194,19 @@ this section previously recorded is superseded):
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.0.0 is a
-major release with one breaking change, deprecated in 5.1.0: without the new
-`--tui`, PingHue prints line output instead of starting the TUI when stdout is
-not a terminal. The change adds no input, output path, privilege, or network
-behavior. `--output -` is now accepted without `--no-tui` when stdout is not a
-terminal; the per-probe lines still go to stderr, so the JSON document on
-stdout stays parseable, and the TUI still refuses `--output -`. No new finding
-was raised. The local candidate passed the security, QA,
-deterministic-artifact, installed-artifact, and staged-formula gates.
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.1.0 is a
+minor release. The TUI can sort its rows by a clicked column header, and `/`
+opens a search box that filters the rows; the search text is matched in memory
+against host names and resolved addresses and is never written out or sent.
+The TUI now defaults `TEXTUAL_SMOOTH_SCROLL` to `0`, which only stops Textual
+asking the terminal for in-band resize reports, so the mouse works at startup
+in iTerm2, and the number pad's symbol keys type into the search box. The
+development and build locks take filelock 4.2.4 and setuptools 84.2.1, which
+close advisories pip-audit reported against the locked filelock 4.1.0 and
+setuptools 84.0.0; the runtime dependencies are unchanged. The release adds no
+input source, output path, privilege, or network behavior. No new finding was
+raised. The local candidate passed the security, QA, deterministic-artifact,
+installed-artifact, and staged-formula gates.
 Publishing remains gated on release-PR review and exact-head CI.
 
 Revisit this report if PingHue gains a listener, privileged wrapper, remote

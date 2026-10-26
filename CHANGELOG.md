@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 7.1.0 - 2026-10-26
+
 ### Added
 
 - TUI: click a column header to sort the hosts by it, worst first for state, loss and latency, then reversed, then back to the input order. Host names and addresses sort by value, so `10.1.9.9` comes before `10.1.10.10` and `host-2` before `host-10`. The sort follows the values as they change.
