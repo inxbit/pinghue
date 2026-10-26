@@ -200,6 +200,79 @@
     };
   };
 
+  // ui.py _name_sort_key: IP addresses by value, IPv4 before names, and names
+  // in natural order, so 10.1.9.9 comes before 10.1.10.10 and host-2 before
+  // host-10. The split leaves the digit runs at the odd positions.
+  const nameKey = (name) => {
+    if (IPV4.test(name)) return [0, 4, name.split(".").reduce((n, octet) => n * 256 + Number(octet), 0)];
+    const parts = name.toLowerCase().split(/(\d+)/);
+    return [1, ...parts.flatMap((part, k) => (part ? [k % 2 ? [0, Number(part), ""] : [1, 0, part]] : []))];
+  };
+  // Python's tuple order: element by element, then the shorter first.
+  const compareKeys = (a, b) => {
+    if (!Array.isArray(a)) return a < b ? -1 : a > b ? 1 : 0;
+    for (let k = 0; k < Math.min(a.length, b.length); k++) {
+      const c = compareKeys(a[k], b[k]);
+      if (c) return c;
+    }
+    return a.length - b.length;
+  };
+  // ui.py _STATE_SEVERITY: higher is worse, in the fleet summary's order.
+  const severity = (state) => {
+    const at = SUMMARY.findIndex(([s]) => s === state);
+    return at < 0 ? SUMMARY.length + 1 : SUMMARY.length - at;
+  };
+
+  // ui.py _SORT_KEYS: what each sortable column sorts by; null sorts last.
+  const SORT_KEYS = {
+    host: (row) => nameKey(row.host),
+    address: (row) => nameKey(row.address),
+    state: (row) => severity(row.state),
+    last: (row) => row.last,
+    min: (row) => row.min,
+    avg: (row) => row.avg,
+    max: (row) => row.max,
+    jitter: (row) => row.jitter,
+    loss: (row) => row.loss,
+  };
+  const sortable = (column) => Object.prototype.hasOwnProperty.call(SORT_KEYS, column);
+  const ASCENDING_FIRST = ["host", "address"];
+  // ui.py _NARROWEST_WIDTH, in characters (FIXED_COLUMN_WIDTHS, MIN_HOST_WIDTH,
+  // IPV4_ADDRESS_WIDTH): where a column has no room for "name ▲".
+  const NARROWEST = { host: 12, address: 15, state: 12, last: 7, min: 7, avg: 7, max: 7, jitter: 7, loss: 7, mode: 4 };
+
+  // ui.py next_sort: the first click sorts host and address up and every
+  // other column worst first, the second reverses it, the third goes back to
+  // the input order. Columns that cannot be sorted leave the sort alone.
+  const nextSort = (column, sortColumn, descending) => {
+    if (!sortable(column)) return [sortColumn, descending];
+    const first = !ASCENDING_FIRST.includes(column);
+    if (column !== sortColumn) return [column, first];
+    if (descending === first) return [column, !first];
+    return [null, false];
+  };
+  const columnLabel = (column, sortColumn, descending) => {
+    if (column !== sortColumn) return column;
+    const arrow = descending ? "▼" : "▲";
+    return column.length + 2 > (NARROWEST[column] || 0) ? `${column}${arrow}` : `${column} ${arrow}`;
+  };
+  // ui.py display_order: the rows the search shows, sorted stably, with rows
+  // that have nothing to sort by last in either direction.
+  const displayOrder = (rows, sortColumn, descending, query) => {
+    const matches = searchMatcher(query);
+    const order = rows.map((_, i) => i).filter((i) => matches([rows[i].host, rows[i].address]));
+    if (!sortable(sortColumn)) return order;
+    const keyed = [];
+    const missing = [];
+    for (const i of order) {
+      const key = SORT_KEYS[sortColumn](rows[i]);
+      if (key === null) missing.push(i);
+      else keyed.push([key, i]);
+    }
+    keyed.sort((a, b) => (descending ? -1 : 1) * compareKeys(a[0], b[0]));
+    return [...keyed.map(([, i]) => i), ...missing];
+  };
+
   const fmt = (n) => (n === null ? "-" : n.toFixed(2));
   const fmtLoss = (n) => n.toFixed(2) + "%";
   const clockAt = (t) => {
@@ -213,7 +286,7 @@
     module.exports = {
       BUCKETS, SLOW_MS, JITTER_THRESHOLD, FAIL_THRESHOLD, HOSTS, START, HISTORY, RUN_SECONDS,
       SUMMARY, buildRun, levelOf, glyphFor, toneFor, historyLabel, summaryParts, searchMatcher, fmt, fmtLoss,
-      clockAt,
+      clockAt, SORT_KEYS, ASCENDING_FIRST, NARROWEST, nextSort, columnLabel, displayOrder,
     };
     return;
   }
@@ -363,23 +436,28 @@
   const searchCount = doc.querySelector("[data-search-count]");
   const clearKey = doc.querySelector('[data-key="Escape"]');
   const n = HOSTS.length;
+  // The static rows come in HOSTS order; a sort moves them, so keep them by host.
+  const rowOf = tbody ? Array.from(tbody.rows) : [];
+  const headers = term ? Array.from(term.querySelectorAll(".tui thead th")) : [];
   let elapsed = 0;
   let extra = HOSTS.map(() => 0);
   let since = HOSTS.map(() => 0);
   let showAddress = true;
+  // A row position in the table, as in the TUI: a live re-sort leaves it on
+  // its row, a new sort or search puts it back on the first.
   let cursor = 0;
   let quit = false;
   let paused = reduced;
   let timer = 0;
   let searching = false;
   let query = "";
+  let sortColumn = null;
+  let descending = false;
+  // The hosts in the order the table shows them (ui.py display_order).
+  let view = HOSTS.map((_, i) => i);
+  let shownOrder = view.join();
 
   const tickOf = (i) => START + elapsed + extra[i];
-  // The rows the search shows, in table order.
-  const shownRows = () => {
-    const matches = searchMatcher(query);
-    return HOSTS.map((_, i) => i).filter((i) => matches(HOSTS[i]));
-  };
 
   const paintBars = (cell, history) => {
     let bars = cell.querySelector(".bars");
@@ -417,18 +495,16 @@
   const paint = () => {
     if (!tbody) return;
     const states = [];
-    const shown = shownRows();
-    if (searchCount) searchCount.textContent = `${shown.length} of ${n}`;
-    Array.from(tbody.rows).forEach((tr, i) => {
+    const rows = [];
+    rowOf.forEach((tr, i) => {
       const cells = tr.cells;
       const tk = tickOf(i);
-      // ui.py: the header summary keeps counting the whole fleet
-      tr.hidden = !shown.includes(i);
       cells[1].textContent = showAddress ? HOSTS[i][1] : "";
-      tr.classList.toggle("is-cursor", term && term.classList.contains("is-engaged") && i === cursor);
       if (since[i] > tk) {
-        // ui.py: a reset target shows "pending" until its next probe lands
+        // ui.py: a reset target shows "pending" until its next probe lands,
+        // and has nothing to sort by
         states.push("pending");
+        rows.push({ host: HOSTS[i][0], address: HOSTS[i][1], state: "pending", last: null, min: null, avg: null, max: null, jitter: null, loss: null });
         cells[2].textContent = "pending";
         cells[2].className = "s-pending";
         for (let k = 3; k <= 7; k++) {
@@ -442,6 +518,7 @@
       }
       const row = run.rowAt(i, tk, since[i]);
       states.push(row.state);
+      rows.push(row);
       cells[2].textContent = row.state;
       cells[2].className = `s-${row.state}`;
       const nums = [["last", row.last], ["min", row.min], ["avg", row.avg], ["max", row.max], ["jitter", row.jitter]];
@@ -453,6 +530,22 @@
       cells[8].className = row.tones.loss ? `t-${row.tones.loss}` : "";
       paintBars(cells[10], row.history);
     });
+    // ui.py: a sort follows the values as they change, and the header
+    // summary keeps counting the whole fleet. Rows move only when the order
+    // changes; the ones the search hides go after the shown ones.
+    view = displayOrder(rows, sortColumn, descending, query);
+    const order = [...view, ...rowOf.map((_, i) => i).filter((i) => !view.includes(i))];
+    if (order.join() !== shownOrder) {
+      order.forEach((i) => tbody.appendChild(rowOf[i]));
+      shownOrder = order.join();
+    }
+    if (cursor >= view.length) cursor = Math.max(0, view.length - 1);
+    const engaged = term && term.classList.contains("is-engaged");
+    rowOf.forEach((tr, i) => {
+      tr.hidden = !view.includes(i);
+      tr.classList.toggle("is-cursor", engaged && view[cursor] === i);
+    });
+    if (searchCount) searchCount.textContent = `${view.length} of ${n}`;
     paintSummary(states);
     if (clock) clock.textContent = clockAt(elapsed + START);
   };
@@ -636,16 +729,14 @@
     searchInput.value = "";
     searchBar.hidden = true;
     if (clearKey) clearKey.hidden = true;
+    cursor = 0;
     focusTable();
     paint();
   };
 
-  // The cursor moves over the rows the search shows, and wraps.
+  // The cursor moves over the rows the table shows, and wraps.
   const step = (by) => {
-    const rows = shownRows();
-    if (!rows.length) return;
-    const at = rows.indexOf(cursor);
-    cursor = at < 0 ? rows[0] : rows[(at + by + rows.length) % rows.length];
+    if (view.length) cursor = (cursor + by + view.length) % view.length;
   };
 
   const press = (key) => {
@@ -673,11 +764,12 @@
       clearSearch();
       return;
     }
-    const onCursor = shownRows().includes(cursor);
+    // the host on the cursor's row; none when the search shows no rows
+    const host = view[cursor];
     if (key === "a") showAddress = !showAddress;
-    else if (key === "r" && onCursor) since[cursor] = tickOf(cursor) + 1;
+    else if (key === "r" && host !== undefined) since[host] = tickOf(host) + 1;
     else if (key === "R") since = HOSTS.map((_, i) => tickOf(i) + 1);
-    else if (key === "b" && onCursor) extra[cursor] += 1;
+    else if (key === "b" && host !== undefined) extra[host] += 1;
     else if (key === "B") extra = extra.map((x) => x + 1);
     else if (key === "ArrowDown") step(1);
     else if (key === "ArrowUp") step(-1);
@@ -693,8 +785,9 @@
   if (term) {
     term.addEventListener("keydown", (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // keys typed in the search line are text, not pinghue keys
-      if (e.target !== term && e.target.closest("button, [data-search]")) return;
+      // keys typed in the search line are text, not pinghue keys; a header
+      // button keeps the table's keys, as the TUI's table does after a sort
+      if (e.target !== term && e.target.closest("button:not(.sort), [data-search]")) return;
       if (e.key === "Escape" && !searching) return;
       if (!["q", "a", "r", "R", "b", "B", "/", "Escape", "ArrowDown", "ArrowUp"].includes(e.key)) return;
       e.preventDefault();
@@ -704,8 +797,7 @@
       searchInput.addEventListener("input", () => {
         // app.py _show_new_view: a changed search starts from the top row
         query = searchInput.value;
-        const rows = shownRows();
-        if (rows.length) cursor = rows[0];
+        cursor = 0;
         paint();
       });
       searchInput.addEventListener("keydown", (e) => {
@@ -733,11 +825,42 @@
       tbody.addEventListener("click", (e) => {
         const tr = e.target.closest("tr");
         if (!tr) return;
-        cursor = Array.from(tbody.rows).indexOf(tr);
+        cursor = view.indexOf(rowOf.indexOf(tr));
         term.classList.add("is-engaged");
         paint();
       });
     }
+
+    // app.py on_data_table_header_selected: a click on a sortable header
+    // sorts by it (next_sort), and sorting by address shows the addresses.
+    // The headers become buttons here, so without the script they stay text.
+    const paintHeaders = () => headers.forEach((th) => {
+      const button = th.querySelector(".sort");
+      if (!button) return;
+      const column = button.getAttribute("data-column");
+      button.textContent = columnLabel(column, sortColumn, descending);
+      if (column === sortColumn) th.setAttribute("aria-sort", descending ? "descending" : "ascending");
+      else th.removeAttribute("aria-sort");
+    });
+    headers.forEach((th) => {
+      const column = th.textContent;
+      if (!sortable(column)) return;
+      const button = doc.createElement("button");
+      button.type = "button";
+      button.className = "sort";
+      button.setAttribute("data-column", column);
+      button.textContent = column;
+      th.replaceChildren(button);
+      button.addEventListener("click", () => {
+        if (quit) return;
+        [sortColumn, descending] = nextSort(column, sortColumn, descending);
+        if (sortColumn === "address") showAddress = true;
+        cursor = 0;
+        term.classList.add("is-engaged");
+        paintHeaders();
+        paint();
+      });
+    });
   }
 
   if (hero && "IntersectionObserver" in window) {
