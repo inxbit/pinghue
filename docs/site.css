@@ -454,6 +454,18 @@ kbd {
   .term-summary {
     display: none;
   }
+
+  /* keeps the title off the dots and the clock */
+  .term-bar {
+    column-gap: 1ch;
+  }
+}
+
+/* the smallest phones: the clock gives way so the title keeps its room */
+@media (max-width: 379px) {
+  .term-clock {
+    display: none;
+  }
 }
 
 .term-end {
@@ -568,6 +580,21 @@ kbd {
   height: max(36px, calc(41 * var(--u)));
   border-bottom: 1px solid var(--tui-line);
   color: var(--tui-muted);
+}
+
+/* the script makes the sortable headers buttons; a click sorts, as in the TUI */
+.tui thead .sort {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: pre;
+  cursor: pointer;
+}
+
+.tui thead .sort:hover {
+  color: var(--tui-text);
 }
 
 .tui tbody tr:first-child > * {

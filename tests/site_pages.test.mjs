@@ -295,7 +295,7 @@ test('the hero is the real TUI, labeled as a simulated run', () => {
   // The table repaints every second; it must not flood a screen reader, and
   // it says plainly that the run is simulated.
   assert.doesNotMatch(term[0].match(/<table[\s\S]*?<\/table>/)[0], /aria-live/);
-  assert.match(term[0], /<figcaption id="term-cap">A simulated run in the real pinghue TUI layout: same columns, states, latency scale and keys<span class="wide-only">, with addresses shown as if you had pressed <kbd>a<\/kbd><\/span><span class="narrow-only">; a narrow screen shows only some of the eleven columns<\/span>\. The hosts are made up\.<span class="js-only"> The keys work here too\.<\/span><\/figcaption>/);
+  assert.match(term[0], /<figcaption id="term-cap">A simulated run in the real pinghue TUI layout: same columns, states, latency scale and keys<span class="wide-only">, with addresses shown as if you had pressed <kbd>a<\/kbd><\/span><span class="narrow-only">; a narrow screen shows only some of the eleven columns<\/span>\. The hosts are made up\.<span class="js-only"> The keys work here too, and a click on a column header sorts by it\.<\/span><\/figcaption>/);
   assert.match(read('docs/site.js'), /btn\.disabled = false;/);
   // Everything that moves can be paused (WCAG 2.2.2); the control is a JS enhancement.
   assert.match(term[0], /<button class="term-pause" type="button" aria-label="Pause the live demo" data-pause hidden>/);
@@ -549,6 +549,54 @@ test('the hero search matches the way ui.py search_matcher does', () => {
   assert.deepEqual(shown('db, 8.8.8.8 nas'), ['db-primary', 'backup-nas', 'dns-resolver']);
   // an empty search shows every host
   assert.deepEqual(shown(' , '), [...HOSTS].map(([host]) => host));
+});
+
+test('the hero sorts the way ui.py next_sort and display_order do', () => {
+  const ui = read('src/pinghue/ui.py');
+  const site = loadSiteModule();
+  // the same sortable columns, the same ones sorted up first, the same widths
+  const sortKeys = [...ui.match(/_SORT_KEYS: [^\n]*= \{\n([\s\S]*?)\n\}/)[1].matchAll(/^ {4}"(\w+)":/gm)].map((m) => m[1]);
+  assert.deepEqual(Object.keys(site.SORT_KEYS), sortKeys);
+  const ascendingFirst = [...ui.match(/_ASCENDING_FIRST = frozenset\(\{([^}]*)\}\)/)[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...site.ASCENDING_FIRST].sort(), ascendingFirst.sort());
+  const fixed = Object.fromEntries([...ui.match(/FIXED_COLUMN_WIDTHS = \{([\s\S]*?)\}/)[1].matchAll(/"(\w+)": (?:len\("([^"]*)"\)|(\d+))/g)]
+    .map(([, column, text, width]) => [column, text === undefined ? Number(width) : text.length]));
+  assert.deepEqual({ ...site.NARROWEST }, {
+    ...fixed,
+    host: Number(ui.match(/^MIN_HOST_WIDTH = (\d+)/m)[1]),
+    address: Number(ui.match(/^IPV4_ADDRESS_WIDTH = (\d+)/m)[1]),
+  });
+
+  // header clicks: worst first, reversed, then the input order again
+  const clicks = [];
+  let sort = [null, false];
+  for (let k = 0; k < 3; k++) clicks.push([...(sort = site.nextSort('loss', ...sort))]);
+  assert.deepEqual(clicks, [['loss', true], ['loss', false], [null, false]]);
+  assert.deepEqual([...site.nextSort('host', null, false)], ['host', false]);
+  assert.deepEqual([...site.nextSort('address', 'loss', true)], ['address', false]);
+  assert.deepEqual([...site.nextSort('mode', 'avg', true)], ['avg', true]);
+  assert.equal(site.columnLabel('host', 'host', false), 'host ▲');
+  assert.equal(site.columnLabel('loss', 'loss', true), 'loss ▼');
+  assert.equal(site.columnLabel('jitter', 'jitter', true), 'jitter▼');
+  assert.equal(site.columnLabel('avg', 'loss', true), 'avg');
+
+  const shown = (rows, column, descending, field, query = '') =>
+    [...site.displayOrder(rows, column, descending, query)].map((i) => rows[i][field]);
+  // the demo's addresses by value, not as text
+  const hosts = [...site.HOSTS].map(([host, address]) => ({ host, address }));
+  assert.deepEqual(shown(hosts, 'address', false, 'address'), ['8.8.8.8', '10.0.0.10', '10.0.1.20', '10.0.2.30', '192.168.1.1', '192.168.50.10']);
+  assert.deepEqual(shown(hosts, 'address', true, 'host', '10.0'), ['api-gw', 'db-primary', 'core-sw-1']);
+  // names in natural order, after IP addresses
+  const names = ['host-10', 'Host-2', '10.0.0.1', 'host-9'].map((host) => ({ host, address: '' }));
+  assert.deepEqual(shown(names, 'host', false, 'host'), ['10.0.0.1', 'Host-2', 'host-9', 'host-10']);
+  // states worst first in the fleet summary's order, then reversed
+  const states = ['healthy', 'down', 'pending', 'intermittent'].map((state, k) => ({ host: `h${k}`, address: '', state }));
+  assert.deepEqual(shown(states, 'state', true, 'state'), ['down', 'intermittent', 'pending', 'healthy']);
+  assert.deepEqual(shown(states, 'state', false, 'state'), ['healthy', 'pending', 'intermittent', 'down']);
+  // a host with nothing to sort by stays last both ways; ties keep their order
+  const loss = [[0, 'a'], [null, 'b'], [100, 'c'], [0, 'd'], [50, 'e']].map(([value, host]) => ({ host, address: '', loss: value }));
+  assert.deepEqual(shown(loss, 'loss', true, 'host'), ['c', 'e', 'a', 'd', 'b']);
+  assert.deepEqual(shown(loss, 'loss', false, 'host'), ['a', 'd', 'e', 'c', 'b']);
 });
 
 test('the hero title bar carries the ui.py fleet summary', () => {
