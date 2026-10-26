@@ -31,8 +31,8 @@ see Website below); `node scripts/site-version.mjs` keeps its version current.
 
 ## Website
 
-`docs/` is the published site (pinghue.com): GitHub Pages behind Cloudflare
-(proxied DNS). Every push to `main` that touches `docs/` deploys, gated by
+`docs/` is the published site (pinghue.com): GitHub Pages, with DNS at
+Cloudflare in DNS-only mode (records not proxied). Every push to `main` that touches `docs/` deploys, gated by
 `tests/site_pages.test.mjs`. Do not keep working notes in `docs/`.
 
 What the page is made of (redesign of 2026-10, recorded in `DESIGN.md`):
@@ -71,12 +71,14 @@ What the page is made of (redesign of 2026-10, recorded in `DESIGN.md`):
 - Every shipped raster carries its origin: a PNG `tEXt` chunk, or a `.json`
   sidecar next to a WebP.
 
-`scripts/gen-readme-assets.sh` writes the README screenshot and
-`docs/assets/pinghue-screenshot.webp` (needs `cwebp`: `brew install webp`).
-The README links those files, so they stay in `docs/assets/` although the
-site itself no longer shows them.
+`scripts/gen-readme-assets.sh` writes the README demo GIF and screenshot PNG,
+plus `docs/assets/pinghue-screenshot.webp` (needs `cwebp`: `brew install
+webp`). The README embeds the GIF and PNG from `docs/assets/`, so they stay
+there although the site itself no longer shows them; nothing links the WebP.
 
-Cloudflare settings that live outside the repo (zone `pinghue.com`):
+Cloudflare settings that live outside the repo (zone `pinghue.com`). They take
+effect only while the records are proxied; with DNS-only records GitHub Pages
+serves every file with `cache-control: max-age=600`:
 
 - Web Analytics (RUM) auto-injection is **off**. The site CSP is
   `script-src 'self'`, so an injected beacon is blocked and only produces

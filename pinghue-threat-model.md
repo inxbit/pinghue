@@ -6,8 +6,8 @@ PingHue is a local, unprivileged Python CLI/TUI that performs outbound ICMP or
 TCP probes and optionally writes a JSON report. It does not expose a listener,
 remote API, authentication system, database, or multi-tenant service boundary.
 The principal security concerns are trustworthy operator-visible evidence,
-bounded processing of target inventories, safe local-file handling, least-
-privilege ICMP guidance, and integrity of the release path.
+bounded processing of target inventories, safe local-file handling,
+least-privilege ICMP guidance, and integrity of the release path.
 
 The runtime controls the highest-value abuse paths by sanitizing rendered and
 exported text, bounding target and retained-sample counts, containing resolver
@@ -68,7 +68,7 @@ Open questions:
 | Run state -> JSON path | Metadata, statistics, recent samples | 100,000-sample run-wide retention cap; private mode; descriptor-verified path handling; effective-user ownership for FIFOs and overwritten files; owner-only FIFO permissions in private mode; pre-run path check; schema tests |
 | Git tag -> release workflow | Source commit and package artifacts | Signed annotated-tag identity/target checks; main ancestry; exact-commit validation; protected environment; OIDC; attestations |
 | Dependency metadata -> package indexes | Locked requirements and advisory queries | Hash-enforced installs; narrow runtime ranges; Dependabot and scheduled audits |
-| Docs source -> GitHub Pages | Static HTML/CSS/JS and assets, one same-origin video | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; self-only CSP with no inline script or style (`media-src 'self'` admits only the hero clip in `docs/media/`); Cloudflare edge script injection (Web Analytics beacon) disabled so the self-only CSP holds |
+| Docs source -> GitHub Pages | Static HTML/CSS/JS and assets, one same-origin video | Pinned actions; read-only build job; scoped deploy permissions; static contract tests; self-only CSP with no inline script or style (`media-src 'self'` admits only the hero clip in `docs/media/`); no CDN edge in the request path (Cloudflare DNS-only), so nothing can inject a script past the self-only CSP; if the records are proxied again, Web Analytics auto-injection must stay off |
 
 ## Assets and objectives
 
@@ -138,8 +138,8 @@ A symlink, FIFO, device, socket, oversized file, or invalid UTF-8 file could
 block or redirect parsing. The parser opens without following symlinks where
 supported, verifies the opened descriptor is a regular file, performs bounded
 reads, and reports encoding errors without a traceback. Lines end only at
-`\n`, `\r\n`, or a lone `\r`, so vertical tabs, form feeds, file/group/
-record separators, NEL, and Unicode line/paragraph separators cannot split one
+`\n`, `\r\n`, or a lone `\r`, so vertical tabs, form feeds,
+file/group/record separators, NEL, and Unicode line/paragraph separators cannot split one
 line into several targets or shift line numbers and the line limit; they stay
 in the value, where target validation rejects control characters and display
 sanitization escapes the rest.
@@ -283,7 +283,7 @@ release gate.
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |
 | TM-008 | Vulnerable/malicious dependency | Hash locks, narrow ranges, Dependabot, three-lock audit | New advisories and index compromise remain external | Medium |
-| TM-009 | Static-site supply-chain change | Static assets, contract test, pinned actions, scoped deploy job, no edge-injected scripts (Cloudflare RUM off) | Compromised maintainer review remains possible | Low |
+| TM-009 | Static-site supply-chain change | Static assets, contract test, pinned actions, scoped deploy job, no edge-injected scripts (Cloudflare DNS-only; RUM off if re-proxied) | Compromised maintainer review remains possible | Low |
 
 ## Required security invariants
 
