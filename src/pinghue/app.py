@@ -58,6 +58,17 @@ UI_REFRESH_INTERVAL = 0.5
 # Lookups that are already done (IP literals) drain without suspending; give
 # input and rendering a turn this often while starting their probe loops.
 RESOLUTION_YIELD_EVERY = 256
+# Terminals such as iTerm2 send these number pad keys without their text, and
+# Textual then reports them as named keys with no character to type.
+NUMBER_PAD_CHARACTERS = {
+    "decimal": ".",
+    "subtract": "-",
+    "add": "+",
+    "multiply": "*",
+    "divide": "/",
+    "equal": "=",
+    "separator": ",",
+}
 
 
 def _note_probe_loop_failure(target: TargetRun, task: asyncio.Task[None]) -> None:
@@ -612,6 +623,13 @@ class PinghueTextualApp(App[None]):
         self._focus_target_table()
 
     def on_key(self, event: Key) -> None:
+        if event.key in NUMBER_PAD_CHARACTERS:
+            search = self.query_one("#search", Input)
+            if search.has_focus:
+                search.insert_text_at_cursor(NUMBER_PAD_CHARACTERS[event.key])
+                event.prevent_default()
+            return
+
         if event.key not in {"up", "down"}:
             return
 

@@ -14,6 +14,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 ### Fixed
 
 - TUI: in iTerm2, the mouse wheel, clicks, and the scroll bar now work as soon as the TUI starts. Before, they did nothing until the window was resized whenever neither `TERM_PROGRAM` nor `LC_TERMINAL` named iTerm2: Textual's smooth scrolling asked for in-band resize reports, which iTerm2 does not send until a resize, and read mouse positions in pixels without them. PingHue now turns smooth scrolling off by default; `TEXTUAL_SMOOTH_SCROLL=1` turns it back on.
+- TUI: the number pad's `.`, `-`, `+`, `*`, `/`, `=` and `,` keys now type into the search box. In iTerm2 they typed nothing, so an address typed on the number pad lost its dots; its digits already worked.
 
 ## 7.0.0 - 2026-10-23
 
