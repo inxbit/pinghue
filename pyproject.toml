@@ -48,7 +48,7 @@ dev = [
 pinghue = "pinghue.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/inxbit/pinghue"
+Homepage = "https://pinghue.com"
 Repository = "https://github.com/inxbit/pinghue"
 Issues = "https://github.com/inxbit/pinghue/issues"
 Changelog = "https://github.com/inxbit/pinghue/blob/main/CHANGELOG.md"

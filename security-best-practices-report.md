@@ -92,13 +92,13 @@ Operational guidance: accept output only after PingHue exits successfully and
 the JSON validates, then rotate it separately. The README, changelog, and threat
 model state both tradeoffs explicitly.
 
-### BP-003 — New target cap requires a major release (Compatibility gate)
+### BP-003 — Target cap required a major release (Compatibility gate, shipped in 5.0.0)
 
-Runs now reject more than 5,000 unique targets and retain at most 100,000 recent
+Runs reject more than 5,000 unique targets and retain at most 100,000 recent
 samples across all targets. The bounds prevent unbounded task/history growth,
-but the new target limit is an incompatible CLI behavior. The changelog invokes
-the narrowly scoped resource-safety exception to the deprecation window and
-requires the next major release; it must not ship as a patch or minor version.
+but the target limit was an incompatible CLI behavior. The changelog invoked
+the narrowly scoped resource-safety exception to the deprecation window, and
+the cap shipped in the 5.0.0 major release rather than a patch or minor version.
 
 ## Resolved findings
 

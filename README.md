@@ -92,7 +92,7 @@ pinghue -p 443 example.com
 pinghue -p 1 127.0.0.1 -c 1 --no-tui
 pinghue --output maintenance.json 1.1.1.1 example.com
 pinghue --output maintenance.json --overwrite 1.1.1.1 example.com
-pinghue --host-label maintenance-window --output maintenance.json 1.1.1.1
+pinghue --host-label maintenance-window --output window.json 1.1.1.1
 ```
 
 Host files are plain text. Blank lines and `#` comments are ignored. Inline comments
@@ -136,7 +136,7 @@ internal-db.corp
 
 The supported platform contract is macOS and Linux on Python 3.11 through 3.14. CI runs on both macOS and Linux for every supported Python version. Python 3.10 reached end of life in October 2026, and 6.0.0 dropped support for it.
 
-The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows and other POSIX platforms are outside the declared support scope unless explicitly added later.
+The TUI assumes an ANSI-capable terminal with Unicode glyph support. Windows, and Unix-like platforms other than macOS and Linux (such as the BSDs), are outside the declared support scope unless explicitly added later.
 
 ## Stability Policy
 
@@ -148,9 +148,9 @@ A narrowly scoped safety or security limit may be enforced without that deprecat
 
 Starting with `1.0.0`, release versions follow semantic versioning: patch releases are bug fixes, minor releases may add compatible behavior, and major releases are reserved for breaking CLI or JSON changes.
 
-`2.0.0` changes the default `--output` behavior: existing regular files are preserved unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
+Since `2.0.0`, `--output` preserves an existing regular file unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
 
-The next major release uses the security exception above for `--output` paths through which another local user could read the report: it refuses an existing FIFO owned by another user, an existing FIFO that group or other users can open in the default `private` output mode, and an `--overwrite` target owned by another user (see [JSON Output](#json-output)). It uses the same exception for host files, whose lines end only at `\n`, `\r\n`, or a lone `\r`: a host file that separates targets with vertical tabs, form feeds, file/group/record separators, or NEL is refused as an invalid target, and Unicode line and paragraph separators no longer split a line (see [Quick Start](#quick-start)). The same release treats `--output ./-` as a file named `-` in the current directory; only a bare `-` writes the report to stdout.
+`6.0.0` used the security exception above for `--output` paths through which another local user could read the report: it refuses an existing FIFO owned by another user, an existing FIFO that group or other users can open in the default `private` output mode, and an `--overwrite` target owned by another user (see [JSON Output](#json-output)). It used the same exception for host files, whose lines end only at `\n`, `\r\n`, or a lone `\r`: a host file that separates targets with vertical tabs, form feeds, file/group/record separators, or NEL is refused as an invalid target, and Unicode line and paragraph separators no longer split a line (see [Quick Start](#quick-start)). Since that release, `--output ./-` names a file called `-` in the current directory; only a bare `-` writes the report to stdout.
 
 ## Modes
 
@@ -185,8 +185,6 @@ Pass `--tui` to start the TUI even though stdout is not a terminal, for example
 when a wrapper redirects stdout but stderr is still your terminal. The TUI
 draws on stderr, so with stderr closed (for example `2>&-`) it does not start
 and pinghue exits with status `1`; line output does not need stderr and runs.
-Before 7.0.0 the TUI started whenever `--no-tui` was not given, with a warning
-on stderr when stdout was not a terminal.
 
 Example no-TUI output:
 
@@ -196,7 +194,7 @@ Example no-TUI output:
 2026-05-14T18:32:12.420000+00:00 api.internal timeout latency=-
 ```
 
-Each line is written as soon as its probe result lands, also when stdout is a
+Each line is written as soon as its probe result lands, even when stdout is a
 pipe or a file. If the reader goes away (for example `| head`), the run stops as
 if interrupted and still writes `--output`. Any other failure to write a line,
 such as a full disk, stops the run the same way after a warning on stderr.
@@ -214,7 +212,7 @@ pinghue [OPTIONS] [TARGET ...]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `TARGET ...` | none | Hostnames or IP addresses to probe, up to 253 characters each. Required unless `--check` is used. |
+| `TARGET ...` | none | Hostnames or IP addresses to probe, up to 253 characters each. Required unless `-f` supplies targets or `--check` is used. |
 | `-f, --file PATH` | none | Read targets from a non-symlink plain-text host file. Blank lines and full-line/inline `#` comments are ignored. |
 | `-p, --port PORT` | ICMP | Enable TCP connect checks against `PORT`. Valid range: `1-65535`. |
 | `--ipv4` | off | Force IPv4 resolution/probing. |
@@ -231,10 +229,10 @@ pinghue [OPTIONS] [TARGET ...]
 | `--output-mode {private,umask}` | `private` | Permissions for the `--output` file: `private` (`0600`, owner only) or `umask` (honor the process umask). `private` also refuses an existing FIFO that group or other users can open. |
 | `--no-samples` | off | Emit empty per-target `samples` arrays in JSON output. |
 | `--concurrency N` | automatic | Maximum concurrent probes, `1-1024`. A probe holds its slot until the reply or the timeout, so the default is sized from the run: enough slots for every target to time out once per probe cycle (`targets × timeout ÷ max(interval, timeout + 0.1)`, plus 25% headroom), at least `64`. In ICMP mode an in-flight probe holds no thread or socket of its own, so the default may reach `5000`, a slot for every target at the 5,000-target cap, and keeps every host on its interval even when all of them are silent. In TCP mode every in-flight probe holds a socket, so the default stops at `1024` (about 1,100 silent targets when the timeout equals the interval); past that, silent targets stretch every target's cadence and a shorter `--timeout` restores it. In TCP mode pinghue also raises its soft open-file limit to fit the concurrency, never past the hard limit, and otherwise lowers the concurrency with a warning on stderr. |
-| `--jitter-threshold MS` | `50.0` | Mark jitter as attention-worthy above this RFC 3550 interarrival jitter, in milliseconds. |
+| `--jitter-threshold MS` | `50.0` | Mark a target `intermittent` (latched for the run) and its jitter cell amber when RFC 3550 interarrival jitter exceeds this many milliseconds. |
 | `--fail-threshold COUNT` | `3` | Classify a previously responsive host as down after this many consecutive failures; all-failure runs are down immediately. |
-| `--fail-on-any-down` | off | Exit `3` when any target finishes down. |
-| `--fail-on-all-down` | off | Exit `3` only when all targets finish down. `--fail-on-down` remains a compatibility alias. |
+| `--fail-on-any-down` | off | Exit `3` when any target finishes in a state other than `healthy` or `intermittent`. |
+| `--fail-on-all-down` | off | Exit `3` only when no target finishes `healthy` or `intermittent`. `--fail-on-down` remains a compatibility alias. |
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline` (an alias of `bar`), or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
 | `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics, up to 253 characters. Defaults to the first target when provided. |
@@ -252,9 +250,11 @@ pinghue [OPTIONS] [TARGET ...]
 | `2` | Usage error: unknown flag or invalid value. |
 | `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
 
-A target the run never probed, for example one still `resolving` (shown as
-`pending` in the TUI) when `--duration` ends, has no evidence that it is up,
-so both `--fail-on-*` options count it as down.
+Both `--fail-on-*` options count a target as down unless it finishes `healthy`
+or `intermittent`: `down`, `dns_failure`, `permission_denied`, `error`, and a
+target the run never probed, for example one still `resolving` (shown as
+`pending` in the TUI) when `--duration` ends, which has no evidence that it is
+up.
 
 ## TUI Controls
 
@@ -268,7 +268,7 @@ so both `--fail-on-*` options count it as down.
 | `B` | Probe all hosts immediately. |
 | `/` | Search hosts and addresses. `Enter` returns to the table with the search kept, `Esc` clears it. |
 
-Click a column header to sort by it. The first click sorts host names and addresses up and every other column worst first (down hosts, full loss, the slowest replies), the second click reverses it, and the third goes back to the input order. Host names and addresses sort by value: `10.1.9.9` comes before `10.1.10.10`, `host-2` before `host-10`, IPv4 before IPv6 and both before names. Rows with nothing to sort by, such as a host with no reply yet, stay last either way, and sorting by address also shows the address column. The sort follows the values as they change, so a host that starts losing packets moves up on the next refresh while the selection stays on its row. Header clicks need a terminal that passes mouse clicks through (in tmux, `set -g mouse on`).
+Click any column header except mode and history to sort by it. The first click sorts host names and addresses up and every other column worst first (down hosts, full loss, the slowest replies), the second click reverses it, and the third goes back to the input order. Host names and addresses sort by value: `10.1.9.9` comes before `10.1.10.10`, `host-2` before `host-10`, IPv4 before IPv6 and both before names. Rows with nothing to sort by, such as a host with no reply yet, stay last either way, and sorting by address also shows the address column. The sort follows the values as they change, so a host that starts losing packets moves up on the next refresh while the selection stays on its row. Header clicks need a terminal that passes mouse clicks through (in tmux, `set -g mouse on`).
 
 `/` opens a search line under the table: only hosts whose name or address contains what you type stay in the table, ignoring case, with a count of how many match. A full IP address matches only that address, so `10.0.0.5` does not also show `10.0.0.50`. Separate several hosts with spaces or commas to watch them together, for example `10.0.0.5 10.0.0.9 db-2`. A search and a sort work together, and the header summary keeps counting the whole fleet.
 
@@ -282,9 +282,9 @@ With thousands of hosts, rows on screen refresh every half second, state changes
 
 The default history style is a fixed-scale colored bar:
 
-- Green bar: successful probe.
-- Amber bar: successful probe above the slow-latency threshold.
-- Red `.` / `·`: timeout, loss, or down state.
+- Green bar: successful probe at or below 100 ms.
+- Amber bar: successful probe slower than 100 ms (a fixed threshold).
+- Red `·`: failed probe (timeout, unreachable, or error).
 - Amber `!`: TCP refused.
 
 Successful latency uses `▁▂▃▄▅▆▇█`.
@@ -318,9 +318,7 @@ In the TUI, a host whose address is known but that has no probe result yet (just
 
 | Role | Hex | Used for |
 | --- | --- | --- |
-| Background | `#101418` | Terminal body and empty space. |
-| Panel | `#151b22` | Table surface and primary content areas. |
-| Header | `#1b2630` | Title bars and footer bands. |
+| Background | `#101418` | Terminal body, table surface, and empty space. |
 | Border | `#2a313a` | Table outlines and separators. |
 | Text | `#e6edf3` | Normal readable values. |
 | Muted | `#8ea0b8` | Labels, secondary text, and inactive chrome. |
@@ -328,6 +326,8 @@ In the TUI, a host whose address is known but that has no probe result yet (just
 | Amber | `#f2cc60` | Slow latency, high jitter, intermittent state, and TCP refused markers. |
 | Red | `#ff7b72` | Loss, down state, timeouts, and failed history markers. |
 | Selection Blue | `#58a6ff` | Focus accents and selected-row treatment. |
+
+The title bar and the key footer use Textual's default dark theme.
 
 ## Doctor
 
@@ -360,11 +360,11 @@ The doctor also reports the open-file limit, which bounds TCP mode only. Every i
 
 ## JSON Output
 
-`--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. Symlinks, sockets, multiply linked regular files, and other unsupported special nodes are never replaced. Existing character devices and FIFOs are written directly only when they can be opened safely as the same node. This is the breaking `2.0.0` CLI change for scripts that previously reused the same output file. The schema lives at `schemas/output-v1.schema.json`, and an example lives at `examples/pinghue-output-example.json`.
+`--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. Symlinks, sockets, multiply linked regular files, and other unsupported special nodes are never replaced. Existing character devices and FIFOs are written directly only when they can be opened safely as the same node. The schema lives at [`schemas/output-v1.schema.json`](https://github.com/inxbit/pinghue/blob/main/schemas/output-v1.schema.json), and an example lives at [`examples/pinghue-output-example.json`](https://github.com/inxbit/pinghue/blob/main/examples/pinghue-output-example.json).
 
-In a shared directory such as `/tmp`, another local user can create the report path before PingHue does. A FIFO is written only when it is owned by the effective user, and `--overwrite` refuses a regular file owned by anyone else; character devices are accepted regardless of owner, because the only one an unprivileged user can create is the driverless `0:0` whiteout device on Linux, which is refused. In the default `private` output mode a FIFO is also written only when its permissions give group and other users no access: `mkfifo` under the usual umask `022` creates mode `0644`, which lets every local user open it and read the report, so create it with `mkfifo -m 600`, or pass `--output-mode umask` to accept its permissions as they are. The bits are checked when PingHue opens the FIFO, and a `chmod` does not revoke a reader that opened the FIFO, or was waiting to open it, while group or other users had access, so remove a FIFO that was ever open to them and recreate it with `mkfifo -m 600` instead of changing its mode. On macOS a `/dev/fd/N` path names one of the run's own descriptors, and PingHue judges the file open on it. A pipe, which process substitution passes, is accepted whatever its fixed permission bits show, because it has no name that other users could open it by; a named FIFO behind the descriptor, as in `--output /dev/fd/3 3>report.fifo`, is judged by its own permissions like any other FIFO. These refusals exit with status 1 and write nothing. PingHue checks the output path before probing starts, so a path it would refuse, an existing node or directory it cannot write, or a parent that is not a directory is reported at once instead of after the run, and checks again when it writes the report. The directory itself is not checked: a user who owns it, or can write to it without the sticky bit, can still replace a finished report, so keep evidence in a directory that only you control.
+In a shared directory such as `/tmp`, another local user can create the report path before pinghue does. A FIFO is written only when it is owned by the effective user, and `--overwrite` refuses a regular file owned by anyone else; character devices are accepted regardless of owner, because the only one an unprivileged user can create is the driverless `0:0` whiteout device on Linux, which is refused. In the default `private` output mode a FIFO is also written only when its permissions give group and other users no access: `mkfifo` under the usual umask `022` creates mode `0644`, which lets every local user open it and read the report, so create it with `mkfifo -m 600`, or pass `--output-mode umask` to accept its permissions as they are. The bits are checked when pinghue opens the FIFO, and a `chmod` does not revoke a reader that opened the FIFO, or was waiting to open it, while group or other users had access, so remove a FIFO that was ever open to them and recreate it with `mkfifo -m 600` instead of changing its mode. On macOS a `/dev/fd/N` path names one of the run's own descriptors, and pinghue judges the file open on it. A pipe, which process substitution passes, is accepted whatever its fixed permission bits show, because it has no name that other users could open it by; a named FIFO behind the descriptor, as in `--output /dev/fd/3 3>report.fifo`, is judged by its own permissions like any other FIFO. These refusals exit with status 1 and write nothing. pinghue checks the output path before probing starts, so a path it would refuse, an existing node or directory it cannot write, or a parent that is not a directory is reported at once instead of after the run, and checks again when it writes the report. The directory itself is not checked: a user who owns it, or can write to it without the sticky bit, can still replace a finished report, so keep evidence in a directory that only you control.
 
-New report creation is no-clobber and first tries to hard-link a complete temporary report into place atomically. On filesystems without hardlink support (for example exFAT and some FUSE mounts), it falls back to an exclusive create and copy: ordinary errors and handled interrupts remove that fallback file, but an abrupt process or system failure can leave a partial new report. Explicitly overwriting an existing regular file uses a descriptor-verified in-place rewrite so a path race cannot replace a symlink, socket, FIFO, or device node; that path is also not crash-atomic. Evidence workflows should accept a report only after PingHue exits successfully and the JSON parses, then rotate it as a separate step.
+New report creation is no-clobber and first tries to hard-link a complete temporary report into place atomically. On filesystems without hardlink support (for example exFAT and some FUSE mounts), it falls back to an exclusive create and copy: ordinary errors and handled interrupts remove that fallback file, but an abrupt process or system failure can leave a partial new report. Explicitly overwriting an existing regular file uses a descriptor-verified in-place rewrite so a path race cannot replace a symlink, socket, FIFO, or device node; that path is also not crash-atomic. Evidence workflows should accept a report only after pinghue exits successfully and the JSON parses, then rotate it as a separate step.
 
 ```sh
 pinghue -f hosts.txt --duration 180 --output maintenance.json
@@ -396,7 +396,7 @@ The `run.host` field defaults to `local` to avoid leaking workstation hostnames.
 - local output paths selected by the operator
 - release workflow integrity
 
-See `pinghue-threat-model.md`, `security-best-practices-report.md`, and `SECURITY.md`.
+See the [threat model](https://github.com/inxbit/pinghue/blob/main/pinghue-threat-model.md), the [security review](https://github.com/inxbit/pinghue/blob/main/security-best-practices-report.md), and [SECURITY.md](https://github.com/inxbit/pinghue/blob/main/SECURITY.md).
 
 ## Release Channels
 
@@ -427,4 +427,4 @@ Those maintainer tools are intentionally not part of the installed package.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](https://github.com/inxbit/pinghue/blob/main/LICENSE).
