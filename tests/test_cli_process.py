@@ -69,6 +69,10 @@ def _stop(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is None:
         proc.kill()
         proc.wait(timeout=EXIT_TIMEOUT)
+    # Pipes left open warn as unclosed files when collected.
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            pipe.close()
 
 
 def _exit_reason(report: Path) -> str:

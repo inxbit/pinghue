@@ -234,15 +234,32 @@ async def test_tcp_probe_ignores_tcp_info_errors(monkeypatch: pytest.MonkeyPatch
     assert sample.latency_ms is not None
 
 
-async def _accept_and_close(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    writer.close()
+class _ClosingPeer:
+    """A loopback peer that closes every connection it accepts."""
+
+    def __init__(self) -> None:
+        self.closed_one = asyncio.Event()
+
+    async def accept_and_close(
+        self, _reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        writer.close()
+        await writer.wait_closed()
+        self.closed_one.set()
+
+    async def wait_for_close(self) -> None:
+        # Shut the server down only after it closed the probe's connection, or
+        # the accepted transport can outlive the event loop and warn as unclosed.
+        await asyncio.wait_for(self.closed_one.wait(), timeout=2.0)
 
 
 async def test_tcp_probe_real_loopback_connect() -> None:
-    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    peer = _ClosingPeer()
+    server = await asyncio.start_server(peer.accept_and_close, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     async with server:
         sample = await tcp_probe("127.0.0.1", port, timeout_s=2.0)
+        await peer.wait_for_close()
 
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms is not None and 0 <= sample.latency_ms < 1000
@@ -250,13 +267,15 @@ async def test_tcp_probe_real_loopback_connect() -> None:
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="TCP_INFO is read on Linux")
 async def test_tcp_probe_real_loopback_excludes_event_loop_stall() -> None:
-    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    peer = _ClosingPeer()
+    server = await asyncio.start_server(peer.accept_and_close, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     async with server:
         probe = asyncio.create_task(tcp_probe("127.0.0.1", port, timeout_s=2.0))
         await asyncio.sleep(0)
         time.sleep(0.05)  # the loop stalls while the connect is in flight
         sample = await probe
+        await peer.wait_for_close()
 
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms is not None and sample.latency_ms < 25
@@ -264,7 +283,8 @@ async def test_tcp_probe_real_loopback_excludes_event_loop_stall() -> None:
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="TCP_INFO is read on Linux")
 async def test_tcp_probe_real_loopback_keeps_a_connect_finished_before_a_stalled_deadline() -> None:
-    server = await asyncio.start_server(_accept_and_close, "127.0.0.1", 0)
+    peer = _ClosingPeer()
+    server = await asyncio.start_server(peer.accept_and_close, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     async with server:
         probe = asyncio.create_task(tcp_probe("127.0.0.1", port, timeout_s=0.05))
@@ -273,6 +293,7 @@ async def test_tcp_probe_real_loopback_keeps_a_connect_finished_before_a_stalled
         # deadline before it can see that.
         time.sleep(0.2)
         sample = await probe
+        await peer.wait_for_close()
 
     assert sample.status == SampleStatus.OK
     assert sample.latency_ms is not None and sample.latency_ms < 25
