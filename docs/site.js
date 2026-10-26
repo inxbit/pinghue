@@ -181,6 +181,25 @@
     return parts;
   };
 
+  // ui.py search_matcher: the query splits at spaces and commas and a host
+  // matches when any term does. A full IP address matches that address
+  // exactly (10.0.0.5 is not 10.0.0.50); anything else matches part of the
+  // host name or its address, ignoring case. The hosts here have IPv4
+  // addresses only, so only IPv4 terms are read as addresses.
+  const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+  const searchMatcher = (query) => {
+    const terms = query.toLowerCase().split(/[\s,]+/).filter(Boolean);
+    const addresses = terms.filter((term) => IPV4.test(term));
+    const fragments = terms.filter((term) => !IPV4.test(term));
+    return ([host, address]) => {
+      if (!terms.length) return true;
+      const name = host.toLowerCase();
+      const addr = address.toLowerCase();
+      if (addresses.includes(name) || addresses.includes(addr)) return true;
+      return fragments.some((fragment) => name.includes(fragment) || addr.includes(fragment));
+    };
+  };
+
   const fmt = (n) => (n === null ? "-" : n.toFixed(2));
   const fmtLoss = (n) => n.toFixed(2) + "%";
   const clockAt = (t) => {
@@ -193,7 +212,8 @@
   if (typeof module === "object" && module.exports) {
     module.exports = {
       BUCKETS, SLOW_MS, JITTER_THRESHOLD, FAIL_THRESHOLD, HOSTS, START, HISTORY, RUN_SECONDS,
-      SUMMARY, buildRun, levelOf, glyphFor, toneFor, historyLabel, summaryParts, fmt, fmtLoss, clockAt,
+      SUMMARY, buildRun, levelOf, glyphFor, toneFor, historyLabel, summaryParts, searchMatcher, fmt, fmtLoss,
+      clockAt,
     };
     return;
   }
@@ -338,6 +358,10 @@
   const summary = doc.querySelector("[data-summary]");
   const note = doc.querySelector("[data-term-note]");
   const pauseBtn = doc.querySelector("[data-pause]");
+  const searchBar = doc.querySelector("[data-search]");
+  const searchInput = doc.querySelector("[data-search-input]");
+  const searchCount = doc.querySelector("[data-search-count]");
+  const clearKey = doc.querySelector('[data-key="Escape"]');
   const n = HOSTS.length;
   let elapsed = 0;
   let extra = HOSTS.map(() => 0);
@@ -347,8 +371,15 @@
   let quit = false;
   let paused = reduced;
   let timer = 0;
+  let searching = false;
+  let query = "";
 
   const tickOf = (i) => START + elapsed + extra[i];
+  // The rows the search shows, in table order.
+  const shownRows = () => {
+    const matches = searchMatcher(query);
+    return HOSTS.map((_, i) => i).filter((i) => matches(HOSTS[i]));
+  };
 
   const paintBars = (cell, history) => {
     let bars = cell.querySelector(".bars");
@@ -386,9 +417,13 @@
   const paint = () => {
     if (!tbody) return;
     const states = [];
+    const shown = shownRows();
+    if (searchCount) searchCount.textContent = `${shown.length} of ${n}`;
     Array.from(tbody.rows).forEach((tr, i) => {
       const cells = tr.cells;
       const tk = tickOf(i);
+      // ui.py: the header summary keeps counting the whole fleet
+      tr.hidden = !shown.includes(i);
       cells[1].textContent = showAddress ? HOSTS[i][1] : "";
       tr.classList.toggle("is-cursor", term && term.classList.contains("is-engaged") && i === cursor);
       if (since[i] > tk) {
@@ -579,6 +614,40 @@
     });
   };
 
+  const focusTable = () => {
+    if (term) term.focus({ preventScroll: true });
+  };
+
+  // app.py action_search and action_clear_search: "/" opens the search line
+  // and focuses it; esc clears it and goes back to the table, and does
+  // nothing while no search is open.
+  const openSearch = () => {
+    if (!searchBar || !searchInput) return;
+    searching = true;
+    searchBar.hidden = false;
+    if (clearKey) clearKey.hidden = false;
+    searchInput.focus({ preventScroll: true });
+    paint();
+  };
+  const clearSearch = () => {
+    if (!searching) return;
+    searching = false;
+    query = "";
+    searchInput.value = "";
+    searchBar.hidden = true;
+    if (clearKey) clearKey.hidden = true;
+    focusTable();
+    paint();
+  };
+
+  // The cursor moves over the rows the search shows, and wraps.
+  const step = (by) => {
+    const rows = shownRows();
+    if (!rows.length) return;
+    const at = rows.indexOf(cursor);
+    cursor = at < 0 ? rows[0] : rows[(at + by + rows.length) % rows.length];
+  };
+
   const press = (key) => {
     flash(key);
     if (key === "q") {
@@ -596,13 +665,22 @@
     }
     if (quit) return;
     if (term) term.classList.add("is-engaged");
+    if (key === "/") {
+      openSearch();
+      return;
+    }
+    if (key === "Escape") {
+      clearSearch();
+      return;
+    }
+    const onCursor = shownRows().includes(cursor);
     if (key === "a") showAddress = !showAddress;
-    else if (key === "r") since[cursor] = tickOf(cursor) + 1;
+    else if (key === "r" && onCursor) since[cursor] = tickOf(cursor) + 1;
     else if (key === "R") since = HOSTS.map((_, i) => tickOf(i) + 1);
-    else if (key === "b") extra[cursor] += 1;
+    else if (key === "b" && onCursor) extra[cursor] += 1;
     else if (key === "B") extra = extra.map((x) => x + 1);
-    else if (key === "ArrowDown") cursor = (cursor + 1) % n;
-    else if (key === "ArrowUp") cursor = (cursor - 1 + n) % n;
+    else if (key === "ArrowDown") step(1);
+    else if (key === "ArrowUp") step(-1);
     wrap();
     paint();
   };
@@ -615,11 +693,38 @@
   if (term) {
     term.addEventListener("keydown", (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.target !== term && e.target.closest("button")) return;
-      if (!["q", "a", "r", "R", "b", "B", "ArrowDown", "ArrowUp"].includes(e.key)) return;
+      // keys typed in the search line are text, not pinghue keys
+      if (e.target !== term && e.target.closest("button, [data-search]")) return;
+      if (e.key === "Escape" && !searching) return;
+      if (!["q", "a", "r", "R", "b", "B", "/", "Escape", "ArrowDown", "ArrowUp"].includes(e.key)) return;
       e.preventDefault();
       press(e.key);
     });
+    if (searchInput) {
+      searchInput.addEventListener("input", () => {
+        // app.py _show_new_view: a changed search starts from the top row
+        query = searchInput.value;
+        const rows = shownRows();
+        if (rows.length) cursor = rows[0];
+        paint();
+      });
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          press("Escape");
+        } else if (e.key === "Enter") {
+          // app.py on_input_submitted: Enter keeps the search and goes back
+          // to the table; an empty search is cleared instead
+          e.preventDefault();
+          if (query.trim()) focusTable();
+          else press("Escape");
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          focusTable();
+          press(e.key);
+        }
+      });
+    }
     term.addEventListener("focus", () => {
       term.classList.add("is-engaged");
       paint();

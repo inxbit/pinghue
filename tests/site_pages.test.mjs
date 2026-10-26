@@ -71,8 +71,9 @@ const tuiColumns = () => {
   assert.ok(block, 'COLUMN_KEYS not found in ui.py');
   return [...block[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
 };
-const tuiBindings = () => [...read('src/pinghue/app.py').matchAll(/Binding\("(\w)", "\w+", "([^"]+)"\)/g)]
-  .map(([, key, label]) => [key, label]);
+// [key, label] for every binding, the key as Textual's footer prints it.
+const tuiBindings = () => [...read('src/pinghue/app.py').matchAll(/Binding\("(\w+)", "\w+", "([^"]+)"(?:, key_display="([^"]+)")?\)/g)]
+  .map(([, key, label, display]) => [display ?? (key === 'escape' ? 'esc' : key), label]);
 const readmeNotList = () => {
   const section = read('README.md').match(/## What This Is Not\n\n([\s\S]*?)\n\n## /);
   assert.ok(section, 'README "What This Is Not" section missing');
@@ -97,7 +98,7 @@ const loadSiteModule = () => {
     setTimeout,
     clearTimeout,
   });
-  for (const name of ['buildRun', 'levelOf', 'glyphFor', 'toneFor', 'historyLabel', 'summaryParts', 'fmt', 'fmtLoss', 'clockAt', 'START', 'HISTORY', 'RUN_SECONDS', 'HOSTS', 'SUMMARY']) {
+  for (const name of ['buildRun', 'levelOf', 'glyphFor', 'toneFor', 'historyLabel', 'summaryParts', 'searchMatcher', 'fmt', 'fmtLoss', 'clockAt', 'START', 'HISTORY', 'RUN_SECONDS', 'HOSTS', 'SUMMARY']) {
     assert.ok(name in module.exports, 'site.js must export ' + name);
   }
   return module.exports;
@@ -278,12 +279,18 @@ test('the hero is the real TUI, labeled as a simulated run', () => {
 
   // Every key on the page is a real binding with its real label, in order.
   // They ship disabled, so without the script they are the TUI footer and nothing more.
-  const keys = [...term[0].matchAll(/<button class="key" type="button" data-key="(\w)" disabled><kbd>(\w)<\/kbd>([^<]+)<\/button>/g)]
-    .map(([, dataKey, key, label]) => {
-      assert.equal(dataKey, key);
+  const keys = [...term[0].matchAll(/<button class="key" type="button" data-key="([^"]+)" disabled( hidden)?><kbd>([^<]+)<\/kbd>([^<]+)<\/button>/g)]
+    .map(([, dataKey, hidden, key, label]) => {
+      // data-key is the key the visitor presses for it
+      assert.equal(dataKey, key === 'esc' ? 'Escape' : key);
+      // like app.py check_action, only the search's esc starts hidden
+      assert.equal(Boolean(hidden), key === 'esc');
       return [key, label];
     });
   assert.deepEqual(keys, tuiBindings());
+  // The search line under the table, closed until "/" opens it.
+  assert.match(term[0], /<div class="term-search" data-search hidden>\s*<span aria-hidden="true">\/<\/span>\s*<input class="term-search-input" type="text" aria-label="Search host names and addresses" placeholder="host or address, several with spaces"[^>]*data-search-input>\s*<span class="term-search-count" aria-live="polite" data-search-count><\/span>\s*<\/div>/);
+  assert.match(read('src/pinghue/app.py'), /Input\(placeholder="host or address, several with spaces", id="search"\)/);
 
   // The table repaints every second; it must not flood a screen reader, and
   // it says plainly that the run is simulated.
@@ -525,6 +532,23 @@ test('the no-JS hero rows are the simulated frame at START', () => {
   const site = loadSiteModule();
   assert.equal(site.clockAt(site.START), '02:31:04');
   assert.match(html, /<span class="term-clock" aria-hidden="true" data-clock>02:31:04<\/span>/);
+});
+
+test('the hero search matches the way ui.py search_matcher does', () => {
+  // the same separators as ui.py
+  assert.match(read('src/pinghue/ui.py'), /_SEARCH_SEPARATORS = re\.compile\(r"\[\\s,\]\+"\)/);
+  const { HOSTS, searchMatcher } = loadSiteModule();
+  const shown = (query) => [...HOSTS].filter(searchMatcher(query)).map(([host]) => host);
+  // a full IP address matches only that address
+  assert.deepEqual(shown('10.0.0.1'), []);
+  assert.deepEqual(shown('10.0.0.10'), ['core-sw-1']);
+  // anything else matches part of a host name or address, ignoring case
+  assert.deepEqual(shown('10.0'), ['core-sw-1', 'db-primary', 'api-gw']);
+  assert.deepEqual(shown('DB'), ['db-primary']);
+  // several terms show every host that matches any of them
+  assert.deepEqual(shown('db, 8.8.8.8 nas'), ['db-primary', 'backup-nas', 'dns-resolver']);
+  // an empty search shows every host
+  assert.deepEqual(shown(' , '), [...HOSTS].map(([host]) => host));
 });
 
 test('the hero title bar carries the ui.py fleet summary', () => {
