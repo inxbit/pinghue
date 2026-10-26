@@ -2094,6 +2094,23 @@ html:not(.js) .js-only {
   }
 }
 
+/* below the 320 px reflow floor (a folded Galaxy Fold is about 280 px): the
+   install commands tighten so their row fits instead of pushing the page out */
+@media (max-width: 319px) {
+  .hero-copy {
+    padding: 0 12px;
+  }
+
+  .cmd {
+    padding-left: 12px;
+    font-size: 13px;
+  }
+
+  .copy-btn {
+    margin-left: 4px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
