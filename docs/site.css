@@ -388,6 +388,7 @@ kbd {
 
 .term-bar,
 .term-body,
+.term-search,
 .term-keys {
   background: var(--tui-bg);
   border-inline: 1px solid var(--tui-line);
@@ -634,6 +635,55 @@ kbd {
 .bars .h7 { height: 87.5%; }
 .bars .h8 { height: 100%; }
 
+/* the TUI's search line (app.py #search-bar): "/", the query, "N of M" */
+.term-search {
+  display: flex;
+  align-items: center;
+  gap: max(8px, calc(12 * var(--u)));
+  padding: 0 calc(22 * var(--u)) max(14px, calc(18 * var(--u))) calc(23 * var(--u));
+  color: var(--tui-muted);
+  font-family: var(--mono);
+  font-size: max(14px, calc(20 * var(--u)));
+  line-height: max(20px, calc(26 * var(--u)));
+}
+
+.term-search[hidden],
+.key[hidden] {
+  display: none;
+}
+
+.term-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tui-text);
+  font: inherit;
+  caret-color: var(--blue);
+}
+
+/* a terminal line, not a form field: a rule under the query, not a ring */
+.term-search-input:focus-visible {
+  outline: none;
+  border-radius: 0;
+  box-shadow: 0 1px 0 var(--blue);
+}
+
+.term-search:focus-within > [aria-hidden] {
+  color: var(--blue);
+}
+
+.term-search-input::placeholder {
+  color: var(--tui-muted);
+  opacity: 0.7;
+}
+
+.term-search-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .term-keys {
   display: flex;
   flex-wrap: wrap;
@@ -649,8 +699,9 @@ kbd {
   font-family: var(--mono);
   font-size: max(13px, calc(17 * var(--u)));
   line-height: max(26px, calc(30 * var(--u)));
-  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);
-  mask-image: linear-gradient(to bottom, #000 62%, transparent);
+  /* fade only the padding under the last row, however many rows the keys wrap to */
+  -webkit-mask-image: linear-gradient(to bottom, #000 max(62%, calc(100% - max(32px, calc(44 * var(--u))))), transparent);
+  mask-image: linear-gradient(to bottom, #000 max(62%, calc(100% - max(32px, calc(44 * var(--u))))), transparent);
 }
 
 .key {
@@ -1787,6 +1838,10 @@ html:not(.js) .js-only {
     width: 5px;
     height: 5px;
     margin-bottom: 6px;
+  }
+
+  .term-search {
+    padding-inline: 16px;
   }
 
   .term-keys {

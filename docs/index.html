@@ -106,6 +106,11 @@
         </table>
         <p class="term-note" aria-live="polite" data-term-note></p>
       </div>
+      <div class="term-search" data-search hidden>
+        <span aria-hidden="true">/</span>
+        <input class="term-search-input" type="text" aria-label="Search host names and addresses" placeholder="host or address, several with spaces" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" data-search-input>
+        <span class="term-search-count" aria-live="polite" data-search-count></span>
+      </div>
       <div class="term-keys" role="group" aria-label="pinghue keys">
         <button class="key" type="button" data-key="q" disabled><kbd>q</kbd>Quit</button>
         <button class="key" type="button" data-key="a" disabled><kbd>a</kbd>Address</button>
@@ -113,6 +118,8 @@
         <button class="key" type="button" data-key="R" disabled><kbd>R</kbd>Reset all</button>
         <button class="key" type="button" data-key="b" disabled><kbd>b</kbd>Probe now</button>
         <button class="key" type="button" data-key="B" disabled><kbd>B</kbd>Probe all</button>
+        <button class="key" type="button" data-key="/" disabled><kbd>/</kbd>Search</button>
+        <button class="key" type="button" data-key="Escape" disabled hidden><kbd>esc</kbd>Clear search</button>
       </div>
       </div>
       <figcaption id="term-cap">A simulated run in the real pinghue TUI layout: same columns, states, latency scale and keys<span class="wide-only">, with addresses shown as if you had pressed <kbd>a</kbd></span><span class="narrow-only">; a narrow screen shows only some of the eleven columns</span>. The hosts are made up.<span class="js-only"> The keys work here too.</span></figcaption>
