@@ -834,13 +834,27 @@
     // app.py on_data_table_header_selected: a click on a sortable header
     // sorts by it (next_sort), and sorting by address shows the addresses.
     // The headers become buttons here, so without the script they stay text.
+    // column_label drops the space before the arrow where a column has no
+    // room for it; here the room is measured, since phones narrow the
+    // columns. The next column's text starts at the cell's edge, so a label
+    // that would leave less than one and a half characters free loses it.
     const paintHeaders = () => headers.forEach((th) => {
       const button = th.querySelector(".sort");
       if (!button) return;
       const column = button.getAttribute("data-column");
-      button.textContent = columnLabel(column, sortColumn, descending);
+      const label = columnLabel(column, sortColumn, descending);
+      button.textContent = label;
+      if (label.includes(" ") && th.clientWidth - button.offsetWidth < 1.5 * (button.offsetWidth / label.length)) {
+        button.textContent = label.replace(" ", "");
+      }
       if (column === sortColumn) th.setAttribute("aria-sort", descending ? "descending" : "ascending");
       else th.removeAttribute("aria-sort");
+    });
+    let headerFrame = 0;
+    window.addEventListener("resize", () => {
+      if (!sortColumn) return;
+      cancelAnimationFrame(headerFrame);
+      headerFrame = requestAnimationFrame(paintHeaders);
     });
     headers.forEach((th) => {
       const column = th.textContent;

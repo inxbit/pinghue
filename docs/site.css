@@ -777,6 +777,7 @@ kbd {
   padding: 0 calc(23 * var(--u)) max(32px, calc(40 * var(--u)));
   color: var(--muted);
   font-size: max(13px, calc(15 * var(--u)));
+  text-wrap: balance;
 }
 
 /* ------------------------------------------------ sections */
