@@ -95,6 +95,13 @@ a {
   text-decoration: none;
 }
 
+p,
+li,
+dd,
+figcaption {
+  text-wrap: pretty;
+}
+
 :focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 3px;
@@ -597,6 +604,11 @@ kbd {
   color: var(--tui-text);
 }
 
+/* the cell clips its text, so it stops clipping while its button has focus */
+.tui thead th:has(.sort:focus-visible) {
+  overflow: visible;
+}
+
 .tui tbody tr:first-child > * {
   height: max(40px, calc(49.6 * var(--u)));
   padding-top: max(8px, calc(10 * var(--u)));
@@ -703,7 +715,7 @@ kbd {
 
 .term-search-input::placeholder {
   color: var(--tui-muted);
-  opacity: 0.7;
+  opacity: 1;
 }
 
 .term-search-count {
@@ -919,8 +931,9 @@ pre.window-body code {
 
 /* the mini TUI tables in the modes panes */
 
+/* fits without scrolling from 700 px up; phones scroll it at 660 px */
 .tui.tui-mini {
-  min-width: 760px;
+  min-width: 620px;
   margin: 0;
   font-size: var(--fs-sm);
   line-height: 1.3;
@@ -940,15 +953,15 @@ pre.window-body code {
   padding-top: 6px;
 }
 
-.tui.tui-mini th:nth-child(1) { width: 15%; }
-.tui.tui-mini th:nth-child(2) { width: 10%; }
-.tui.tui-mini th:nth-child(3) { width: 12%; }
+.tui.tui-mini th:nth-child(1) { width: 12%; }
+.tui.tui-mini th:nth-child(2) { width: 12%; }
+.tui.tui-mini th:nth-child(3) { width: 9.5%; }
 .tui.tui-mini th:nth-child(4),
 .tui.tui-mini th:nth-child(5),
 .tui.tui-mini th:nth-child(6),
 .tui.tui-mini th:nth-child(7),
-.tui.tui-mini th:nth-child(8),
-.tui.tui-mini th:nth-child(9) { width: 7.6%; }
+.tui.tui-mini th:nth-child(8) { width: 8.3%; }
+.tui.tui-mini th:nth-child(9) { width: 9.5%; }
 .tui.tui-mini th:nth-child(10) { width: 6%; }
 
 .tui-mini .bars {
@@ -996,6 +1009,7 @@ pre.window-body code {
 .tab {
   min-height: 40px;
   padding: 0 18px;
+  white-space: nowrap;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -1765,6 +1779,19 @@ html:not(.js) .pane + .pane {
 .tui.tui-lost th:nth-child(3) { width: 17%; }
 .tui.tui-lost th:nth-child(4) { width: 20%; }
 
+/* phones drop "last", which is "-" here anyway, as the hero does */
+@media (max-width: 479px) {
+  .tui-lost th:nth-child(3),
+  .tui-lost td:nth-child(3) {
+    display: none;
+  }
+
+  .tui.tui-lost { font-size: 13px; }
+  .tui.tui-lost th:nth-child(1) { width: 31%; }
+  .tui.tui-lost th:nth-child(2) { width: 21%; }
+  .tui.tui-lost th:nth-child(4) { width: 25%; }
+}
+
 .tui-lost .bars {
   gap: 4px;
   height: 18px;
@@ -1982,6 +2009,18 @@ html:not(.js) .js-only {
     text-align: left;
   }
 
+  .copy-btn {
+    margin-left: 8px;
+  }
+
+  .lab-readout {
+    min-width: 0;
+  }
+
+  .tui.tui-mini {
+    min-width: 660px;
+  }
+
   .actions .btn {
     justify-content: center;
   }
@@ -2056,7 +2095,7 @@ html:not(.js) .js-only {
   .term .tui th:nth-child(1) { width: 28.5%; }
   .term .tui th:nth-child(3) { width: 26.5%; }
   .term .tui th:nth-child(4) { width: 14%; }
-  .term .tui th:nth-child(9) { width: 14%; }
+  .term .tui th:nth-child(9) { width: 16%; }
 
   .term .bars {
     gap: 1.5px;
@@ -2085,7 +2124,7 @@ html:not(.js) .js-only {
 
   .term .tui th:nth-child(1) { width: 33.5%; }
   .term .tui th:nth-child(3) { width: 31%; }
-  .term .tui th:nth-child(9) { width: 16.5%; }
+  .term .tui th:nth-child(9) { width: 18.5%; }
 }
 
 @media (max-width: 339px) {
@@ -2106,8 +2145,29 @@ html:not(.js) .js-only {
     font-size: 13px;
   }
 
-  .copy-btn {
-    margin-left: 4px;
+  /* the hero table keeps host, state and history; loss gives them its room */
+  .term .tui th:nth-child(9),
+  .term .tui td:nth-child(9) {
+    display: none;
+  }
+
+  .term .tui th:nth-child(1) { width: 40%; }
+  .term .tui th:nth-child(3) { width: 36%; }
+}
+
+@media (max-width: 359px) {
+  .tab {
+    padding: 0 12px;
+  }
+}
+
+@media (max-width: 339px) {
+  .lost {
+    padding-inline: 12px;
+  }
+
+  .lost-window .window-body {
+    padding-inline: 12px;
   }
 }
 

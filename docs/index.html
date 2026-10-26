@@ -9,6 +9,7 @@
   <meta name="theme-color" content="#08090a">
   <link rel="canonical" href="https://pinghue.com/">
   <link rel="icon" type="image/svg+xml" href="assets/pinghue-favicon.svg">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pinghue.com/">
@@ -78,7 +79,7 @@
     </div>
 
     <figure class="term" aria-labelledby="term-cap">
-      <div class="term-window" tabindex="0" data-term>
+      <div class="term-window" tabindex="0" role="group" aria-label="Live pinghue demo" data-term>
       <div class="term-bar">
         <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="term-head"><span class="term-title" aria-hidden="true">PingHUE v7.1.0</span><span class="term-summary" aria-hidden="true" data-summary>oldest 1.0s  <span class="t-red">1</span> down  <span class="t-amber">1</span> intermittent  <span class="t-green">4</span> healthy</span></span>
@@ -131,7 +132,7 @@
     <div class="wrap">
       <div class="section-head">
         <h2 id="modes-title">TUI when you watch, lines when you script</h2>
-        <p class="section-lede">One command, three ways to run it. Every mode probes your hosts concurrently, up to 1024 probes at a time with <code>--concurrency</code>, and keeps the same whole-run statistics.</p>
+        <p class="section-lede">One command, three ways to run it. Every mode probes your hosts concurrently and keeps the same whole-run statistics: by default ICMP gives every host its own probe slot (up to 5,000 hosts), and TCP runs up to 1024 probes at a time with <code>--concurrency</code>.</p>
       </div>
 
       <div class="panes">
@@ -184,7 +185,7 @@
 <span class="prompt">$</span> echo $?
 <span class="out">0</span></code></pre>
           </figure>
-          <p class="pane-note"><strong>For cron and CI.</strong> The default when stdout is not a terminal, <code>--no-tui</code> on one. One line per probe, exit code <code>3</code> when a <code>--fail-on-any-down</code> or <code>--fail-on-all-down</code> condition triggers, and <code>--output</code> for the report.</p>
+          <p class="pane-note"><strong>For cron and CI.</strong> Line output is the default when stdout is not a terminal; on a terminal, pass <code>--no-tui</code>. One line per probe, exit code <code>3</code> when a <code>--fail-on-any-down</code> or <code>--fail-on-all-down</code> condition triggers, and <code>--output</code> for the report.</p>
         </div>
       </div>
     </div>
@@ -254,7 +255,8 @@
     <span class="jk">"exit_reason"</span>: <span class="js">"deadline"</span>,
     <span class="jk">"samples_window"</span>: <span class="jn">1000</span>,
     <span class="jk">"probe"</span>: {
-      <span class="jk">"mode"</span>: <span class="js">"icmp"</span>, <span class="jk">"port"</span>: <span class="jn">null</span>, <span class="jk">"interval_s"</span>: <span class="jn">1.0</span>, <span class="jc">…</span>
+      <span class="jk">"mode"</span>: <span class="js">"icmp"</span>, <span class="jk">"port"</span>: <span class="jn">null</span>,
+      <span class="jk">"interval_s"</span>: <span class="jn">1.0</span>, <span class="jc">…</span>
     }
   },
   <span class="jk">"targets"</span>: [
@@ -265,7 +267,8 @@
       <span class="jk">"status"</span>: <span class="js c-amber">"intermittent"</span>,
       <span class="jk">"error"</span>: <span class="jn">null</span>,
       <span class="jk">"stats"</span>: {
-        <span class="jk">"sent"</span>: <span class="jn">180</span>, <span class="jk">"received"</span>: <span class="jn">176</span>, <span class="jk">"loss_pct"</span>: <span class="jn">2.22</span>,
+        <span class="jk">"sent"</span>: <span class="jn">180</span>, <span class="jk">"received"</span>: <span class="jn">176</span>,
+        <span class="jk">"loss_pct"</span>: <span class="jn">2.22</span>,
         <span class="jk">"min_ms"</span>: <span class="jn">20.11</span>, <span class="jk">"avg_ms"</span>: <span class="jn">64.07</span>,
         <span class="jk">"max_ms"</span>: <span class="jn">451.44</span>, <span class="jk">"jitter_ms"</span>: <span class="jn">23.59</span>
       },
@@ -305,7 +308,7 @@
         <div class="cmd cmd-row"><code>brew install inxbit/tap/pinghue</code><button class="copy-btn" type="button" data-copy="brew install inxbit/tap/pinghue" aria-label="Copy Homebrew command"><svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-check"/></svg></button></div>
         <div class="cmd cmd-row"><code>python -m pip install pinghue</code><button class="copy-btn" type="button" data-copy="python -m pip install pinghue" aria-label="Copy pip command"><svg class="icon i-copy" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-check"/></svg></button></div>
       </div>
-      <p class="install-note">macOS and Linux, Python 3.11 to 3.14. Run <code>pinghue --check</code> first: on Linux, ICMP may need a <code>ping_group_range</code> setting, or use TCP mode with <code>-p</code>.</p>
+      <p class="install-note">macOS and Linux, Python 3.11 to 3.14. Run <code>pinghue --check</code> first: on Linux, ICMP may need a <code>ping_group_range</code> setting, and TCP mode (<code>-p</code>) needs none.</p>
     </div>
     <div class="trace" data-trace="api-gw" aria-hidden="true"></div>
   </section>
@@ -318,7 +321,7 @@
     <nav class="footer-links" aria-label="Footer">
       <a href="https://github.com/inxbit/pinghue">GitHub</a>
       <a href="https://pypi.org/project/pinghue/">PyPI</a>
-      <a href="https://github.com/inxbit/pinghue/blob/main/SECURITY.md">Security model</a>
+      <a href="https://github.com/inxbit/pinghue/blob/main/SECURITY.md#security-model">Security model</a>
       <a href="https://github.com/inxbit/pinghue/blob/main/LICENSE">MIT license</a>
     </nav>
   </div>
