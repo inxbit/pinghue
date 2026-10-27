@@ -10,7 +10,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import pairwise
 from typing import Any
 
@@ -143,7 +143,7 @@ FULL_SWEEP_PASSES = 8
 MIN_ROWS_PER_PASS = 256
 VIEWPORT_MARGIN_ROWS = 4
 
-_NO_SAMPLE = datetime.max.replace(tzinfo=timezone.utc)
+_NO_SAMPLE = datetime.max.replace(tzinfo=UTC)
 
 
 def issue_styles(
@@ -1218,7 +1218,7 @@ class TargetTableRenderer:
         oldest = min(newest, default=_NO_SAMPLE)
         age = None
         if oldest is not _NO_SAMPLE:
-            current = datetime.now(timezone.utc) if now is None else now
+            current = datetime.now(UTC) if now is None else now
             age = max(0.0, (current - oldest).total_seconds())
         return FleetSummary(counts=dict(counts), oldest_result_age_s=age)
 

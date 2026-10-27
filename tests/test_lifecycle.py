@@ -11,7 +11,7 @@ import os
 import signal
 import sys
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -60,7 +60,7 @@ def no_tui_args(**overrides: object) -> SimpleNamespace:
 
 def ok_sample() -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=1.0,
         status=SampleStatus.OK,
     )

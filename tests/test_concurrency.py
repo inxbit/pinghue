@@ -2,7 +2,7 @@ import asyncio
 import statistics
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -139,13 +139,13 @@ async def test_default_concurrency_keeps_healthy_cadence_with_many_silent_target
         if address in silent_addresses:
             await asyncio.sleep(args.timeout)
             return ProbeSample(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 latency_ms=None,
                 status=SampleStatus.TIMEOUT,
                 error="Request timed out",
             )
         return ProbeSample(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=0.1,
             status=SampleStatus.OK,
         )

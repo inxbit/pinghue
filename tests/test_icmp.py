@@ -9,7 +9,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -1022,7 +1022,7 @@ def test_engine_belongs_to_one_loop_and_is_released_with_it() -> None:
 
 def as_sample(result: icmp.EchoResult) -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latency_ms=result.latency_ms,
         status=result.status,
         error=result.error,

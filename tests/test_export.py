@@ -7,7 +7,7 @@ import socket
 import stat
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -39,7 +39,7 @@ def build_target() -> TargetRun:
         error=None,
         samples=[
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
                 latency_ms=9.2,
                 status=SampleStatus.OK,
                 error=None,
@@ -56,8 +56,8 @@ def _private_fifo(path: Path, mode: int = 0o600) -> None:
 
 def _write(output_path: Path, **overrides: Any) -> None:
     kwargs: dict[str, Any] = dict(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1044,8 +1044,8 @@ def test_write_output_json_umask_mode_honors_umask(tmp_path: Path) -> None:
 
 def test_build_output_document_matches_schema() -> None:
     document = build_output_document(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1075,7 +1075,7 @@ def test_build_output_document_reports_samples_window_for_windowed_stats() -> No
     for index in range(MAX_TARGET_SAMPLES + 25):
         target.apply_sample(
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, index % 60, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, index % 60, tzinfo=UTC),
                 latency_ms=float(index),
                 status=SampleStatus.OK,
             ),
@@ -1084,8 +1084,8 @@ def test_build_output_document_reports_samples_window_for_windowed_stats() -> No
         )
 
     document = build_output_document(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="completed",
         probe=ProbeConfig(
@@ -1118,8 +1118,8 @@ def test_build_output_document_reports_effective_per_target_sample_window() -> N
     )
 
     document = build_output_document(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="completed",
         probe=ProbeConfig(
@@ -1140,8 +1140,8 @@ def test_write_output_json_can_omit_samples(tmp_path: Path) -> None:
 
     write_output_json(
         output_path,
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1166,8 +1166,8 @@ def test_write_output_json_refuses_to_replace_existing_file_by_default(tmp_path:
     with pytest.raises(FileExistsError, match="already exists"):
         write_output_json(
             output_path,
-            started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-            ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+            started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+            ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
             host="ops-laptop-04",
             exit_reason="user_quit",
             probe=ProbeConfig(
@@ -1190,8 +1190,8 @@ def test_write_output_json_allows_explicit_overwrite(tmp_path: Path) -> None:
 
     write_output_json(
         output_path,
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1213,8 +1213,8 @@ def test_write_output_json_allows_explicit_overwrite(tmp_path: Path) -> None:
 def test_write_output_json_writes_special_device_directly() -> None:
     write_output_json(
         Path("/dev/null"),
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1238,7 +1238,7 @@ def test_build_output_document_escapes_control_characters() -> None:
         error="target\x1b[2Jerror",
         samples=[
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
                 latency_ms=None,
                 status=SampleStatus.ERROR,
                 error="sample\x1b[2Jerror",
@@ -1247,8 +1247,8 @@ def test_build_output_document_escapes_control_characters() -> None:
     )
 
     document = build_output_document(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops-laptop-04",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1279,8 +1279,8 @@ def test_build_output_document_escapes_non_ascii_confusables() -> None:
     )
 
     document = build_output_document(
-        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+        started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+        ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
         host="ops\u2011host",
         exit_reason="user_quit",
         probe=ProbeConfig(
@@ -1326,8 +1326,8 @@ def test_write_output_json_preserves_existing_file_on_write_failure(
     with pytest.raises(OSError, match="disk full"):
         write_output_json(
             output_path,
-            started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=timezone.utc),
-            ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=timezone.utc),
+            started_at=datetime(2026, 5, 14, 18, 32, 11, 420000, tzinfo=UTC),
+            ended_at=datetime(2026, 5, 14, 18, 35, 11, 890000, tzinfo=UTC),
             host="ops-laptop-04",
             exit_reason="user_quit",
             probe=ProbeConfig(

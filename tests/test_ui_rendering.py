@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -60,7 +60,7 @@ from pinghue.ui import (
     truncate_middle,
 )
 
-T0 = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+T0 = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
 SLOW_MS = 100.0
 
 
@@ -984,7 +984,7 @@ async def test_rows_and_fleet_summary_follow_every_way_a_run_changes_a_target(
             return
         if target.target == "up.example":
             await probe_up.wait()
-            add(target, ProbeSample(datetime.now(timezone.utc), 5.0, SampleStatus.OK))
+            add(target, ProbeSample(datetime.now(UTC), 5.0, SampleStatus.OK))
         await stop_event.wait()
 
     async def fake_resolve_target_bounded(target: str, *_: Any, **__: Any) -> ResolvedTarget:
@@ -992,7 +992,7 @@ async def test_rows_and_fleet_summary_follow_every_way_a_run_changes_a_target(
 
     async def fake_probe_address(*_: Any, **__: Any) -> ProbeSample:
         await probe_late.wait()
-        return ProbeSample(datetime.now(timezone.utc), 5.0, SampleStatus.OK)
+        return ProbeSample(datetime.now(UTC), 5.0, SampleStatus.OK)
 
     monkeypatch.setattr(app_module, "resolve_run_target", fake_resolve)
     monkeypatch.setattr(app_module, "probe_target_loop", fake_probe_target_loop)

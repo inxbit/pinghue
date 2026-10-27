@@ -1,5 +1,5 @@
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -21,7 +21,7 @@ def test_sanitize_display_escapes_terminal_control_characters() -> None:
 
 def test_no_tui_output_escapes_target_and_error_controls(capsys) -> None:
     sample = ProbeSample(
-        timestamp=datetime(2026, 5, 14, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, tzinfo=UTC),
         latency_ms=None,
         status=SampleStatus.ERROR,
         error="bad\x1b[2Jerror",
@@ -75,7 +75,7 @@ HOSTILE_NAMES = [
 @pytest.mark.parametrize("show_address", [False, True])
 def test_tui_table_cells_escape_control_characters(show_address: bool) -> None:
     sample = ProbeSample(
-        timestamp=datetime(2026, 5, 14, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, tzinfo=UTC),
         latency_ms=None,
         status=SampleStatus.ERROR,
         error="bad\x1b[2Jerror",

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pinghue.history import render_history
 from pinghue.models import ProbeSample, SampleStatus
@@ -6,7 +6,7 @@ from pinghue.models import ProbeSample, SampleStatus
 
 def make_sample(status: SampleStatus, latency_ms: float | None = None) -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=latency_ms,
         status=status,
         error=None,
