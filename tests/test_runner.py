@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -58,7 +58,7 @@ def test_print_sample_routes_both_branches_to_given_stream() -> None:
         resolved_family=AddressFamily.IPV4,
     )
     sample = ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=2.0,
         status=SampleStatus.OK,
     )
@@ -95,7 +95,7 @@ async def test_run_writes_configured_host_label(
         _: object,
         __: ProbeMode,
     ) -> tuple[list[TargetRun], str, datetime, datetime]:
-        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
         return [], "completed", timestamp, timestamp
 
     def fake_write_output_json(_: Path, **kwargs: object) -> None:
@@ -124,7 +124,7 @@ async def test_run_fail_on_down_returns_nonzero_when_all_targets_down(
         _: object,
         __: ProbeMode,
     ) -> tuple[list[TargetRun], str, datetime, datetime]:
-        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
         return [target], "completed", timestamp, timestamp
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
@@ -146,7 +146,7 @@ async def test_run_fail_on_down_returns_zero_when_any_target_is_usable(
         _: object,
         __: ProbeMode,
     ) -> tuple[list[TargetRun], str, datetime, datetime]:
-        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
         return targets, "completed", timestamp, timestamp
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
@@ -168,7 +168,7 @@ async def test_run_fail_on_any_down_returns_nonzero_when_any_target_is_down(
         _: object,
         __: ProbeMode,
     ) -> tuple[list[TargetRun], str, datetime, datetime]:
-        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
         return targets, "completed", timestamp, timestamp
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
@@ -189,7 +189,7 @@ async def test_run_legacy_fail_on_down_fails_only_when_every_target_is_down(
         _: object,
         __: ProbeMode,
     ) -> tuple[list[TargetRun], str, datetime, datetime]:
-        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
         targets = [TargetRun(f"10.0.0.{n}", status=s) for n, s in enumerate(statuses, start=1)]
         return targets, "completed", timestamp, timestamp
 
@@ -209,7 +209,7 @@ def test_short_all_failed_run_is_down_and_trips_fail_on_any_down() -> None:
     for _ in range(2):  # fewer samples than the default fail_threshold of 3
         target.apply_sample(
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
                 latency_ms=None,
                 status=SampleStatus.TIMEOUT,
             ),
@@ -239,12 +239,12 @@ async def test_probe_once_caches_and_prioritizes_working_address(
         calls.append(address)
         if address == "192.0.2.1":
             return ProbeSample(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 latency_ms=None,
                 status=SampleStatus.TIMEOUT,
             )
         return ProbeSample(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=3.0,
             status=SampleStatus.OK,
         )
@@ -322,7 +322,7 @@ async def test_probe_once_attempts_dns_re_resolution_on_failure(
 
     async def fake_probe_address(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=10.0,
             status=SampleStatus.OK,
         )
@@ -378,7 +378,7 @@ async def test_initial_resolution_starts_cooldown_and_prevents_immediate_retry(
 
 def _timeout_sample() -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latency_ms=None,
         status=SampleStatus.TIMEOUT,
     )
@@ -434,7 +434,7 @@ async def test_probe_once_refreshes_stale_dns_after_repeated_address_failures(
         if address != "192.0.2.20":
             return _timeout_sample()
         return ProbeSample(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=2.0,
             status=SampleStatus.OK,
         )
@@ -813,7 +813,7 @@ async def _no_probe_loop(*_: object, **__: object) -> None:
 
 async def _ok_probe(*_: object, **__: object) -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         latency_ms=1.0,
         status=SampleStatus.OK,
     )

@@ -1,7 +1,7 @@
 import io
 import socket
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -9,7 +9,7 @@ from pinghue import doctor, probes
 from pinghue.limits import FdLimit
 from pinghue.models import AddressFamily, ProbeSample, SampleStatus
 
-_NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 10, 1, tzinfo=UTC)
 
 
 class FakeSocket:

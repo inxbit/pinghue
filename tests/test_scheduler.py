@@ -1,6 +1,6 @@
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -213,7 +213,7 @@ async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
 
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -247,7 +247,7 @@ async def test_run_no_tui_yields_after_slow_iteration(
 
     async def fake_probe_once(*_: object, **__: object) -> ProbeSample:
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -275,7 +275,7 @@ async def test_run_no_tui_probes_targets_independently_and_prints_as_results_lan
         if target is slow:
             await asyncio.sleep(0.3)
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -335,7 +335,7 @@ async def test_run_no_tui_skips_probes_when_stop_is_already_requested(
         nonlocal probe_calls
         probe_calls += 1
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -370,7 +370,7 @@ async def test_run_no_tui_reports_interrupted_when_count_final_probe_requests_st
         assert installed_stop_event is not None
         installed_stop_event.set()
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -417,7 +417,7 @@ async def test_run_no_tui_prints_probes_completed_before_interruption(
             raise AssertionError("unreachable")
 
         sample = ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -664,7 +664,7 @@ async def test_run_no_tui_passes_args_mode_and_semaphore_to_probe_once(
     async def fake_probe_once(*_: object, **kwargs: object) -> ProbeSample:
         probe_kwargs.append(set(kwargs))
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )
@@ -753,7 +753,7 @@ async def test_run_no_tui_caps_aggregate_retained_samples_across_targets(
     assert {run.samples.maxlen for run in runs} == {effective_window}
 
     retained_sample = ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=1.0,
         status=SampleStatus.OK,
     )
@@ -782,13 +782,13 @@ async def test_probe_once_fails_over_to_next_resolved_address(
         calls.append(address)
         if address == "192.0.2.1":
             return ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
                 latency_ms=None,
                 status=SampleStatus.UNREACHABLE,
                 error="unreachable",
             )
         return ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=UTC),
             latency_ms=3.0,
             status=SampleStatus.OK,
         )
@@ -828,13 +828,13 @@ async def test_probe_once_retains_primary_failure_when_all_addresses_fail(
         resolved_addresses=("192.0.2.1", "2001:db8::1"),
     )
     primary_failure = ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=None,
         status=SampleStatus.UNREACHABLE,
         error="primary unreachable",
     )
     alternate_failure = ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=UTC),
         latency_ms=None,
         status=SampleStatus.TIMEOUT,
         error="alternate timed out",

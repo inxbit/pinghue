@@ -20,7 +20,8 @@ def retained_samples_per_target(target_count: int) -> int:
     return min(MAX_TARGET_SAMPLES, max(1, MAX_TOTAL_RETAINED_SAMPLES // target_count))
 
 
-class StringEnum(str, Enum):
+# StrEnum would serialize the same; this keeps the established class and its explicit __str__.
+class StringEnum(str, Enum):  # noqa: UP042
     """Enum that serializes as its value."""
 
     def __str__(self) -> str:

@@ -7,7 +7,7 @@ Network is the only thing stubbed, so the tests stay hermetic and fast.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -49,7 +49,7 @@ def build_args(**overrides: object) -> SimpleNamespace:
 
 def _ok_sample() -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=5.0,
         status=SampleStatus.OK,
     )
@@ -407,7 +407,7 @@ async def test_pilot_a_sorted_table_follows_the_values_as_they_change() -> None:
         assert _hosts(table) == ["a.example", "b.example", "c.example"]
 
         lost = ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=UTC),
             latency_ms=None,
             status=SampleStatus.TIMEOUT,
         )

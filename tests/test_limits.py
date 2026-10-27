@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -292,7 +292,7 @@ def run_args(**overrides: object) -> SimpleNamespace:
 
 
 def finished_run() -> tuple[list[TargetRun], str, datetime, datetime]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return [], "completed", now, now
 
 

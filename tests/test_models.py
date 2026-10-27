@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pinghue.models import (
     MAX_TARGET_SAMPLES,
@@ -14,7 +14,7 @@ from pinghue.models import (
 
 def sample(status: SampleStatus, latency_ms: float | None = None) -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=latency_ms,
         status=status,
         error=None,
@@ -96,7 +96,7 @@ def test_classify_samples_marks_intermitent_when_any_loss_without_down() -> None
 def test_target_run_apply_sample_keeps_permission_denied_invariant() -> None:
     target = TargetRun("1.1.1.1")
     denied = ProbeSample(
-        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
         latency_ms=None,
         status=SampleStatus.ERROR,
         error="permission denied: socket",
@@ -124,7 +124,7 @@ def test_target_run_caps_sample_history_and_keeps_lifetime_stats_current() -> No
     for index in range(MAX_TARGET_SAMPLES + 5):
         target.apply_sample(
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, index % 60, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, index % 60, tzinfo=UTC),
                 latency_ms=float(index),
                 status=SampleStatus.OK,
             ),
@@ -146,7 +146,7 @@ def test_target_sample_clear_resets_cached_statistics() -> None:
         "1.1.1.1",
         samples=[
             ProbeSample(
-                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+                timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
                 latency_ms=10.0,
                 status=SampleStatus.OK,
             )

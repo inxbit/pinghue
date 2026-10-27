@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
@@ -397,7 +397,7 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
     connect the kernel finished within the timeout still counts when a
     stalled loop only got to it after the deadline.
     """
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
     loop = asyncio.get_running_loop()
     start = time.perf_counter()
     sock: socket.socket | None = None
@@ -406,7 +406,7 @@ async def tcp_probe(address: str, port: int, *, timeout_s: float) -> ProbeSample
         sock = _open_tcp_socket(address)
         try:
             await asyncio.wait_for(loop.sock_connect(sock, (address, port)), timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             in_time_rtt_ms = _handshake_rtt_within_ms(sock, timeout_s)
             if in_time_rtt_ms is None:
                 return ProbeSample(
@@ -454,7 +454,7 @@ async def icmp_probe(
     The engine reports ICMP destination-unreachable and time-exceeded errors
     that quote the probe as unreachable, apart from a timeout.
     """
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
     try:
         ip = ipaddress.ip_address(address.partition("%")[0])
     except ValueError:

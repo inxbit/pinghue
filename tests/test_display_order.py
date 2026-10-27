@@ -1,6 +1,6 @@
 """Row order for the TUI: header-click sorting and the / search filter."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pinghue.models import ProbeSample, SampleStatus, TargetRun, TargetStatus
 from pinghue.ui import column_label, display_order, next_sort
@@ -8,7 +8,7 @@ from pinghue.ui import column_label, display_order, next_sort
 
 def reply(latency_ms: float) -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime(2026, 10, 23, 18, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 10, 23, 18, 0, tzinfo=UTC),
         latency_ms=latency_ms,
         status=SampleStatus.OK,
     )
@@ -16,7 +16,7 @@ def reply(latency_ms: float) -> ProbeSample:
 
 def timeout() -> ProbeSample:
     return ProbeSample(
-        timestamp=datetime(2026, 10, 23, 18, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 10, 23, 18, 0, tzinfo=UTC),
         latency_ms=None,
         status=SampleStatus.TIMEOUT,
     )

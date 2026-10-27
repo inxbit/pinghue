@@ -5,7 +5,7 @@ import signal
 import socket
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -62,7 +62,7 @@ async def test_tui_duration_includes_time_elapsed_before_deadline_task(
     async def fake_wait_for(awaitable: Any, *, timeout: float) -> None:
         awaitable.close()
         waits.append(timeout)
-        raise asyncio.TimeoutError
+        raise TimeoutError
 
     async def fake_finish(reason: str) -> None:
         reasons.append(reason)
@@ -234,7 +234,7 @@ def test_reset_selected_recomputes_target_state(monkeypatch) -> None:
     )
     target.apply_sample(
         ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC),
             latency_ms=10.0,
             status=SampleStatus.OK,
         ),
@@ -243,7 +243,7 @@ def test_reset_selected_recomputes_target_state(monkeypatch) -> None:
     )
     target.apply_sample(
         ProbeSample(
-            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 14, 18, 32, 12, tzinfo=UTC),
             latency_ms=None,
             status=SampleStatus.TIMEOUT,
             error="timeout",
@@ -266,7 +266,7 @@ def test_reset_selected_recomputes_target_state(monkeypatch) -> None:
 
 def test_reset_all_recomputes_all_target_states(monkeypatch) -> None:
     app = PinghueTextualApp(args=build_args(), mode=ProbeMode.ICMP)
-    timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+    timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
     targets = [
         TargetRun(
             "1.1.1.1",
@@ -731,7 +731,7 @@ async def test_tui_count_waits_for_a_free_resolver_thread(monkeypatch) -> None:
 
     async def ok_probe(*_: Any, **__: Any) -> ProbeSample:
         return ProbeSample(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             latency_ms=1.0,
             status=SampleStatus.OK,
         )

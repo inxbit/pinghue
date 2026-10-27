@@ -11,7 +11,7 @@ import stat
 import sys
 import tempfile
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +37,7 @@ _DESCRIPTOR_DIRECTORY = "/dev/fd"
 
 def format_timestamp(value: datetime) -> str:
     """Return UTC RFC 3339 timestamp with millisecond precision."""
-    utc_value = value.astimezone(timezone.utc)
+    utc_value = value.astimezone(UTC)
     return utc_value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 

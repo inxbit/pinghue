@@ -11,7 +11,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TextIO
 
 from pinghue.config import RunConfig
@@ -171,7 +171,7 @@ async def _resolve_target_bounded(
             )
         except ResolverBusyError:
             return None
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _record_dns_outcome(target, failed=True, timed_out=True)
             return ResolvedTarget(
                 target,
@@ -393,7 +393,7 @@ async def probe_once(
                 sample = await _probe_address(address, args=args, mode=mode)
             except Exception as exc:
                 sample = ProbeSample(
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     latency_ms=None,
                     status=SampleStatus.ERROR,
                     error=f"Unexpected probe error: {exc}",
@@ -554,7 +554,7 @@ async def probe_target_loop(
             # Record an unexpected failure like any failed probe so the row
             # keeps updating and the run carries on instead of losing the loop.
             sample = ProbeSample(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 latency_ms=None,
                 status=SampleStatus.ERROR,
                 error=f"Unexpected probe error: {exc}",
@@ -590,7 +590,7 @@ async def probe_target_loop(
         )
         try:
             await asyncio.wait_for(immediate_event.wait(), timeout=wait_timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
         finally:
             immediate_event.clear()
@@ -606,7 +606,7 @@ def print_sample(
             # No lookup could run yet (resolver threads busy): no verdict to print.
             return
         print(
-            f"{datetime.now(timezone.utc).isoformat()} "
+            f"{datetime.now(UTC).isoformat()} "
             f"{target_text} dns_failure error={sanitize_display(target.error or '')}",
             file=out,
         )
@@ -798,7 +798,7 @@ async def run_no_tui(
 ) -> tuple[list[TargetRun], str, datetime, datetime]:
     loop = asyncio.get_running_loop()
     deadline_at = None if args.duration is None else loop.time() + args.duration
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     targets = pending_target_runs(args.targets)
     semaphore = asyncio.Semaphore(args.concurrency)
     stop_event = asyncio.Event()
@@ -830,7 +830,7 @@ async def run_no_tui(
         cleanup_signal_handlers()
         print_line.flush()
 
-    ended_at = datetime.now(timezone.utc)
+    ended_at = datetime.now(UTC)
     return targets, exit_reason, started_at, ended_at
 
 

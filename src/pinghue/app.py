@@ -6,7 +6,7 @@ import asyncio
 import gc
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
@@ -165,7 +165,7 @@ class PinghueTextualApp(App[None]):
         self.args_config = args
         self.mode = mode
         self.targets: list[TargetRun] = []
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
         self.ended_at = self.started_at
         self._deadline_at = None if args.duration is None else monotonic_time() + args.duration
         self.exit_reason = "user_quit"
@@ -383,7 +383,7 @@ class PinghueTextualApp(App[None]):
 
         try:
             await asyncio.wait_for(self._stop_event.wait(), timeout=remaining)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._finish("deadline")
 
     async def _finish_when_probe_tasks_complete(self) -> None:
@@ -399,7 +399,7 @@ class PinghueTextualApp(App[None]):
             return
 
         self._finishing = True
-        self.ended_at = datetime.now(timezone.utc)
+        self.ended_at = datetime.now(UTC)
         self.exit_reason = exit_reason
         # Stop first so no lookup that completes meanwhile starts a new loop,
         # then cancel outstanding lookups and every loop already started.
@@ -721,5 +721,5 @@ class PinghueApp:
         flush_or_discard_output(sys.stdout)
         # A signal before mount ends the app before it builds its target list.
         targets = app.targets or pending_target_runs(self.args.targets)
-        ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)
+        ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(UTC)
         return targets, app.exit_reason, app.started_at, ended_at
