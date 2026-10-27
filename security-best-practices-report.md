@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; verification evidence refreshed for 7.1.0 on 2026-10-26
+Review date: 2026-07-11; verification evidence refreshed for 7.1.1 on 2026-10-27
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -152,28 +152,28 @@ the cap shipped in the 5.0.0 major release rather than a patch or minor version.
 
 ## Verification evidence
 
-Refreshed for the 7.1.0 release candidate on 2026-10-26 (the 7.0.0 evidence
+Refreshed for the 7.1.1 release candidate on 2026-10-27 (the 7.1.0 evidence
 this section previously recorded is superseded):
 
-- Full tests: 738 passed and 8 skipped (Linux-only kernel features, a
+- Full tests: 744 passed and 8 skipped (Linux-only kernel features, a
   Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.16, with total branch-aware coverage of 94.28% against the 85% floor;
+  3.12.16, with total branch-aware coverage of 94.31% against the 85% floor;
   localhost TCP and Unix-socket cases executed. The same suite passed under
   CPython 3.11.15, the supported floor, and 3.14.10, each from fresh
   `--require-hashes` installs.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
-- Mypy strict mode: no issues across 16 runtime modules plus the sdist
+- Mypy strict mode: no issues across 17 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 26 Node tests passed. The 7.1.0 site change updates
+- Static site contract: 28 Node tests passed. The 7.1.1 site change updates
   the version strings.
 - Semgrep 1.182.0 Python, security-audit, and secrets rule packs: 0 findings
-  across 85 scanned files.
+  across 88 scanned files.
 - Bandit 1.9.4 recursive runtime/script scan: one low-severity B311 note for
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 146-commit history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 156-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -181,9 +181,9 @@ this section previously recorded is superseded):
   `--require-hashes` entry.
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
-- The final normalized sdist and wheel passed `twine check`; all 645 tests
+- The final normalized sdist and wheel passed `twine check`; all 651 tests
   shipped in the unpacked sdist passed against its own sources (8 skipped as
-  above); fresh wheel and sdist installs both reported `pinghue 7.1.0`
+  above); fresh wheel and sdist installs both reported `pinghue 7.1.1`
   through the console-script entry point and completed the localhost TCP
   smoke test, choosing line output without `--no-tui` because stdout was a
   pipe.
@@ -194,18 +194,16 @@ this section previously recorded is superseded):
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.1.0 is a
-minor release. The TUI can sort its rows by a clicked column header, and `/`
-opens a search box that filters the rows; the search text is matched in memory
-against host names and resolved addresses and is never written out or sent.
-The TUI now defaults `TEXTUAL_SMOOTH_SCROLL` to `0`, which only stops Textual
-asking the terminal for in-band resize reports, so the mouse works at startup
-in iTerm2, and the number pad's symbol keys type into the search box. The
-development and build locks take filelock 4.2.4 and setuptools 84.2.1, which
-close advisories pip-audit reported against the locked filelock 4.1.0 and
-setuptools 84.0.0; the runtime dependencies are unchanged. The release adds no
-input source, output path, privilege, or network behavior. No new finding was
-raised. The local candidate passed the security, QA, deterministic-artifact,
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.1.1 is a
+patch release. `--output -` and `--check` now stop quietly when nothing reads
+stdout any more, as line output already did: once a write fails because the
+reader has gone, PingHue points the stream at the null device so the exit-time
+flush cannot fail again, and any other write error still raises. Host-file,
+output-directory, and command-line error messages now name the path or value
+involved; the checks behind them and every exit code are unchanged. The
+release adds no input source, output path, privilege, or network behavior,
+and the runtime dependencies are unchanged. No new finding was raised. The
+local candidate passed the security, QA, deterministic-artifact,
 installed-artifact, and staged-formula gates.
 Publishing remains gated on release-PR review and exact-head CI.
 
