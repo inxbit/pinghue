@@ -118,6 +118,7 @@ test('GitHub Pages site ships the expected files', () => {
     'docs/assets/pinghue-favicon.svg',
     'docs/assets/pinghue-wordmark.svg',
     'docs/assets/pinghue-social-card.png',
+    'docs/assets/apple-touch-icon.png',
     'docs/assets/hero-poster.webp',
     'docs/fonts/zalando-sans-latin.woff2',
     'docs/fonts/ubuntu-sans-mono-latin.woff2',
@@ -127,6 +128,7 @@ test('GitHub Pages site ships the expected files', () => {
   }
   assert.equal(read('docs/CNAME').trim(), 'pinghue.com');
   assert.deepEqual(pngDimensions('docs/assets/pinghue-social-card.png'), { width: 1200, height: 630 });
+  assert.deepEqual(pngDimensions('docs/assets/apple-touch-icon.png'), { width: 180, height: 180 });
 
   // The previous builds are gone, not shadowing this one.
   for (const path of [
@@ -174,6 +176,7 @@ test('index.html carries the exact title, description, social and canonical meta
     '<meta name="theme-color" content="#08090a">',
     '<link rel="canonical" href="https://pinghue.com/">',
     '<link rel="icon" type="image/svg+xml" href="assets/pinghue-favicon.svg">',
+    '<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">',
     '<meta property="og:type" content="website">',
     '<meta property="og:url" content="https://pinghue.com/">',
     '<meta property="og:title" content="' + TITLE + '">',
@@ -427,6 +430,7 @@ test('404 page is a down host, styled by site.css', () => {
   // GitHub Pages serves this file at any missing path, so every reference is root-absolute.
   assert.match(notFound, /<link rel="stylesheet" href="\/site\.css">/);
   assert.match(notFound, /<link rel="icon" type="image\/svg\+xml" href="\/assets\/pinghue-favicon\.svg">/);
+  assert.match(notFound, /<link rel="apple-touch-icon" href="\/assets\/apple-touch-icon\.png">/);
   const refs = [...notFound.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
   for (const ref of refs) {
     assert.ok(ref === '#main' || ref.startsWith('/'), '404 reference must be root-absolute: ' + ref);

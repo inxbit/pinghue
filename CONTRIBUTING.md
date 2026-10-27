@@ -63,13 +63,17 @@ What the page is made of (redesign of 2026-10, recorded in `DESIGN.md`):
   It loads only when the hero is on screen, never under reduced motion unless
   the visitor presses play, and the pause button stops it with the live table.
 - `assets/pinghue-social-card.png` is rendered from `scripts/site-social-card.html`
-  by `scripts/gen-site-social-card.sh` (headless Chrome).
+  by `scripts/gen-site-social-card.sh` (headless Chrome), and
+  `assets/apple-touch-icon.png` (the favicon's bars, 180x180) from
+  `scripts/site-touch-icon.html` by `scripts/gen-site-touch-icon.sh`.
 - The site shows the released version in four places (the hero and 404 TUI
   titles, the JSON report, the social card). At release time,
   `node scripts/site-version.mjs` copies the `pyproject.toml` version into all
   of them and re-renders the card; the site test fails while any is stale.
-- Every shipped raster carries its origin: a PNG `tEXt` chunk, or a `.json`
-  sidecar next to a WebP.
+- Every shipped raster has a recorded origin: the WebPs a `.json` sidecar, the
+  PNGs rendered from HTML their generator above, and the README captures
+  `scripts/gen-readme-assets.sh` (the screenshot also carries its pinghue
+  version in a PNG `tEXt` chunk).
 
 `scripts/gen-readme-assets.sh` writes the README demo GIF and screenshot PNG,
 plus `docs/assets/pinghue-screenshot.webp` (needs `cwebp`: `brew install

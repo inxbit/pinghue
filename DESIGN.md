@@ -203,7 +203,7 @@ One centered column. The hero stacks nav, headline, lede, the install chip besid
 
 **The comp unit.** `--u` is one comp pixel: `min(100cqw, 1840px) / 1672`, measured on the body's inline-size container. Desktop stops growing at 1840px. Type sizes, control heights and paddings carry px floors through `max(Npx, calc(N * var(--u)))`; widths, gaps and the hero table's column widths scale freely. Below 1100px `--u` freezes at 0.658px (its 1100px value), so every size is continuous across the breakpoint and the floors carry smaller screens.
 
-**Rhythm.** Section padding is 150u on desktop, 96px under 1100px, 72px under 700px. Narrow screens hide terminal columns rather than shrink type: under 900px the hero table keeps host, state, last, loss and history; under 380px it drops last; the nav links leave under 700px and the GitHub button becomes a 44px icon with its label kept for assistive tech.
+**Rhythm.** Section padding is 150u on desktop, 96px under 1100px, 72px under 700px. Narrow screens hide terminal columns rather than shrink type: under 900px the hero table keeps host, state, last, loss and history; under 380px it drops last; under 320px it also drops loss; the 404's table drops last under 480px; the nav links leave under 700px and the GitHub button becomes a 44px icon with its label kept for assistive tech.
 
 ## Elevation & Depth
 
