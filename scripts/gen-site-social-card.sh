@@ -45,9 +45,9 @@ if data[:8] != b"\x89PNG\r\n\x1a\n":
 width, height = struct.unpack(">II", data[16:24])
 if (width, height) != (1200, 630):
     raise SystemExit(f"expected 1200x630, got {width}x{height}")
-print(f"wrote {path} ({width}x{height})")
 PY
 
 mv -f -- "$temp_output" "$output"
 temp_output=""
+printf 'wrote %s (1200x630)\n' "$output"
 trap - EXIT HUP INT TERM

@@ -8,11 +8,18 @@ on:
       - "docs/**"
       - "tests/site_pages.test.mjs"
       - ".github/workflows/pages.yml"
+      # the site test also reads these: the version, the generators, the card source
+      - "pyproject.toml"
+      - "scripts/site-*"
+      - "scripts/gen-site-*.sh"
   pull_request:
     paths:
       - "docs/**"
       - "tests/site_pages.test.mjs"
       - ".github/workflows/pages.yml"
+      - "pyproject.toml"
+      - "scripts/site-*"
+      - "scripts/gen-site-*.sh"
 permissions:
   contents: read
 

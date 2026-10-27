@@ -1,4 +1,5 @@
 import os
+import re
 import signal
 from pathlib import Path
 
@@ -50,6 +51,34 @@ def test_parse_host_file_rejects_symlink(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="regular file"):
         parse_host_file(link)
+
+
+def test_parse_host_file_reports_a_missing_file_as_not_found(tmp_path: Path) -> None:
+    # A mistyped path used to read "host file must be a regular file".
+    missing = tmp_path / "hosts.txt"
+
+    with pytest.raises(ValueError, match=f"^host file not found: {re.escape(str(missing))}$"):
+        parse_host_file(missing)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads files whatever their mode")
+def test_parse_host_file_names_the_file_it_cannot_read(tmp_path: Path) -> None:
+    # An unreadable file used to surface as a bare "[Errno 13] Permission denied".
+    path = tmp_path / "hosts.txt"
+    path.write_text("1.1.1.1\n", encoding="utf-8")
+    path.chmod(0)
+
+    expected = f"^cannot read host file {re.escape(str(path))}: Permission denied$"
+    with pytest.raises(ValueError, match=expected):
+        parse_host_file(path)
+
+
+def test_parse_host_file_names_the_file_with_a_target_that_is_too_long(tmp_path: Path) -> None:
+    path = tmp_path / "hosts.txt"
+    path.write_text("a" * (TARGET_MAXIMUM + 1) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=f"characters: {re.escape(str(path))} line 1$"):
+        parse_host_file(path)
 
 
 def test_parse_host_file_rejects_large_file(tmp_path: Path) -> None:

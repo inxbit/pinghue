@@ -2,6 +2,7 @@ import errno
 import fcntl
 import json
 import os
+import re
 import socket
 import stat
 import sys
@@ -791,12 +792,32 @@ def test_check_output_path_refuses_unwritable_directory(
 
     monkeypatch.setattr(os, "access", deny_directories)
 
-    with pytest.raises(PermissionError, match="output directory is not writable"):
+    # A missing parent is created at write time, so the message names it and
+    # the existing directory that would have to hold it; it used to name only
+    # that ancestor, for example "/".
+    missing_parent = re.escape(str(tmp_path / "missing"))
+    with pytest.raises(
+        PermissionError,
+        match=f"^cannot create output directory {missing_parent}: "
+        f"{re.escape(str(tmp_path))} is not writable$",
+    ):
         check_output_path(tmp_path / "missing" / "out.json")
     with pytest.raises(PermissionError, match="output directory is not writable"):
         check_output_path(existing, overwrite=True)
 
     assert checked == [tmp_path, existing, tmp_path]
+
+
+def test_check_output_path_names_the_directory_a_file_blocks(tmp_path: Path) -> None:
+    blocker = tmp_path / "report.json"
+    blocker.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(
+        NotADirectoryError,
+        match=f"^cannot create output directory {re.escape(str(blocker / 'day'))}: "
+        f"{re.escape(str(blocker))} is not a directory$",
+    ):
+        check_output_path(blocker / "day" / "out.json")
 
 
 def test_check_output_path_refuses_existing_node_it_cannot_write(

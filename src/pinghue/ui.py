@@ -98,7 +98,6 @@ ELLIPSIS = "…"
 # Host-name labels are kept whole when a long name is shortened.
 HOST_NAME_SEPARATORS = ".-_:"
 PENDING_LABEL = "pending"
-HOST_INDEX = COLUMN_KEYS.index("host")
 STATE_INDEX = COLUMN_KEYS.index("state")
 HISTORY_INDEX = COLUMN_KEYS.index("history")
 _COLUMN_KEY_OBJECTS = tuple(ColumnKey(key) for key in COLUMN_KEYS)

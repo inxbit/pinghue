@@ -6,6 +6,16 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Fixed
+
+- `--output -` and `--check` now stop quietly when nothing reads stdout any more (for example `| head -0`), as line output already did. Before, they printed a `BrokenPipeError` and exited `120`, or exited `1` for a large report.
+- A missing `-f` host file is reported as `host file not found`, a symlink as a symlink, and an unreadable file with the system's reason; a target that is too long names its file. Before, a missing file read `host file must be a regular file` and an unreadable one showed a bare `[Errno 13] Permission denied`.
+- `--output` into a missing directory under one that cannot be written names both (`cannot create output directory DIR: PARENT is not writable`), and a file standing where a parent directory should be is reported the same way instead of as a bare `[Errno 20] Not a directory`.
+
+### Changed
+
+- Clearer error messages for `--interval`, `--port`, `--output -` with the TUI, and a literal address that `--ipv4` or `--ipv6` excludes. `pinghue --check` aligns all its `[ok]` lines and reports a DNS failure in the same words as a run. Exit codes are unchanged.
+
 ## 7.1.0 - 2026-10-26
 
 ### Added

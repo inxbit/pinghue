@@ -1,6 +1,6 @@
 # Hash-pinned build backend for reproducible, supply-chain-verified builds.
 # Used by publish.yml and ci.yml: pip install --require-hashes -r requirements-build.txt
-# Regenerate from PyPI when bumping the build toolchain (see docs/release-checklist.md).
+# Regenerate from PyPI when bumping the build toolchain (see .github/release-checklist.md).
 
 build==1.6.1 \
     --hash=sha256:51cc11666391ab6f092070437ac747002ff46f3e4113a3622177ee6b488bfc53 \

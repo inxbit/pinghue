@@ -52,7 +52,7 @@ async def test_tui_duration_includes_time_elapsed_before_deadline_task(
     waits: list[float] = []
     reasons: list[str] = []
 
-    monkeypatch.setattr(app_module, "_monotonic_time", lambda: now, raising=False)
+    monkeypatch.setattr(app_module, "monotonic_time", lambda: now, raising=False)
     app = PinghueTextualApp(
         args=build_args(duration=10.0),
         mode=ProbeMode.ICMP,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import errno
 import os
 import random
 import signal
@@ -38,6 +37,7 @@ from pinghue.probes import (
     resolve_target,
     tcp_probe,
 )
+from pinghue.streams import discard_output, reader_is_gone
 
 ProbeOnce = Callable[[], Awaitable[ProbeSample | None]]
 SampleCallback = Callable[[TargetRun, ProbeSample | None], None]
@@ -82,7 +82,7 @@ _dns_refreshes: _DnsRefreshes = {}
 _dns_refreshes_loop: asyncio.AbstractEventLoop | None = None
 
 
-def _monotonic_time() -> float:
+def monotonic_time() -> float:
     return time.monotonic()
 
 
@@ -235,7 +235,7 @@ async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
         # Nothing to look up: skip the resolver queue so IP literals can be
         # probed at once instead of waiting behind slow DNS names.
         run = target_run_from_resolution(await resolve_target(target, family, numeric=args.numeric))
-        run._last_resolve_time = _monotonic_time()
+        run._last_resolve_time = monotonic_time()
         return run
     try:
         resolved = await _resolve_target_bounded(target, family, numeric=args.numeric)
@@ -254,7 +254,7 @@ async def resolve_run_target(target: str, args: RunConfig) -> TargetRun:
             # no cooldown the first probe iteration retries right away.
             return TargetRun(target=target, status=TargetStatus.RESOLVING)
         run = target_run_from_resolution(resolved)
-    run._last_resolve_time = _monotonic_time()
+    run._last_resolve_time = monotonic_time()
     return run
 
 
@@ -265,7 +265,7 @@ def apply_retained_sample_budget(runs: list[TargetRun]) -> None:
         run.samples = SampleWindow(run.samples, maxlen=samples_window)
 
 
-def _pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
+def pending_target_runs(targets: Sequence[str]) -> list[TargetRun]:
     """Return ordered unresolved targets for interrupted/deadline output."""
     runs = [TargetRun(target=target, status=TargetStatus.RESOLVING) for target in targets]
     apply_retained_sample_budget(runs)
@@ -292,7 +292,7 @@ async def _refresh_lookup(target: TargetRun, family: AddressFamily) -> ResolvedT
     finally:
         # Anchor the cooldown to completion, capacity misses included, so a
         # refresh queued behind the resolver bound is not reissued at once.
-        target._last_resolve_time = _monotonic_time()
+        target._last_resolve_time = monotonic_time()
 
 
 def _refresh_stale_resolution(target: TargetRun, *, args: RunConfig, now: float) -> None:
@@ -336,7 +336,7 @@ async def probe_once(
     mode: ProbeMode,
     semaphore: asyncio.Semaphore,
 ) -> ProbeSample | None:
-    now = _monotonic_time()
+    now = monotonic_time()
     if target.resolved_address:
         _refresh_stale_resolution(target, args=args, now=now)
     else:
@@ -362,7 +362,7 @@ async def probe_once(
             return None
         # Anchor the cooldown to completion so targets queued behind the
         # resolver semaphore do not immediately issue another lookup.
-        target._last_resolve_time = _monotonic_time()
+        target._last_resolve_time = monotonic_time()
         if resolved.error:
             target.status = TargetStatus.DNS_FAILURE
             target.error = resolved.error
@@ -544,7 +544,7 @@ async def probe_target_loop(
     probes_completed = 0
     probe_limit = args.count
     while not stop_event.is_set():
-        probe_started = _monotonic_time()
+        probe_started = monotonic_time()
         try:
             if probe_once_fn is None:
                 sample = await probe_once(target, args=args, mode=mode, semaphore=semaphore)
@@ -586,7 +586,7 @@ async def probe_target_loop(
         # when probes are slow (e.g. timeout > interval against a dead host).
         wait_timeout = _iteration_sleep(
             interval=args.interval,
-            iteration_elapsed=_monotonic_time() - probe_started,
+            iteration_elapsed=monotonic_time() - probe_started,
         )
         try:
             await asyncio.wait_for(immediate_event.wait(), timeout=wait_timeout)
@@ -729,47 +729,6 @@ async def _run_probe_loops_until_shutdown(
         await asyncio.gather(all_loops, stop_wait, *tasks, return_exceptions=True)
 
 
-def _discard_output(stream: TextIO) -> None:
-    """Point ``stream``'s descriptor at the null device once its reader is gone.
-
-    Python flushes standard streams at exit; without this, the unwritten tail
-    raises BrokenPipeError again there and the exit status becomes 120.
-    """
-    try:
-        descriptor = stream.fileno()
-        devnull = os.open(os.devnull, os.O_WRONLY)
-    except (AttributeError, OSError, ValueError):
-        return
-    try:
-        os.dup2(devnull, descriptor)
-    except OSError:
-        pass
-    finally:
-        os.close(devnull)
-
-
-def flush_or_discard_output(stream: TextIO | None) -> None:
-    """Flush ``stream``, or discard what it still holds when writing fails.
-
-    Restoring the terminal after a hangup leaves bytes that can never be
-    written; the flush at exit would then fail and turn the exit status into 120.
-    """
-    if stream is None:
-        return
-    try:
-        stream.flush()
-    except (OSError, ValueError):
-        _discard_output(stream)
-
-
-def _reader_is_gone(error: BaseException) -> bool:
-    """Return whether a write failed because nothing reads the stream any more."""
-    if isinstance(error, (BrokenPipeError, ConnectionResetError)):
-        return True
-    # A hung-up terminal fails writes with EIO.
-    return isinstance(error, OSError) and error.errno == errno.EIO
-
-
 def _warn(message: str) -> None:
     # A stderr closed at startup is None, and print(file=None) would write to
     # stdout, into the line output or a `--output -` JSON document: drop it.
@@ -827,9 +786,9 @@ class _SampleLinePrinter:
 
     def _close(self, stream: TextIO, error: BaseException) -> None:
         self._closed = True
-        if not _reader_is_gone(error):
+        if not reader_is_gone(error):
             _warn(f"could not write probe lines, stopping the run: {error}")
-        _discard_output(stream)
+        discard_output(stream)
         self._on_closed()
 
 
@@ -840,7 +799,7 @@ async def run_no_tui(
     loop = asyncio.get_running_loop()
     deadline_at = None if args.duration is None else loop.time() + args.duration
     started_at = datetime.now(timezone.utc)
-    targets = _pending_target_runs(args.targets)
+    targets = pending_target_runs(args.targets)
     semaphore = asyncio.Semaphore(args.concurrency)
     stop_event = asyncio.Event()
     cleanup_signal_handlers = install_stop_signal_handlers(stop_event)

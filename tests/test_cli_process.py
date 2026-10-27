@@ -427,3 +427,52 @@ def test_a_usage_error_prints_nothing_on_stdout_when_stderr_is_closed(
 
     assert result.returncode == 2
     assert result.stdout == b""
+
+
+def _run_into_a_closed_pipe(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run ``command`` with stdout on a pipe whose reader has already gone."""
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        return subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=writer,
+            stderr=subprocess.PIPE,
+            env=_cli_env(),
+            timeout=EXIT_TIMEOUT,
+            check=False,
+        )
+    finally:
+        os.close(writer)
+
+
+def test_output_dash_into_a_closed_pipe_stops_quietly() -> None:
+    # `pinghue ... --output - | head -0` printed "Exception ignored ...
+    # BrokenPipeError" and exited 120, or "error: [Errno 32] Broken pipe" and
+    # 1 for a larger report, where line output already stopped cleanly.
+    result = _run_into_a_closed_pipe(_cli_command("-c", "1", "--output", "-"))
+
+    assert result.returncode == 0
+    assert b"Broken pipe" not in result.stderr
+    assert b"Exception ignored" not in result.stderr
+
+
+def test_check_into_a_closed_pipe_keeps_its_exit_status() -> None:
+    # `pinghue --check | head -0` exited 120 with a traceback on stderr.
+    command = [sys.executable, "-m", "pinghue", "--check"]
+    baseline = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=_cli_env(),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    result = _run_into_a_closed_pipe(command)
+
+    assert result.returncode == baseline.returncode
+    assert b"Broken pipe" not in result.stderr
+    assert b"Exception ignored" not in result.stderr

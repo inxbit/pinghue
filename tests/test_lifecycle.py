@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 import pinghue.runner as runner
+import pinghue.streams as streams
 from pinghue.cli import parse_args
 from pinghue.models import (
     AddressFamily,
@@ -719,13 +720,13 @@ def test_flush_or_discard_output_drops_what_a_hung_up_terminal_cannot_take(
             raise OSError(errno.EIO, "Input/output error")
 
     discarded: list[object] = []
-    monkeypatch.setattr(runner, "_discard_output", discarded.append)
+    monkeypatch.setattr(streams, "discard_output", discarded.append)
     hung_up = HungUpStream()
     healthy = RecordingStream()
 
-    runner.flush_or_discard_output(hung_up)
-    runner.flush_or_discard_output(healthy)
-    runner.flush_or_discard_output(None)
+    streams.flush_or_discard_output(hung_up)
+    streams.flush_or_discard_output(healthy)
+    streams.flush_or_discard_output(None)
 
     assert discarded == [hung_up]
     assert healthy.flushes == 1
