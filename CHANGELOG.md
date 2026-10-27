@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 7.1.1 - 2026-10-27
+
 ### Fixed
 
 - `--output -` and `--check` now stop quietly when nothing reads stdout any more (for example `| head -0`), as line output already did. Before, they printed a `BrokenPipeError` and exited `120`, or exited `1` for a large report.
