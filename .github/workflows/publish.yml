@@ -370,11 +370,13 @@ jobs:
             index($0, heading) == 1 { found = 1; next }
             found && /^## / { exit }
             found { print }
-          ' "${RUNNER_TEMP}/CHANGELOG.md" | sed -e '/./,$!d' > "${RUNNER_TEMP}/release-notes.md"
-          if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/release-notes.md"; then
+          ' "${RUNNER_TEMP}/CHANGELOG.md" | sed -e '/./,$!d' > "${RUNNER_TEMP}/changelog-section.md"
+          if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/changelog-section.md"; then
             echo "::error::CHANGELOG.md in the sdist has no section for ${version}"
             exit 1
           fi
+          # Its ### headings sit under one ## heading, like GitHub's "What's Changed".
+          { printf '## Changelog\n\n'; cat "${RUNNER_TEMP}/changelog-section.md"; } > "${RUNNER_TEMP}/release-notes.md"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

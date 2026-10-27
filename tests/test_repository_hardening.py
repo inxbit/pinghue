@@ -267,6 +267,7 @@ def test_publish_workflow_verifies_tag_and_hash_pins_build() -> None:
     sdist_changelog = 'tar -xzOf "dist/pinghue-${version}.tar.gz" "pinghue-${version}/CHANGELOG.md"'
     assert sdist_changelog in workflow
     assert "has no section for ${version}" in workflow
+    assert "printf '## Changelog\\n\\n'" in workflow
     assert '--notes-file "${RUNNER_TEMP}/release-notes.md" --generate-notes' in workflow
 
 
