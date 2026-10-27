@@ -130,18 +130,8 @@ class _RunningSampleStats:
         received = self.received
         loss_pct = round(((sent - received) / sent * 100), 2) if sent else 0.0
 
-        if not received:
-            return SummaryStats(
-                sent=sent,
-                received=received,
-                loss_pct=loss_pct,
-                min_ms=None,
-                avg_ms=None,
-                max_ms=None,
-                jitter_ms=None,
-            )
-
-        if self.latency_min is None or self.latency_max is None:
+        # Any received sample sets min and max; the None checks narrow their types.
+        if not received or self.latency_min is None or self.latency_max is None:
             return SummaryStats(
                 sent=sent,
                 received=received,
@@ -230,8 +220,6 @@ class SampleWindow(Sequence[ProbeSample]):
         return self._items[index]
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, SampleWindow):
-            return list(self) == list(other)
         if isinstance(other, Sequence):
             return list(self) == list(other)
         return False
@@ -284,9 +272,7 @@ class TargetRun:
             fail_threshold=fail_threshold,
             jitter_threshold_ms=jitter_threshold_ms,
         )
-        self.error = (
-            sample.error if self.status in {TargetStatus.DOWN, TargetStatus.ERROR} else None
-        )
+        self.error = sample.error if self.status == TargetStatus.DOWN else None
 
 
 def summarize_samples(samples: Sequence[ProbeSample]) -> SummaryStats:
@@ -306,7 +292,12 @@ def classify_samples(
     fail_threshold: int,
     jitter_threshold_ms: float,
 ) -> TargetStatus:
-    """Classify recent probe samples into a final target state."""
+    """Classify a target from every probe of its run.
+
+    A loss, or jitter above ``jitter_threshold_ms``, latches the target
+    intermittent for the rest of the run; ``fail_threshold`` consecutive
+    failures, or no reply at all, make it down.
+    """
     if not samples:
         return TargetStatus.DOWN
 

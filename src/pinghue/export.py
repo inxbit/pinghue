@@ -18,6 +18,7 @@ from typing import Any
 from pinghue import __version__
 from pinghue.display import sanitize_display
 from pinghue.models import MAX_TARGET_SAMPLES, ProbeConfig, ProbeSample, TargetRun
+from pinghue.streams import write_text
 
 SCHEMA_VERSION = 1
 
@@ -406,11 +407,20 @@ def _require_writable_directory(output_path: Path) -> None:
     for directory in (output_path.parent, *output_path.parent.parents):
         if not os.path.lexists(directory):
             continue
+        parent = output_path.parent
         if not os.path.isdir(directory):
-            raise NotADirectoryError(f"output directory is not a directory: {directory}")
+            raise NotADirectoryError(_directory_error(parent, directory, "not a directory"))
         if not os.access(directory, os.W_OK | os.X_OK):
-            raise PermissionError(f"output directory is not writable: {directory}")
+            raise PermissionError(_directory_error(parent, directory, "not writable"))
         return
+
+
+def _directory_error(parent: Path, existing: Path, problem: str) -> str:
+    if existing == parent:
+        return f"output directory is {problem}: {existing}"
+    # A missing parent would be created at write time: name it and the
+    # existing directory that would have to hold it.
+    return f"cannot create output directory {parent}: {existing} is {problem}"
 
 
 def _require_writable_node(output_path: Path) -> None:
@@ -448,7 +458,8 @@ def check_output_path(
     output_path = Path(path)
     try:
         observed = os.lstat(output_path)
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
+        # NotADirectoryError: a file sits where a parent directory should be.
         _require_writable_directory(output_path)
         return
 
@@ -490,7 +501,7 @@ def write_output_json(
     output_text = json.dumps(document, indent=2, sort_keys=False) + "\n"
 
     if str(path) == "-":
-        sys.stdout.write(output_text)
+        write_text(sys.stdout, output_text)
         return
 
     output_path = Path(path)

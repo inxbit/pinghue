@@ -13,6 +13,7 @@ import pytest
 
 import pinghue.probes as probes
 import pinghue.runner as runner
+from pinghue.cli import parse_args
 from pinghue.models import (
     AddressFamily,
     ProbeMode,
@@ -30,7 +31,6 @@ def build_args(**overrides: object) -> SimpleNamespace:
         "concurrency": 1,
         "fail_on_all_down": False,
         "fail_on_any_down": False,
-        "fail_on_down": False,
         "fail_threshold": 3,
         "history_style": "bar",
         "host_label": "maintenance-window",
@@ -178,26 +178,28 @@ async def test_run_fail_on_any_down_returns_nonzero_when_any_target_is_down(
     assert exit_code == 3
 
 
-async def test_run_legacy_fail_on_down_matches_all_down_mode(
+async def test_run_legacy_fail_on_down_fails_only_when_every_target_is_down(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    targets = [
-        TargetRun("1.1.1.1", status=TargetStatus.DOWN),
-        TargetRun("8.8.8.8", status=TargetStatus.HEALTHY),
-    ]
+    # --fail-on-down is an alias of --fail-on-all-down. This test used to set
+    # a field nothing reads, so it passed whatever the flag did.
+    statuses: list[TargetStatus] = []
 
     async def fake_run_no_tui(
         _: object,
         __: ProbeMode,
     ) -> tuple[list[TargetRun], str, datetime, datetime]:
         timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=timezone.utc)
+        targets = [TargetRun(f"10.0.0.{n}", status=s) for n, s in enumerate(statuses, start=1)]
         return targets, "completed", timestamp, timestamp
 
     monkeypatch.setattr(runner, "run_no_tui", fake_run_no_tui)
+    args = parse_args(["--no-tui", "--fail-on-down", "10.0.0.1", "10.0.0.2"])
 
-    exit_code = await runner.run(build_args(fail_on_down=True), mode=ProbeMode.ICMP)
-
-    assert exit_code == 0
+    statuses[:] = [TargetStatus.DOWN, TargetStatus.DOWN]
+    assert await runner.run(args, mode=ProbeMode.ICMP) == 3
+    statuses[:] = [TargetStatus.DOWN, TargetStatus.HEALTHY]
+    assert await runner.run(args, mode=ProbeMode.ICMP) == 0
 
 
 def test_short_all_failed_run_is_down_and_trips_fail_on_any_down() -> None:
@@ -345,7 +347,7 @@ async def test_initial_resolution_starts_cooldown_and_prevents_immediate_retry(
     async def initial_failure(*_: object, **__: object) -> ResolvedTarget:
         return ResolvedTarget("service.example", None, None, "not found")
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: 5.0, raising=False)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: 5.0, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", initial_failure)
     args = build_args(targets=["service.example"])
 
@@ -360,7 +362,7 @@ async def test_initial_resolution_starts_cooldown_and_prevents_immediate_retry(
         retry_calls += 1
         return ResolvedTarget("service.example", None, None, "still missing")
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: 5.5, raising=False)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: 5.5, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", unexpected_retry)
 
     sample_result = await runner.probe_once(
@@ -437,7 +439,7 @@ async def test_probe_once_refreshes_stale_dns_after_repeated_address_failures(
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: 11.0, raising=False)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: 11.0, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", refreshed_resolution)
     monkeypatch.setattr(runner, "_probe_address", new_address_answers)
     args = build_args(fail_threshold=2, targets=["service.example"])
@@ -483,7 +485,7 @@ async def test_failed_stale_dns_refresh_is_rate_limited(
         return ResolvedTarget("service.example", None, None, "temporary DNS failure")
 
     clock = 11.0
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: clock, raising=False)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: clock, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", failed_resolution)
     monkeypatch.setattr(runner, "_probe_address", _timeout_probe)
     args = build_args(fail_threshold=2, targets=["service.example"])
@@ -557,7 +559,7 @@ async def test_stale_dns_refresh_without_an_answer_keeps_the_cooldown(
         raise error
 
     clock = 11.0
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: clock, raising=False)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: clock, raising=False)
     monkeypatch.setattr(runner, "resolve_target", busy_resolver)
     monkeypatch.setattr(runner, "_probe_address", _timeout_probe)
     target = _down_target("busy-refresh.example")
@@ -599,7 +601,7 @@ async def test_stale_dns_refresh_is_dropped_once_the_known_address_recovers(
     async def recovering_probe(*_: object, **__: object) -> ProbeSample:
         return await _ok_probe() if recovered else _timeout_sample()
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: 11.0, raising=False)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: 11.0, raising=False)
     monkeypatch.setattr(runner, "_resolve_target_bounded", moved_resolution)
     monkeypatch.setattr(runner, "_probe_address", recovering_probe)
     target = _down_target("recovering.example")
@@ -1353,11 +1355,11 @@ async def test_probe_once_waits_out_the_names_backoff_before_retrying(
     runner._get_dns_retries()["backoff.example"] = runner._DnsRetry(timeouts=2, delay_s=30.0)
     args = build_args(targets=["backoff.example"])
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: 120.0)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: 120.0)
     await runner.probe_once(target, args=args, mode=ProbeMode.ICMP, semaphore=asyncio.Semaphore(1))
     assert lookups == 0
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: 131.0)
+    monkeypatch.setattr(runner, "monotonic_time", lambda: 131.0)
     await runner.probe_once(target, args=args, mode=ProbeMode.ICMP, semaphore=asyncio.Semaphore(1))
     assert lookups == 1
 

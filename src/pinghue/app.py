@@ -23,17 +23,17 @@ from pinghue import __version__
 from pinghue.config import RunConfig
 from pinghue.models import ProbeMode, SampleWindow, TargetRun, TargetStatus
 from pinghue.runner import (
-    _monotonic_time,
-    _pending_target_runs,
     apply_retained_sample_budget,
     first_probe_delay,
-    flush_or_discard_output,
     install_stop_signal_callback,
+    monotonic_time,
+    pending_target_runs,
     probe_target_loop,
     record_probe_loop_failure,
     resolve_run_target,
     stagger_window,
 )
+from pinghue.streams import flush_or_discard_output
 from pinghue.ui import (
     CELL_PADDING,
     COLUMN_KEYS,
@@ -167,7 +167,7 @@ class PinghueTextualApp(App[None]):
         self.targets: list[TargetRun] = []
         self.started_at = datetime.now(timezone.utc)
         self.ended_at = self.started_at
-        self._deadline_at = None if args.duration is None else _monotonic_time() + args.duration
+        self._deadline_at = None if args.duration is None else monotonic_time() + args.duration
         self.exit_reason = "user_quit"
         self.show_address = False
         self._sort_column: str | None = None
@@ -260,7 +260,7 @@ class PinghueTextualApp(App[None]):
         ``self.targets``; the table renderer tracks rows by object identity, so
         the next refresh re-renders exactly the rows that changed.
         """
-        run_start = _monotonic_time()
+        run_start = monotonic_time()
         window = stagger_window(
             interval=self.args_config.interval,
             remaining=None if self._deadline_at is None else self._deadline_at - run_start,
@@ -337,7 +337,7 @@ class PinghueTextualApp(App[None]):
                     index=index,
                     count=len(self.targets),
                     window=window,
-                    elapsed=_monotonic_time() - run_start,
+                    elapsed=monotonic_time() - run_start,
                 ),
             )
         )
@@ -375,7 +375,7 @@ class PinghueTextualApp(App[None]):
         if deadline_at is None:
             return
 
-        remaining = max(0.0, deadline_at - _monotonic_time())
+        remaining = max(0.0, deadline_at - monotonic_time())
         if remaining == 0:
             if not self._stop_event.is_set():
                 await self._finish("deadline")
@@ -688,7 +688,10 @@ class PinghueTextualApp(App[None]):
 
 
 class PinghueApp:
-    """Small wrapper around the Textual app entry point."""
+    """Run one PinghueTextualApp for runner.run: stop signals, terminal cleanup, results.
+
+    PinghueTextualApp is the Textual app itself; tests drive it directly.
+    """
 
     def __init__(self, *, args: RunConfig, mode: ProbeMode) -> None:
         self.args = args
@@ -717,6 +720,6 @@ class PinghueApp:
         flush_or_discard_output(sys.stderr)
         flush_or_discard_output(sys.stdout)
         # A signal before mount ends the app before it builds its target list.
-        targets = app.targets or _pending_target_runs(self.args.targets)
+        targets = app.targets or pending_target_runs(self.args.targets)
         ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(timezone.utc)
         return targets, app.exit_reason, app.started_at, ended_at

@@ -13,6 +13,7 @@ from typing import Any, NamedTuple, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
+from pinghue.icmp import IPPROTO_ICMPV6
 from pinghue.limits import (
     FD_REQUEST_MAXIMUM,
     FD_RESERVE,
@@ -22,12 +23,11 @@ from pinghue.limits import (
 )
 from pinghue.models import SampleStatus
 from pinghue.probes import UNSPECIFIED_ONLY_ERROR, _usable_addresses, family_from_ip, icmp_probe
+from pinghue.streams import write_text
 
 OK = "[ok]"
 FAIL = "[fail]"
 WARN = "[warn]"
-
-_IPPROTO_ICMPV6 = getattr(socket, "IPPROTO_ICMPV6", 58)
 
 
 class IcmpSocketCheck(NamedTuple):
@@ -147,7 +147,8 @@ def _dns_probe(
 
     result = outcome[0]
     if isinstance(result, Exception):
-        return None, None, str(result)
+        # The same wording as a run reports: the resolver's message, not "[Errno 8] ...".
+        return None, None, getattr(result, "strerror", None) or str(result)
     infos = result
 
     if not infos:
@@ -327,7 +328,7 @@ def run_check(
             )
         else:
             lines.append(
-                f"  {_status(OK, use_color=use_color)}  Unprivileged ICMP sockets available"
+                f"  {_status(OK, use_color=use_color)}    Unprivileged ICMP sockets available"
             )
         if loopback_error:
             lines.append(
@@ -360,7 +361,7 @@ def run_check(
                     lines.append(f'          Current value: "{raw}"{suffix}')
             _write_linux_fix(lines, egid=egid)
 
-    icmp6 = _check_dgram_icmp_socket(family=socket.AF_INET6, proto=_IPPROTO_ICMPV6)
+    icmp6 = _check_dgram_icmp_socket(family=socket.AF_INET6, proto=IPPROTO_ICMPV6)
     if icmp6.ok:
         loopback6_ms, loopback6_error = _loopback_icmp_probe("::1")
         if loopback6_error:
@@ -416,7 +417,6 @@ def run_check(
         lines.extend(["", "Not ready for ICMP. TCP mode works. See fixes above."])
 
     if not quiet:
-        stream.write("\n".join(lines))
-        stream.write("\n")
+        write_text(stream, "\n".join(lines) + "\n")
 
     return exit_code

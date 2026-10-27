@@ -285,13 +285,18 @@ def _numeric_address_family(
     return AddressFamily.IPV4.value
 
 
+def probe_mode(args: RunConfig) -> ProbeMode:
+    """Return TCP mode when a port is given, ICMP mode otherwise."""
+    return ProbeMode.TCP if args.port else ProbeMode.ICMP
+
+
 def parse_args(argv: list[str] | None = None) -> RunConfig:
     parser = _parser()
     args = parser.parse_args(argv, namespace=RunConfig())
 
     _validate_finite(parser, "interval", args.interval)
     if args.interval < INTERVAL_MINIMUM:
-        parser.error(f"minimum interval is {INTERVAL_MINIMUM}")
+        parser.error(f"interval must be at least {INTERVAL_MINIMUM}")
 
     args.timeout = args.timeout if args.timeout is not None else args.interval
     _validate_finite(parser, "timeout", args.timeout)
@@ -299,7 +304,7 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
         parser.error("timeout must be greater than 0")
 
     if args.port is not None and not 1 <= args.port <= 65535:
-        parser.error("port outside of range 1-65535")
+        parser.error("port must be between 1 and 65535")
 
     if args.count is not None and args.count <= 0:
         parser.error("count must be greater than 0")
@@ -358,7 +363,7 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
             len(args.targets),
             interval=args.interval,
             timeout=args.timeout,
-            mode=ProbeMode.TCP if args.port else ProbeMode.ICMP,
+            mode=probe_mode(args),
         )
 
     if args.numeric:
@@ -384,7 +389,9 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
         args.no_tui = True
 
     if not args.check and not args.no_tui and args.output is not None and str(args.output) == "-":
-        parser.error("--output - requires --no-tui; the TUI owns stdout while it runs")
+        parser.error(
+            "--output - requires --no-tui; the report goes to stdout, which needs line output"
+        )
 
     return args
 
@@ -426,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from pinghue.runner import run
 
-    mode = ProbeMode.TCP if args.port else ProbeMode.ICMP
+    mode = probe_mode(args)
     try:
         return asyncio.run(run(args, mode=mode))
     except OSError as exc:

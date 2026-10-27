@@ -1,5 +1,5 @@
-# Hash-pinned audit toolchain for the scheduled dependency audit.
-# Used by dependency-audit.yml: pip install --require-hashes -r requirements-audit.txt
+# Hash-pinned audit toolchain for the dependency audit and the release audit.
+# Used by dependency-audit.yml and publish.yml: pip install --require-hashes -r requirements-audit.txt
 # Regenerate when bumping: uv pip compile --universal --generate-hashes --python-version 3.11 --no-annotate <pip-audit/setuptools/wheel pins>
 
 boolean-py==5.0 \

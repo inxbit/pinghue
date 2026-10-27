@@ -29,9 +29,11 @@ def _read_regular_file(path: Path) -> bytes:
     try:
         fd = os.open(path, flags)
     except OSError as exc:
-        if exc.errno in {errno.ELOOP, errno.ENOENT, errno.ENOTDIR}:
-            raise ValueError(f"host file must be a regular file: {path}") from exc
-        raise
+        if exc.errno in {errno.ENOENT, errno.ENOTDIR}:
+            raise ValueError(f"host file not found: {path}") from exc
+        if exc.errno == errno.ELOOP:
+            raise ValueError(f"host file must be a regular file, not a symlink: {path}") from exc
+        raise ValueError(f"cannot read host file {path}: {exc.strerror}") from exc
 
     try:
         file_stat = os.fstat(fd)
@@ -86,7 +88,8 @@ def parse_host_file(path: str | Path) -> list[str]:
 
         if len(value) > TARGET_MAXIMUM:
             raise ValueError(
-                f"target too long; maximum is {TARGET_MAXIMUM} characters: line {line_number}"
+                f"target too long; maximum is {TARGET_MAXIMUM} characters: "
+                f"{host_path} line {line_number}"
             )
 
         targets.append(value)

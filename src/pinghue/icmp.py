@@ -68,7 +68,8 @@ _PAYLOAD_PADDING = bytes(40)
 _ECHO_HEADER = struct.Struct("!BBHHH")
 _ECHO_IDENT_SEQUENCE = struct.Struct("!HH")
 _IPPROTO_ICMP = 1
-_IPPROTO_ICMPV6 = 58
+# The IANA protocol number, which is also socket.IPPROTO_ICMPV6 on every platform.
+IPPROTO_ICMPV6 = 58
 _IPV4_MAPPED_PREFIX = bytes(10) + b"\xff\xff"
 
 # Large enough for an echo reply, or a macOS ICMP error quoting the probe,
@@ -246,7 +247,7 @@ def _errno_outcome(code: int) -> EchoResult:
 def _quoted_echo(*, ipv6: bool, quote: bytes) -> tuple[bytes, bytes] | None:
     """Return (destination, echo header + payload) quoted by an ICMP error."""
     if ipv6:
-        if len(quote) < 48 or quote[6] != _IPPROTO_ICMPV6:
+        if len(quote) < 48 or quote[6] != IPPROTO_ICMPV6:
             return None
         destination = quote[24:40]
         echo = quote[40:]
@@ -517,9 +518,7 @@ class IcmpEngine:
         if self.closed:
             raise OSError(errno.EBADF, "ICMP engine closed")
         if ipv6:
-            sock = self._socket_factory(
-                socket.AF_INET6, socket.SOCK_DGRAM, getattr(socket, "IPPROTO_ICMPV6", 58)
-            )
+            sock = self._socket_factory(socket.AF_INET6, socket.SOCK_DGRAM, IPPROTO_ICMPV6)
         else:
             sock = self._socket_factory(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_ICMP)
         try:

@@ -303,7 +303,12 @@ async def resolve_target(
 
     if literal_family is not None:
         if address_family != AddressFamily.AUTO and literal_family != address_family:
-            return ResolvedTarget(target, None, None, f"target is not {address_family.value}")
+            return ResolvedTarget(
+                target,
+                None,
+                None,
+                f"{literal_family.value} address excluded by --{address_family.value}",
+            )
         return ResolvedTarget(target, target, literal_family, addresses=(target,))
 
     try:

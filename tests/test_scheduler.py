@@ -218,7 +218,7 @@ async def test_run_no_tui_accounts_for_probe_duration_between_rounds(
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: next(monotonic_times))
+    monkeypatch.setattr(runner, "monotonic_time", lambda: next(monotonic_times))
     monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
     use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
@@ -252,7 +252,7 @@ async def test_run_no_tui_yields_after_slow_iteration(
             status=SampleStatus.OK,
         )
 
-    monkeypatch.setattr(runner, "_monotonic_time", lambda: next(monotonic_times))
+    monkeypatch.setattr(runner, "monotonic_time", lambda: next(monotonic_times))
     monkeypatch.setattr(runner, "_iteration_sleep", spy_iteration_sleep)
     use_resolved_runs(monkeypatch, target)
     monkeypatch.setattr(runner, "probe_once", fake_probe_once)
@@ -567,7 +567,7 @@ async def test_run_no_tui_duration_cancels_active_resolution(
 async def test_run_no_tui_duration_includes_synchronous_startup_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_pending_runs = runner._pending_target_runs
+    original_pending_runs = runner.pending_target_runs
     resolution_calls = 0
 
     def slow_pending_runs(targets: list[str]) -> list[TargetRun]:
@@ -579,7 +579,7 @@ async def test_run_no_tui_duration_includes_synchronous_startup_time(
         resolution_calls += 1
         return TargetRun(target, resolved_address=target)
 
-    monkeypatch.setattr(runner, "_pending_target_runs", slow_pending_runs)
+    monkeypatch.setattr(runner, "pending_target_runs", slow_pending_runs)
     monkeypatch.setattr(runner, "resolve_run_target", fake_resolve_run_target)
 
     _, exit_reason, _, _ = await run_no_tui(
@@ -628,7 +628,7 @@ async def test_resolution_rejects_work_and_preserves_targets_after_expired_deadl
         return TargetRun(target)
 
     monkeypatch.setattr(runner, "resolve_run_target", immediate_resolution)
-    targets = runner._pending_target_runs(["a.example", "b.example"])
+    targets = runner.pending_target_runs(["a.example", "b.example"])
 
     stop_reason = await runner._run_probe_loops_until_shutdown(
         targets,
