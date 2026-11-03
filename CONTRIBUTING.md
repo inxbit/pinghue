@@ -50,10 +50,15 @@ What the page is made of (redesign of 2026-10, recorded in `DESIGN.md`):
   `fonts/ubuntu-sans-mono-latin.woff2` (Ubuntu Sans Mono, Ubuntu Font Licence 1.0).
 - `assets/pinghue-wordmark.svg` is the hue wordmark outlined to paths, so it
   needs no web font: `scripts/site-wordmark.py` regenerates it (usage in the file).
-- `media/hero.mp4` (1280x720, 4 s seamless loop, no audio) and its first frame
+- `media/hero.mp4` (1920x1080, 4 s seamless loop, no audio) and its first frame
   `assets/hero-poster.webp` (2508x1412). The clip comes from Higgsfield
-  `bytedance/seedance-2.5/text-to-video` (5 s, 720p, 16:9) with this prompt,
-  then an ffmpeg crossfade loop and a slight darken:
+  `bytedance/seedance-2.5/text-to-video` (5 s, 1080p, 16:9) with this prompt,
+  then a retime of frames the generator held, an ffmpeg crossfade loop, a
+  slight darken and a hue shift that keeps the LEDs green (the commands are in
+  `made_by` in `assets/hero-poster.webp.json`). Before shipping a new clip,
+  check it has no held frames, for example
+  `ffmpeg -i clip.mp4 -an -vf mpdecimate=max=1 -loglevel debug -f null - 2>&1 | grep -c ' drop '`
+  prints 0:
   "Cinematic slow dolly forward down a narrow data center cold aisle at 2 a.m.:
   tall black server racks on both sides with tiny green status LEDs blinking,
   one amber LED blinking on the right, cool dim overhead light falling off into
