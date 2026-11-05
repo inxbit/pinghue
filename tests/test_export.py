@@ -218,13 +218,16 @@ def test_existing_special_device_rejects_identity_change(
     after = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=11, st_uid=os.geteuid())
     closed: list[int] = []
 
-    monkeypatch.setattr(os, "lstat", lambda _path: before)
-    monkeypatch.setattr(os, "open", lambda _path, _flags: 99)
-    monkeypatch.setattr(os, "fstat", lambda _fd: after)
-    monkeypatch.setattr(os, "close", closed.append)
+    # Undo the fakes before the test returns: pytest's own output capture calls
+    # os.fstat once the test body ends, before fixture teardown.
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "lstat", lambda _path: before)
+        patch.setattr(os, "open", lambda _path, _flags: 99)
+        patch.setattr(os, "fstat", lambda _fd: after)
+        patch.setattr(os, "close", closed.append)
 
-    with pytest.raises(OSError, match="changed while opening"):
-        export_module._existing_special_device_fd(Path("out.fifo"))
+        with pytest.raises(OSError, match="changed while opening"):
+            export_module._existing_special_device_fd(Path("out.fifo"))
 
     assert closed == [99]
 
@@ -284,13 +287,14 @@ def test_existing_special_device_rejects_fifo_owner_change_after_open(
     after = SimpleNamespace(st_mode=stat.S_IFIFO, st_dev=1, st_ino=10, st_uid=os.geteuid() + 1)
     closed: list[int] = []
 
-    monkeypatch.setattr(os, "lstat", lambda _path: before)
-    monkeypatch.setattr(os, "open", lambda _path, _flags: 99)
-    monkeypatch.setattr(os, "fstat", lambda _fd: after)
-    monkeypatch.setattr(os, "close", closed.append)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "lstat", lambda _path: before)
+        patch.setattr(os, "open", lambda _path, _flags: 99)
+        patch.setattr(os, "fstat", lambda _fd: after)
+        patch.setattr(os, "close", closed.append)
 
-    with pytest.raises(PermissionError, match="FIFO owned by another user"):
-        export_module._existing_special_device_fd(Path("out.fifo"))
+        with pytest.raises(PermissionError, match="FIFO owned by another user"):
+            export_module._existing_special_device_fd(Path("out.fifo"))
 
     assert closed == [99]
 
@@ -371,13 +375,14 @@ def test_existing_special_device_rechecks_fifo_mode_on_the_opened_node(
     )
     closed: list[int] = []
 
-    monkeypatch.setattr(os, "lstat", lambda _path: before)
-    monkeypatch.setattr(os, "open", lambda _path, _flags: 99)
-    monkeypatch.setattr(os, "fstat", lambda _fd: after)
-    monkeypatch.setattr(os, "close", closed.append)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "lstat", lambda _path: before)
+        patch.setattr(os, "open", lambda _path, _flags: 99)
+        patch.setattr(os, "fstat", lambda _fd: after)
+        patch.setattr(os, "close", closed.append)
 
-    with pytest.raises(PermissionError, match=r"other users can open \(mode 0644\)"):
-        export_module._existing_special_device_fd(Path("out.fifo"))
+        with pytest.raises(PermissionError, match=r"other users can open \(mode 0644\)"):
+            export_module._existing_special_device_fd(Path("out.fifo"))
 
     assert closed == [99]
 
