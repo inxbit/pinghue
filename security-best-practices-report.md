@@ -180,8 +180,14 @@ this section previously recorded is superseded):
 - Audit: two independent reads of `src/` and the scripts (an OpenAI Codex
   read-only audit split into four areas, and a separate review), each finding
   reproduced before it was accepted, then three Codex review passes of the fix
-  diff. No critical or high finding. 19 defects were fixed test-first; none is
-  a regression of 7.1.x.
+  diff. No critical or high finding. 19 defects were fixed test-first. Rerun
+  against the 7.1.1, 7.1.0, 7.0.0, and 6.0.0 sources after the release, all 19
+  reproduce on each of them, with one qualification: `--output -` and
+  `--check` dropped an I/O error from a file silently only from 7.1.1 on
+  (earlier releases failed the flush at exit with status 120 instead), while
+  line output had dropped it silently since 6.0.0. The 7.1.2 sdist carries an
+  earlier wording of this item, "none is a regression of 7.1.x", written
+  before 15 of the 19 had been measured against older releases.
 - Fuzzing with fixed seeds, before and after the fixes: 778,464 datagrams and
   173,494 Linux error-queue messages through an in-memory socket on both
   platform branches of the ICMP engine, with no probe completed by a datagram
