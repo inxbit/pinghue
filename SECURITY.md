@@ -6,8 +6,8 @@ Security fixes are provided for the latest stable release line.
 
 | Version | Supported |
 | --- | --- |
-| `7.x` | Yes |
-| `<7.0` | No |
+| `8.x` | Yes |
+| `<8.0` | No |
 
 ## Reporting a Vulnerability
 
