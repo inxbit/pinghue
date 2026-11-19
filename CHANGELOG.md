@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 7.1.2 - 2026-11-19
+
 ### Fixed
 
 - ICMP probes to an IPv6 link-local address with a zone, such as `fe80::1%en0`, now work. They always timed out, because the zone was not passed to the socket; TCP mode already worked. A host name that resolves to a link-local address now keeps the zone the resolver reports (shown as `fe80::1%7`) in both modes; before, such a host was unreachable.

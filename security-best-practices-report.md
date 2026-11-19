@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; verification evidence refreshed for 7.1.1 on 2026-10-27
+Review date: 2026-07-11; audited again and verification evidence refreshed for 7.1.2 on 2026-11-19
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -100,6 +100,22 @@ but the target limit was an incompatible CLI behavior. The changelog invoked
 the narrowly scoped resource-safety exception to the deprecation window, and
 the cap shipped in the 5.0.0 major release rather than a patch or minor version.
 
+### BP-004 — An inherited macOS ACL outlasts the private report mode (Low, documented)
+
+`--output-mode private` sets the report's permission bits to `0600`. On macOS a
+directory can carry an inheritable access control list; a report created there
+inherits it, and an entry that grants other users read access is not removed
+by the mode. Found in the 2026-11 audit and measured: a report created under a
+directory with `everyone allow read,file_inherit` showed mode `0600` and the
+inherited entry. Reading it from a second account was not tested.
+
+Impact: only where the operator, or whoever controls the directory, configured
+such an ACL; default macOS directories do not grant inherited read access.
+
+Operational guidance: keep evidence in a directory that only the operator
+controls, ACL included (`ls -le` shows the entries). The README and the threat
+model state this. Removing or refusing the ACL in code is an open decision.
+
 ## Resolved findings
 
 | Area | Resolution |
@@ -117,6 +133,11 @@ the cap shipped in the 5.0.0 major release rather than a patch or minor version.
 | Workflow scripts | Workflow `run:` steps receive values through environment variables only; tests reject inline `${{ }}` expressions in scripts, privileged pull-request/workflow-run triggers, dependency caches, and non-read default token permissions. The hosted-hardening check keeps API responses in a private temporary directory. |
 | Launcher metadata | Validates editable-install metadata and local URLs, handles malformed/non-UTF-8 metadata cleanly, and removes failed fallback paths. |
 | Doctor guidance | Reports the actual ICMP datagram-socket check and gives platform-specific, least-privilege remediation. |
+| Parser messages | Usage errors that argparse words itself (unknown or ambiguous options) are escaped like PingHue's own messages, so an option carrying terminal control characters does not reach stderr as typed. |
+| Standard streams | A stdout closed at startup, a stdout that cannot encode the doctor report, and a file that refuses a write end with the documented status instead of a traceback or status 120; `EIO` on a regular file is reported as a write error, while a hung-up terminal is still a reader that went away. |
+| Output modes and names | The no-hardlink fallback applies the report mode after creating the file, so the private mode does not depend on the umask; an empty path is a usage error, and a name the filesystem cannot hold is refused before probing. |
+| IPv6 zones | A link-local target's zone reaches the ICMP socket as its scope id, and a zone the resolver reports is kept, so such hosts are probed instead of always timing out. |
+| TUI failure | A TUI that ends on an unhandled exception exits `1` and records `exit_reason` `error`, even when a deadline, a completed `--count`, or a signal finishes the run afterwards. |
 | TUI/site consistency | Keeps whole-run intermittent state, loss/refusal history, legends, thresholds, example percentages, and copy feedback synchronized. |
 | Release identity | Verifies signed annotated tag name, direct commit target, event SHA, protected-main ancestry, and package version before building. |
 | Exact-commit release validation | Reruns Ruff, Mypy, and coverage-gated tests against the exact tagged commit before publishing. |
@@ -152,38 +173,52 @@ the cap shipped in the 5.0.0 major release rather than a patch or minor version.
 
 ## Verification evidence
 
-Refreshed for the 7.1.1 release candidate on 2026-10-27 (the 7.1.0 evidence
+Refreshed for the 7.1.2 release candidate on 2026-11-19 (the 7.1.1 evidence
 this section previously recorded is superseded):
 
-- Full tests: 744 passed and 8 skipped (Linux-only kernel features, a
+- Audit: two independent reads of `src/` and the scripts (an OpenAI Codex
+  read-only audit split into four areas, and a separate review), each finding
+  reproduced before it was accepted, then three Codex review passes of the fix
+  diff. No critical or high finding. 19 defects were fixed test-first; none is
+  a regression of 7.1.x.
+- Fuzzing with fixed seeds, before and after the fixes: 778,464 datagrams and
+  173,494 Linux error-queue messages through an in-memory socket on both
+  platform branches of the ICMP engine, with no probe completed by a datagram
+  that was not its reply or a matching error; 3,000 host files, 9,000 argument
+  vectors, 9,000 display strings, 3,000 host-name sets, 3,000 resolver
+  answers, and 1,000 reports checked against the schema.
+- Full tests: 776 passed and 8 skipped (Linux-only kernel features, a
   Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.16, with total branch-aware coverage of 94.31% against the 85% floor;
+  3.12.16, with total branch-aware coverage of 94.63% against the 85% floor;
   localhost TCP and Unix-socket cases executed. The same suite passed under
   CPython 3.11.15, the supported floor, and 3.14.10, each from fresh
-  `--require-hashes` installs.
+  `--require-hashes` installs. CI ran it on Linux and macOS under Python 3.11
+  to 3.14.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
 - Mypy strict mode: no issues across 17 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 28 Node tests passed. The 7.1.1 site change updates
+- Static site contract: 28 Node tests passed. The 7.1.2 site change updates
   the version strings.
-- Semgrep 1.182.0 Python, security-audit, and secrets rule packs: 0 findings
+- Semgrep 1.185.0 Python, security-audit, and secrets rule packs: 0 findings
   across 88 scanned files.
 - Bandit 1.9.4 recursive runtime/script scan: one low-severity B311 note for
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 156-commit history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 164-commit release-history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
 - Fresh temporary-environment installation accepted every applicable
   `--require-hashes` entry.
 - Two builds from independent source trees with different mtimes produced byte-identical
-  normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`.
-- The final normalized sdist and wheel passed `twine check`; all 651 tests
+  normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`. The
+  same procedure applied to the previous release's tag reproduced the
+  published 7.1.1 wheel and sdist byte for byte.
+- The final normalized sdist and wheel passed `twine check`; all 683 tests
   shipped in the unpacked sdist passed against its own sources (8 skipped as
-  above); fresh wheel and sdist installs both reported `pinghue 7.1.1`
+  above); fresh wheel and sdist installs both reported `pinghue 7.1.2`
   through the console-script entry point and completed the localhost TCP
   smoke test, choosing line output without `--no-tui` because stdout was a
   pipe.
@@ -194,17 +229,19 @@ this section previously recorded is superseded):
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.1.1 is a
-patch release. `--output -` and `--check` now stop quietly when nothing reads
-stdout any more, as line output already did: once a write fails because the
-reader has gone, PingHue points the stream at the null device so the exit-time
-flush cannot fail again, and any other write error still raises. Host-file,
-output-directory, and command-line error messages now name the path or value
-involved; the checks behind them and every exit code are unchanged. The
-release adds no input source, output path, privilege, or network behavior,
-and the runtime dependencies are unchanged. No new finding was raised. The
-local candidate passed the security, QA, deterministic-artifact,
-installed-artifact, and staged-formula gates.
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 7.1.2 is a
+patch release of fixes from the 2026-11 audit. One is a security fix: usage
+errors that argparse words itself echoed an unknown or ambiguous option as
+typed, so terminal control characters in it reached stderr; they are now
+escaped like every other message. The rest correct results and exit statuses:
+ICMP to a link-local address with a zone, a stdout that is closed, cannot
+encode the doctor report, or sits on storage that refuses the write, a TUI
+that ends on an internal error, and several timing and report-path edge
+cases. BP-004 records one limit the audit found and this release only
+documents. The release adds no input source, output path, privilege, or
+network behavior, changes no workflow or packaging step, and leaves the
+runtime dependencies unchanged. The local candidate passed the security, QA,
+deterministic-artifact, installed-artifact, and staged-formula gates.
 Publishing remains gated on release-PR review and exact-head CI.
 
 Revisit this report if PingHue gains a listener, privileged wrapper, remote
