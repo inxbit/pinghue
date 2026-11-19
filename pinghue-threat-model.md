@@ -250,9 +250,13 @@ commit, while a Python 3.11/3.13 matrix audits all three hash locks. Publishing
 uses a protected environment, OIDC, and artifact attestations without
 repository-write permission, and revalidates the live tag identity and target
 immediately before PyPI. Both exact artifacts are installed and exercised
-against localhost TCP, and the staged Homebrew source version/SHA must match the
-built sdist. The later GitHub-release job revalidates the tag again and uses
-`--verify-tag` before receiving `contents: write`. Source distributions are
+against localhost TCP, the staged Homebrew source version/SHA must match the
+built sdist, and the sdist's `CHANGELOG.md` must have a section for the version,
+all before PyPI. The build job records the SHA-256 of both distributions as job
+outputs, and every job that downloads them (check, publish, release) compares
+them first, so a job that runs the development or audit lock cannot replace the
+artifact that is attested and uploaded. The later GitHub-release job revalidates
+the tag again and uses `--verify-tag` before receiving `contents: write`. Source distributions are
 normalized into a canonical safe archive, and a required CI job builds from two
 independent pristine source trees with different mtimes before comparing both
 wheel and sdist bytes.

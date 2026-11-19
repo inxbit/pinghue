@@ -207,3 +207,22 @@ def test_normalize_sdist_preserves_archive_file_mode(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert stat.S_IMODE(archive.stat().st_mode) == 0o640
+
+
+def test_normalize_sdist_reports_malformed_pax_metadata_without_a_traceback(
+    tmp_path: Path,
+) -> None:
+    # tarfile raises a plain ValueError, not a TarError, for a PAX sparse map
+    # that is not a number; the command line caught only its own errors.
+    archive = tmp_path / "archive.tar.gz"
+    info, payload = _member("root/file", payload=b"payload")
+    info.pax_headers = {"GNU.sparse.map": "x"}
+    _write_archive(archive, [_member("root"), (info, payload)])
+    original = archive.read_bytes()
+
+    result = _run(archive)
+
+    assert result.returncode == 1
+    assert result.stderr.startswith("normalize-sdist: ")
+    assert "Traceback" not in result.stderr
+    assert archive.read_bytes() == original

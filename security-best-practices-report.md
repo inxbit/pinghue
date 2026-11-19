@@ -144,7 +144,8 @@ model state this. Removing or refusing the ACL in code is an open decision.
 | Tag race | Revalidates tag name/signature/target after attestation immediately before PyPI and again before `gh release create --verify-tag`. |
 | Dependency integrity | Uses universal hash-pinned development/build/audit locks; required Python 3.11/3.13 jobs audit all three exact files before merge and publish. |
 | Artifact reproducibility | Incrementally bounds/validates sdist members and canonicalizes bytes; required CI builds from two independent source trees with different mtimes and compares wheel/sdist bytes. |
-| Artifact execution | The tag workflow installs and runs both exact distributions against localhost TCP and blocks when the staged Homebrew version/SHA differs from the built sdist. |
+| Artifact execution | The tag workflow installs and runs both exact distributions against localhost TCP and blocks before PyPI when the staged Homebrew version/SHA differs from the built sdist or the sdist's changelog has no section for the version. |
+| Artifact identity | The build job publishes the SHA-256 of both distributions as job outputs; the check, publish, and release jobs compare what they downloaded against them before using it. |
 | Sdist smoke build | Installs the exact hash-pinned build backend before the no-build-isolation source-distribution smoke test. |
 | Hosted hardening | Fails closed on unclassified API errors, missing fields, reviewer substitution, bypasses, rule/status inventory drift, and status-check source changes; the tracked baseline and manual administrator-bypass control were reconciled and verified live on 2026-07-11. |
 | Sdist contract | Excludes repository-only hardening/normalizer tests and maintainer-only contribution/release/hardening documents whose tooling is intentionally absent. |
