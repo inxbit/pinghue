@@ -1366,3 +1366,42 @@ def test_write_output_json_dash_writes_stdout(
     # "-" means stdout, never a literal file named "-".
     assert not (tmp_path / "-").exists()
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["new", "overwrite"])
+def test_write_output_json_private_mode_holds_without_hardlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overwrite: bool
+) -> None:
+    # The exclusive-create fallback left the mode to the umask: under 0377 a
+    # private report came out 0400 instead of the promised 0600.
+    output_path = tmp_path / "out.json"
+
+    def no_hardlinks(_src: object, _dst: object) -> None:
+        raise OSError(errno.EOPNOTSUPP, "hardlinks not supported")
+
+    monkeypatch.setattr(os, "link", no_hardlinks)
+    previous_umask = os.umask(0o377)
+    try:
+        _write(output_path, overwrite=overwrite)
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
+    assert json.loads(output_path.read_text(encoding="utf-8"))["pinghue_version"]
+
+
+def test_check_output_path_refuses_an_overlong_name_under_a_missing_directory(
+    tmp_path: Path,
+) -> None:
+    # lstat stops at the missing directory, so the name was never looked at:
+    # the run probed, then failed with "File name too long" and left the
+    # directory it had created behind.
+    name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    output_path = tmp_path / "new-directory" / ("x" * (name_max + 1))
+
+    with pytest.raises(OSError, match="File name too long") as excinfo:
+        check_output_path(output_path)
+
+    assert excinfo.value.errno == errno.ENAMETOOLONG
+    assert not (tmp_path / "new-directory").exists()
+    check_output_path(tmp_path / "new-directory" / ("x" * name_max))

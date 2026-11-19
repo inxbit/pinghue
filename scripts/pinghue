@@ -65,7 +65,10 @@ def _load_main_entrypoint(
     if not isinstance(raw_url, str):
         raise RuntimeError("unexpected editable source URL in pinghue metadata")
 
-    parsed_url = urlparse(raw_url)
+    try:
+        parsed_url = urlparse(raw_url)
+    except ValueError:
+        raise RuntimeError("unexpected editable source URL in pinghue metadata") from None
     source_path = unquote(parsed_url.path)
     if (
         parsed_url.scheme != "file"

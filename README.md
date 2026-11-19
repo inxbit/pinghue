@@ -104,6 +104,10 @@ line-break characters, such as form feeds or Unicode line separators, stay insid
 the line instead of splitting it into several targets: control characters make
 the target invalid, and anything else non-ASCII is shown escaped.
 
+An IPv6 link-local target takes its zone, as in `fe80::1%en0`. A host name that
+resolves to a link-local address keeps the zone the resolver reports, shown by
+its interface index (`fe80::1%7`).
+
 ```text
 # edge and core checks
 1.1.1.1
@@ -185,6 +189,8 @@ Pass `--tui` to start the TUI even though stdout is not a terminal, for example
 when a wrapper redirects stdout but stderr is still your terminal. The TUI
 draws on stderr, so with stderr closed (for example `2>&-`) it does not start
 and pinghue exits with status `1`; line output does not need stderr and runs.
+With stdout closed (for example `>&-`), `--output -` has nowhere to write the
+report: pinghue refuses it before probing and exits with status `1`.
 
 Example no-TUI output:
 
@@ -264,8 +270,8 @@ up.
 | `a` | Show or hide resolved addresses. |
 | `r` | Reset the selected host. |
 | `R` | Reset all hosts. |
-| `b` | Probe the selected host immediately. |
-| `B` | Probe all hosts immediately. |
+| `b` | Probe the selected host immediately. A host whose name has not resolved is looked up again first. |
+| `B` | Probe all hosts immediately, looking up again every name that has not resolved. |
 | `/` | Search hosts and addresses. `Enter` returns to the table with the search kept, `Esc` clears it. |
 
 Click any column header except mode and history to sort by it. The first click sorts host names and addresses up and every other column worst first (down hosts, full loss, the slowest replies), the second click reverses it, and the third goes back to the input order. Host names and addresses sort by value: `10.1.9.9` comes before `10.1.10.10`, `host-2` before `host-10`, IPv4 before IPv6 and both before names. Rows with nothing to sort by, such as a host with no reply yet, stay last either way, and sorting by address also shows the address column. The sort follows the values as they change, so a host that starts losing packets moves up on the next refresh while the selection stays on its row. Header clicks need a terminal that passes mouse clicks through (in tmux, `set -g mouse on`).

@@ -120,21 +120,22 @@ def _settle_dns_lookup(
         # Free the slot only once the lookup has left the registry, so whoever
         # takes the slot next can never join this finished call.
         lookup.slots.release()
-    if waiters:
-        for loop, future in waiters:
-            with contextlib.suppress(RuntimeError):
-                loop.call_soon_threadsafe(_deliver_dns_outcome, future, result, error)
-    elif error is None and result:
-        # Every caller already gave up; keep the answer for the next lookup of
-        # this name instead of paying for the slow resolution again. Only the
-        # entries resolve_target would use are kept, so a huge answer cannot pin
-        # memory; an answer with none keeps one entry to repeat its verdict.
-        kept = _usable_addresses(result, prefer_ipv4=key[1] == socket.AF_UNSPEC) or result[:1]
-        with _dns_lock:
+        if not waiters and error is None and result:
+            # Every caller already gave up; keep the answer for the next lookup
+            # of this name instead of paying for the slow resolution again. It
+            # is stored while the lookup leaves the registry: a newer lookup of
+            # the name can only start after this, so its answer is never
+            # followed by this older one. Only the entries resolve_target would
+            # use are kept, so a huge answer cannot pin memory; an answer with
+            # none keeps one entry to repeat its verdict.
+            kept = _usable_addresses(result, prefer_ipv4=key[1] == socket.AF_UNSPEC) or result[:1]
             _dns_late_answers.pop(key, None)
             _dns_late_answers[key] = (time.monotonic(), kept)
             if len(_dns_late_answers) > MAX_DNS_DAEMON_THREADS:
                 del _dns_late_answers[next(iter(_dns_late_answers))]
+    for loop, future in waiters:
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(_deliver_dns_outcome, future, result, error)
 
 
 def _run_dns_lookup(key: _DnsKey, lookup: _DnsLookup, resolve: Callable[[], list[Any]]) -> None:
@@ -253,6 +254,18 @@ UNSPECIFIED_ONLY_ERROR = (
 )
 
 
+def _info_address(info: Any) -> str:
+    """Return a getaddrinfo entry's address, with its IPv6 zone when it has one.
+
+    The zone of a link-local address comes only as the scope id, the fourth
+    item of the socket address; without it the address has no route.
+    """
+    sockaddr = info[4]
+    host: str = sockaddr[0]
+    scope_id = sockaddr[3] if len(sockaddr) > 3 else 0
+    return f"{host}%{scope_id}" if scope_id and "%" not in host else host
+
+
 def _usable_addresses(infos: list[Any], *, prefer_ipv4: bool) -> list[Any]:
     """Return up to MAX_FAILOVER_ADDRESSES getaddrinfo entries, one per address, to probe.
 
@@ -266,7 +279,7 @@ def _usable_addresses(infos: list[Any], *, prefer_ipv4: bool) -> list[Any]:
     preferred: list[Any] = []
     others: list[Any] = []
     for info in infos:
-        address = info[4][0]
+        address = _info_address(info)
         group = preferred if not prefer_ipv4 or info[0] == socket.AF_INET else others
         if len(group) >= MAX_FAILOVER_ADDRESSES or address in seen:
             continue
@@ -329,7 +342,7 @@ async def resolve_target(
         return ResolvedTarget(target, None, None, UNSPECIFIED_ONLY_ERROR)
 
     family = AddressFamily.IPV4 if usable[0][0] == socket.AF_INET else AddressFamily.IPV6
-    addresses = tuple(info[4][0] for info in usable)
+    addresses = tuple(_info_address(info) for info in usable)
     return ResolvedTarget(target, addresses[0], family, addresses=addresses)
 
 

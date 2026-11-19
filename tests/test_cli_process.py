@@ -476,3 +476,85 @@ def test_check_into_a_closed_pipe_keeps_its_exit_status() -> None:
     assert result.returncode == baseline.returncode
     assert b"Broken pipe" not in result.stderr
     assert b"Exception ignored" not in result.stderr
+
+
+def _run_with_stdout_closed(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run ``command`` as a shell's ``>&-`` does: descriptor 1 closed at startup."""
+    return subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=_cli_env(),
+        preexec_fn=lambda: os.close(1),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+
+def _check_command(*arguments: str) -> list[str]:
+    # A local name keeps the DNS part of the check off the network.
+    return [sys.executable, "-m", "pinghue", "--check", "--resolve-name", "localhost", *arguments]
+
+
+def _check_exit_status(*arguments: str) -> int:
+    return subprocess.run(
+        _check_command(*arguments),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=_cli_env(),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    ).returncode
+
+
+@pytest.mark.parametrize("arguments", [(), ("--quiet",)], ids=["check", "check-quiet"])
+def test_check_with_stdout_closed_keeps_its_exit_status(arguments: tuple[str, ...]) -> None:
+    # `pinghue --check --quiet >&-` died on `None.isatty()`: a traceback and
+    # status 1 on a host that is ready.
+    result = _run_with_stdout_closed(_check_command(*arguments))
+
+    assert result.returncode == _check_exit_status(*arguments)
+    assert b"Traceback" not in result.stderr
+
+
+def test_output_dash_with_stdout_closed_is_refused_before_probing() -> None:
+    # The run probed, then died writing the report to a stdout of None. With
+    # `--output -` the probe lines go to stderr, so none must show up there.
+    result = _run_with_stdout_closed(_cli_command("--no-tui", "--output", "-", "-c", "1"))
+
+    assert result.returncode == 1
+    assert b"Traceback" not in result.stderr
+    assert result.stderr.startswith(b"pinghue: error: ")
+    assert b"stdout is closed" in result.stderr
+    assert b"127.0.0.1" not in result.stderr
+
+
+def test_check_prints_on_a_stdout_that_cannot_encode_its_symbols() -> None:
+    # The report's dash and arrows are not ASCII; on a stdout with a legacy
+    # encoding `--check` died with UnicodeEncodeError.
+    result = subprocess.run(
+        _check_command(),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        env=_cli_env(PYTHONIOENCODING="ascii"),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == _check_exit_status()
+    assert b"Traceback" not in result.stderr
+    text = result.stdout.decode("ascii")
+    assert "- environment check" in text
+    assert 'getaddrinfo("localhost")' in text
+
+
+@pytest.mark.parametrize("flag", ["--help", "--version"])
+def test_help_and_version_into_a_closed_pipe_stop_quietly(flag: str) -> None:
+    # `pinghue --help | head -0` printed "Exception ignored ... BrokenPipeError"
+    # and exited 120, like `--check` and `--output -` before 7.1.1.
+    result = _run_into_a_closed_pipe([sys.executable, "-m", "pinghue", flag])
+
+    assert result.returncode == 0
+    assert b"Broken pipe" not in result.stderr
+    assert b"Exception ignored" not in result.stderr

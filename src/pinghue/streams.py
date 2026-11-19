@@ -4,15 +4,26 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 from typing import TextIO
 
 
-def reader_is_gone(error: BaseException) -> bool:
-    """Return whether a write failed because nothing reads the stream any more."""
+def _is_regular_file(stream: TextIO) -> bool:
+    try:
+        return stat.S_ISREG(os.fstat(stream.fileno()).st_mode)
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def reader_is_gone(error: BaseException, stream: TextIO | None = None) -> bool:
+    """Return whether a write to ``stream`` failed because nothing reads it any more."""
     if isinstance(error, (BrokenPipeError, ConnectionResetError)):
         return True
-    # A hung-up terminal fails writes with EIO.
-    return isinstance(error, OSError) and error.errno == errno.EIO
+    # A hung-up terminal fails writes with EIO. So does failing storage under a
+    # redirect to a file, where no reader went away and the error is reported.
+    if not isinstance(error, OSError) or error.errno != errno.EIO:
+        return False
+    return stream is None or not _is_regular_file(stream)
 
 
 def discard_output(stream: TextIO) -> None:
@@ -58,6 +69,6 @@ def write_text(stream: TextIO, text: str) -> None:
         stream.write(text)
         stream.flush()
     except OSError as exc:
-        if not reader_is_gone(exc):
+        if not reader_is_gone(exc, stream):
             raise
         discard_output(stream)

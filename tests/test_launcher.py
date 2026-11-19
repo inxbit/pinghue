@@ -280,3 +280,29 @@ def test_launcher_does_not_mask_a_missing_dependency_inside_pinghue(
         launcher._load_main_entrypoint(importer=_raise_missing_pinghue)
 
     assert exc_info.value.name == "textual"
+
+
+def test_launcher_shows_clear_error_for_an_unparsable_editable_source_url(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # urlparse raises ValueError("Invalid IPv6 URL") for an unbalanced bracket;
+    # that escaped as a traceback instead of the launcher's own message.
+    launcher = _load_launcher_module()
+    monkeypatch.setattr(launcher.sys, "path", list(launcher.sys.path))
+    payload = json.dumps({"dir_info": {"editable": True}, "url": "file://[bad"})
+    monkeypatch.setattr(
+        launcher.metadata,
+        "distribution",
+        lambda _name: SimpleNamespace(read_text=lambda _file_name: payload),
+    )
+
+    def _raise_missing_pinghue() -> object:
+        raise ModuleNotFoundError("No module named", name="pinghue")
+
+    monkeypatch.setattr(launcher, "_direct_import_main", _raise_missing_pinghue)
+
+    assert launcher.main() == 1
+    captured = capsys.readouterr()
+    assert "unexpected editable source URL" in captured.err
+    assert "Traceback" not in captured.err

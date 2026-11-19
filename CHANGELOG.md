@@ -6,6 +6,26 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Fixed
+
+- ICMP probes to an IPv6 link-local address with a zone, such as `fe80::1%en0`, now work. They always timed out, because the zone was not passed to the socket; TCP mode already worked. A host name that resolves to a link-local address now keeps the zone the resolver reports (shown as `fe80::1%7`) in both modes; before, such a host was unreachable.
+- `--check`, `--check --quiet`, and `--output -` no longer end in a traceback when stdout is closed (for example `>&-`). `--check` keeps its exit status, where it returned `1` even on a ready host, and `--output -` is refused before probing with `stdout is closed` and status `1`.
+- `--check` no longer fails with `UnicodeEncodeError` on a stdout that cannot encode the dash and arrows in its report, for example under `PYTHONIOENCODING=ascii` or an ISO 8859-1 locale. They are written as `-` and `->` there.
+- `--help` and `--version` into a pipe whose reader has gone (`pinghue --help | head -0`) exit with status `0`. Before, they printed `Exception ignored ... BrokenPipeError` and exited `120`, as `--check` and `--output -` did before 7.1.1.
+- `--output ''` is a usage error (status `2`). Before, the empty path became the current directory and was refused at run time with status `1`.
+- `--output` with a file name too long for the filesystem, under a directory that does not exist yet, is refused before probing. Before, the run probed, failed to write the report, and left the directory it had created behind.
+- Line output and `--output -` redirected to a file now report an I/O error (`EIO`) from the storage. Before, it was taken for a reader that went away: the lines or the report were dropped without a message, and `--output -` exited `0`.
+- TUI: `b` and `B` on a host whose name has not resolved look the name up again at once. Before, the request was spent on the DNS retry delay, and with `--count` it used up one of the host's probes without probing.
+- With `--output-mode private` on a filesystem without hard links, the report gets mode `0600` whatever the umask. Before, an unusual umask could leave it stricter, for example `0400`.
+- Linux: a reply that arrived in time is no longer reported as a timeout when more than 256 replies were waiting to be read after the event loop stalled, and a late reply is no longer reported as in time when the system clock was set back by less than the round trip while the probe was in flight.
+- An abandoned DNS lookup that finishes late can no longer hand out its answer after a newer lookup of the same name returned.
+- `--check` reports the DNS test as failed, instead of ending in a traceback, when the system cannot start another thread.
+- The development launcher `scripts/pinghue` reports unparsable editable-install metadata instead of a traceback.
+
+### Security
+
+- Messages that argparse writes for an unknown or ambiguous option now have control characters escaped, like PingHue's own messages. Before, an option such as `--x` followed by a terminal escape sequence reached the terminal as typed. Runtime dependencies are unchanged.
+
 ## 7.1.1 - 2026-10-27
 
 ### Fixed

@@ -71,6 +71,8 @@ _IPPROTO_ICMP = 1
 # The IANA protocol number, which is also socket.IPPROTO_ICMPV6 on every platform.
 IPPROTO_ICMPV6 = 58
 _IPV4_MAPPED_PREFIX = bytes(10) + b"\xff\xff"
+# sin6_scope_id is an unsigned 32-bit field.
+_MAX_SCOPE_ID = 0xFFFFFFFF
 
 # Large enough for an echo reply, or a macOS ICMP error quoting the probe,
 # with full IPv4 headers and options.
@@ -141,7 +143,9 @@ _TIMESTAMP_ANCILLARY_SIZE = (
 )
 # A kernel receive timestamp is used only when it agrees with the monotonic
 # round trip: it must not be negative or exceed the monotonic value by more
-# than this, so a wall-clock step falls back to the monotonic measurement.
+# than this, and the wall clock must not have moved against the monotonic one
+# by more than this since the send, so a wall-clock step falls back to the
+# monotonic measurement.
 _KERNEL_TIMESTAMP_SLACK_NS = 1_000_000
 
 _ICMP_UNREACHABLE_MESSAGES = {
@@ -209,6 +213,22 @@ def packed_address(address: str) -> bytes:
         return socket.inet_pton(socket.AF_INET, host)
     packed = socket.inet_pton(socket.AF_INET6, host)
     return packed[12:] if packed[:12] == _IPV4_MAPPED_PREFIX else packed
+
+
+def _send_address(destination: str, *, ipv6: bool) -> tuple[Any, ...]:
+    """Return the socket address an echo request to ``destination`` is sent to.
+
+    An IPv6 zone (``fe80::1%en0``) has to be passed as the scope id: a
+    two-item address sends with scope id 0 whatever its host part says, and a
+    link-local destination then has no route.
+    """
+    host, _, zone = destination.partition("%")
+    if not ipv6 or not zone:
+        return (destination, 0)
+    scope_id = int(zone) if zone.isdecimal() else socket.if_nametoindex(zone)
+    if scope_id > _MAX_SCOPE_ID:
+        raise ValueError(f"IPv6 zone index out of range: {zone}")
+    return (host, 0, 0, scope_id)
 
 
 def _icmp_error_outcome(*, ipv6: bool, icmp_type: int, code: int) -> EchoResult | None:
@@ -448,6 +468,7 @@ class IcmpEngine:
         except Exception as exc:  # noqa: BLE001 - e.g. a loop without add_reader support
             return EchoResult(SampleStatus.ERROR, error=f"ICMP engine unavailable: {exc}")
         try:
+            sockaddr = _send_address(destination, ipv6=ipv6)
             entry = self._register(
                 icmp_socket, destination=destination, loop=loop, timeout_s=timeout_s
             )
@@ -462,7 +483,7 @@ class IcmpEngine:
         )
         try:
             delay = _SEND_RETRY_DELAY_SECONDS
-            while (failure := self._send(entry, packet, (destination, 0))) is not None:
+            while (failure := self._send(entry, packet, sockaddr)) is not None:
                 if failure.errno not in _SEND_BACKOFF_ERRNOS:
                     return _send_failure(failure, destination)
                 if deadline - loop.time() <= delay:
@@ -571,7 +592,7 @@ class IcmpEngine:
         return entry
 
     def _send(
-        self, entry: _PendingEcho, packet: bytes, sockaddr: tuple[str, int]
+        self, entry: _PendingEcho, packet: bytes, sockaddr: tuple[Any, ...]
     ) -> OSError | None:
         icmp_socket = entry.icmp_socket
         failure: OSError | None = None
@@ -625,18 +646,26 @@ class IcmpEngine:
         if entry.future.done():
             return
         # A reply may already be queued but unread: the reader runs after this
-        # timer in some loop iterations, or stopped at its read budget.
-        self._on_readable(entry.icmp_socket)
+        # timer in some loop iterations, or stopped at its read budget. After a
+        # stall more replies can be queued than one pass reads, so read on
+        # while the budget keeps running out: at most one more pass for each
+        # budget of probes in flight on the socket.
+        icmp_socket = entry.icmp_socket
+        for _ in range(len(icmp_socket.pending) // _READ_BUDGET + 2):
+            if not self._on_readable(icmp_socket) or entry.future.done():
+                break
         if not entry.future.done():
             self._finish(entry, EchoResult(SampleStatus.TIMEOUT))
 
-    def _on_readable(self, icmp_socket: _IcmpSocket) -> None:
+    def _on_readable(self, icmp_socket: _IcmpSocket) -> bool:
+        """Read what is queued; return whether the read budget ran out first."""
         # Every probe on the socket depends on this callback, so nothing may
         # escape it; a malformed datagram is dropped where it is parsed.
         with contextlib.suppress(Exception):
-            self._drain(icmp_socket)
+            return self._drain(icmp_socket)
+        return False
 
-    def _drain(self, icmp_socket: _IcmpSocket) -> None:
+    def _drain(self, icmp_socket: _IcmpSocket) -> bool:
         budget = _READ_BUDGET
         if icmp_socket.recverr:
             budget = self._drain_error_queue(icmp_socket, budget)
@@ -652,16 +681,17 @@ class IcmpEngine:
                     data, address = sock.recvfrom(_RECEIVE_SIZE)
                     ancdata = []
             except BlockingIOError:
-                return
+                return False
             except OSError:
                 if not icmp_socket.recverr:
-                    return
+                    return False
                 # Linux fails one receive after an ICMP error arrives; the
                 # error itself is read from the error queue.
                 budget = self._drain_error_queue(icmp_socket, budget)
                 continue
             with contextlib.suppress(Exception):
                 self._handle_datagram(icmp_socket, data, ancdata, address)
+        return True
 
     def _drain_error_queue(self, icmp_socket: _IcmpSocket, budget: int) -> int:
         """Handle up to budget queued errors and return the budget left."""
@@ -773,13 +803,23 @@ class IcmpEngine:
             self._finish_error(entry, outcome, offender=offender)
 
     def _finish_reply(self, entry: _PendingEcho, rx_wall_ns: int | None) -> None:
-        rtt_ns = time.perf_counter_ns() - entry.tx_monotonic_ns
+        now_monotonic_ns = time.perf_counter_ns()
+        rtt_ns = now_monotonic_ns - entry.tx_monotonic_ns
         if rx_wall_ns is not None:
             # The kernel stamped the reply when it arrived, so event-loop delay
             # before this read is not counted. Both stamps use the wall clock;
             # a step between them falls outside [0, monotonic] and is ignored.
+            # A backward step smaller than the round trip stays inside that
+            # range and would shorten it, so the stamp also counts only while
+            # the wall clock has kept pace with the monotonic one since the send.
             kernel_rtt_ns = rx_wall_ns - entry.tx_wall_ns
-            if 0 <= kernel_rtt_ns <= rtt_ns + _KERNEL_TIMESTAMP_SLACK_NS:
+            wall_clock_shift_ns = (time.time_ns() - now_monotonic_ns) - (
+                entry.tx_wall_ns - entry.tx_monotonic_ns
+            )
+            if (
+                abs(wall_clock_shift_ns) <= _KERNEL_TIMESTAMP_SLACK_NS
+                and 0 <= kernel_rtt_ns <= rtt_ns + _KERNEL_TIMESTAMP_SLACK_NS
+            ):
                 rtt_ns = kernel_rtt_ns
         if rtt_ns > entry.timeout_ns:
             self._finish(entry, EchoResult(SampleStatus.TIMEOUT))

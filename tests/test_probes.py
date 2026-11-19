@@ -974,3 +974,85 @@ async def test_resolve_target_checks_each_unique_address_once(
 
     assert resolved.addresses == ("192.0.2.1", "2001:db8::1")
     assert checked == ["2001:db8::1", "0.0.0.0", "192.0.2.1"]
+
+
+async def test_resolve_target_keeps_the_zone_of_a_link_local_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # getaddrinfo reports an IPv6 zone only as the scope id, the fourth item of
+    # the socket address. Dropping it left "fe80::5", which has no route.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_, **__: [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fe80::5", 0, 0, 7)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fe80::5", 0, 0, 9)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::5", 0, 0, 0)),
+        ],
+    )
+
+    resolved = await resolve_target("printer.local", AddressFamily.IPV6)
+
+    assert resolved.address == "fe80::5%7"
+    assert resolved.addresses == ("fe80::5%7", "fe80::5%9", "2001:db8::5")
+    assert resolved.family == AddressFamily.IPV6
+
+
+async def test_late_answer_is_not_stored_once_a_newer_lookup_can_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An abandoned lookup left the registry in one step and stored its answer
+    # in a second one. A lookup started in between returned a newer answer,
+    # and the next caller was then handed the older one.
+    answers = iter(["192.0.2.1", "192.0.2.2", "192.0.2.3"])
+    release_first = threading.Event()
+    settling = threading.Event()
+    release_settle = threading.Event()
+    calls = 0
+
+    def resolver(*_: object, **__: object) -> list[object]:
+        nonlocal calls
+        calls += 1
+        address = next(answers)
+        if calls == 1:
+            release_first.wait(5)
+        return [_answer(address)]
+
+    real_usable_addresses = probes._usable_addresses
+
+    def pausing_usable_addresses(infos: list[Any], *, prefer_ipv4: bool) -> list[Any]:
+        # Hold the abandoned lookup's thread while it works out what to keep.
+        if threading.current_thread().name == "pinghue-dns" and not settling.is_set():
+            settling.set()
+            release_settle.wait(5)
+        return real_usable_addresses(infos, prefer_ipv4=prefer_ipv4)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    monkeypatch.setattr(probes, "_usable_addresses", pausing_usable_addresses)
+    name = "race-late.example"
+    seen: list[str | None] = []
+
+    def second_caller() -> None:
+        # Another caller of the same name, on its own loop and thread.
+        seen.append(asyncio.run(resolve_target(name, AddressFamily.AUTO)).address)
+
+    other = threading.Thread(target=second_caller, daemon=True)
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(resolve_target(name, AddressFamily.AUTO), timeout=0.05)
+        release_first.set()
+        await _wait_until(settling.is_set)
+
+        other.start()
+        # Long enough for a lookup of its own, if it can start one meanwhile.
+        await asyncio.to_thread(other.join, 0.3)
+        release_settle.set()
+        await asyncio.to_thread(other.join, 5)
+        await _wait_until(lambda: not [t for t in threading.enumerate() if t.name == "pinghue-dns"])
+        seen.append((await resolve_target(name, AddressFamily.AUTO)).address)
+    finally:
+        release_first.set()
+        release_settle.set()
+
+    # The answers a name's callers see never go back to an older one.
+    assert seen == ["192.0.2.1", "192.0.2.2"]

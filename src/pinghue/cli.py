@@ -19,6 +19,7 @@ from pinghue.export import check_output_path
 from pinghue.hostfile import TARGET_COUNT_MAXIMUM, TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 from pinghue.runner import MIN_OVERRUN_SLEEP
+from pinghue.streams import flush_or_discard_output
 
 INTERVAL_MINIMUM = 0.1
 CONCURRENCY_DEFAULT_MINIMUM = 64
@@ -31,6 +32,9 @@ HISTORY_STYLES = ("bar", "dots", "sparkline", "none")
 
 
 def _output_path(value: str) -> Path:
+    if not value:
+        # pathlib turns "" into ".", which names the current directory.
+        raise argparse.ArgumentTypeError("output path must not be empty")
     path = Path(value)
     if value == "-" or str(path) != "-":
         return path
@@ -49,7 +53,8 @@ class _ArgumentParser(argparse.ArgumentParser):
         # output or a pipeline. Exit with the usage status and print nothing.
         if sys.stderr is None:
             self.exit(2)
-        super().error(message)
+        # argparse echoes an unknown or ambiguous option as it was typed.
+        super().error(sanitize_display(message))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -292,7 +297,14 @@ def probe_mode(args: RunConfig) -> ProbeMode:
 
 def parse_args(argv: list[str] | None = None) -> RunConfig:
     parser = _parser()
-    args = parser.parse_args(argv, namespace=RunConfig())
+    try:
+        args = parser.parse_args(argv, namespace=RunConfig())
+    except SystemExit:
+        # --help and --version print to stdout and exit here. Into a pipe whose
+        # reader is gone (`pinghue --help | head -0`) the flush at exit would
+        # fail and turn the exit status into 120.
+        flush_or_discard_output(sys.stdout)
+        raise
 
     _validate_finite(parser, "interval", args.interval)
     if args.interval < INTERVAL_MINIMUM:

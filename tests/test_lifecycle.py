@@ -14,7 +14,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TextIO, cast
 
 import pytest
 
@@ -745,3 +745,54 @@ async def test_run_no_tui_stops_cleanly_when_stdout_is_a_broken_pipe(
     targets, exit_reason, _, _ = run_task.result()
     assert exit_reason == "interrupted"
     assert targets[0].stats.sent == 1
+
+
+class FailingFile:
+    """A stdout redirected to a regular file whose writes fail."""
+
+    def __init__(self, path: Path, error: OSError) -> None:
+        self._file = path.open("w", encoding="utf-8")
+        self.error = error
+
+    def fileno(self) -> int:
+        return self._file.fileno()
+
+    def write(self, _text: str) -> int:
+        raise self.error
+
+    def flush(self) -> None:
+        raise self.error
+
+    def close(self) -> None:
+        self._file.close()
+
+
+def test_output_dash_reports_an_io_error_on_a_regular_file(tmp_path: Path) -> None:
+    # EIO from a hung-up terminal means the reader is gone. From a file
+    # (`--output - > report.json` on failing storage) nobody went away: the
+    # report was dropped and the run still exited 0.
+    stream = FailingFile(tmp_path / "report.json", OSError(errno.EIO, "Input/output error"))
+    try:
+        with pytest.raises(OSError, match="Input/output error"):
+            streams.write_text(cast(TextIO, stream), "{}\n")
+    finally:
+        stream.close()
+
+
+async def test_sample_printer_warns_about_an_io_error_on_a_regular_file(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    stream = FailingFile(tmp_path / "probes.log", OSError(errno.EIO, "Input/output error"))
+    closed: list[bool] = []
+    printer = runner._SampleLinePrinter(cast(TextIO, stream), on_closed=lambda: closed.append(True))
+
+    try:
+        printer(TargetRun("192.0.2.1", resolved_address="192.0.2.1"), ok_sample())
+    finally:
+        stream.close()
+
+    assert closed == [True]
+    assert capsys.readouterr().err == (
+        "pinghue: warning: could not write probe lines, stopping the run: "
+        "[Errno 5] Input/output error\n"
+    )
