@@ -1284,7 +1284,9 @@ async def test_expiry_reads_past_one_read_budget_for_a_queued_reply(
     # The expiring probe's reply sits behind a full budget of other replies;
     # it was declared a timeout with its reply still unread.
     factory = FakeSocketFactory()
-    engine = make_engine(engines, factory, probes_per_socket=icmp._READ_BUDGET * 2)
+    engine = make_engine(
+        engines, factory, kernel_timestamps=True, probes_per_socket=icmp._READ_BUDGET * 2
+    )
     loop = asyncio.get_running_loop()
     tasks = [
         asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
@@ -1314,7 +1316,7 @@ async def test_expiry_reads_past_stale_datagrams_for_a_queued_reply(
     # already timed out, another process's echoes on macOS) can be queued ahead
     # of the expiring probe's reply, however few probes are still in flight.
     factory = FakeSocketFactory()
-    engine = make_engine(engines, factory)
+    engine = make_engine(engines, factory, kernel_timestamps=True)
     loop = asyncio.get_running_loop()
     task = asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
     await asyncio.sleep(0)
@@ -1330,3 +1332,27 @@ async def test_expiry_reads_past_stale_datagrams_for_a_queued_reply(
     engine._expire(entry)
 
     assert (await task).status == SampleStatus.OK
+
+
+async def test_expiry_reads_one_budget_where_a_late_read_cannot_count(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    # Without a kernel receive stamp a reply read after the deadline is a
+    # timeout however deep it was queued, so expiry does not read further.
+    factory = FakeSocketFactory()
+    engine = make_engine(engines, factory)
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
+    await asyncio.sleep(0)
+    sock = factory.sockets[0]
+    loop.remove_reader(sock.fileno())
+    request = sock.sent[0][0]
+    entry = next(iter(engine._sockets[False][0].pending.values()))
+    stale = echo_reply_for(request, token=bytes(icmp.TOKEN_SIZE))
+    for _ in range(icmp._READ_BUDGET * 3):
+        sock.replies.append((stale, [], 0, ("127.0.0.1", 0)))
+
+    engine._expire(entry)
+
+    assert (await task).status == SampleStatus.TIMEOUT
+    assert len(sock.replies) == icmp._READ_BUDGET * 2

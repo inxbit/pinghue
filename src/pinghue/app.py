@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
+from rich.console import RenderableType
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -685,6 +686,18 @@ class PinghueTextualApp(App[None]):
 
     async def action_quit(self) -> None:
         await self._finish("user_quit")
+
+    def exit(
+        self,
+        result: None = None,
+        return_code: int = 0,
+        message: RenderableType | None = None,
+    ) -> None:
+        # Textual sets a non-zero return code when it ends the app on an
+        # unhandled exception. A deadline, a completed --count or a stop signal
+        # can still finish the run after that; keep the error instead of
+        # letting that exit reset the code to 0.
+        super().exit(result, return_code or self.return_code or 0, message)
 
 
 class PinghueApp:

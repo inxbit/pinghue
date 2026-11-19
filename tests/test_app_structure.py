@@ -830,3 +830,39 @@ async def test_pinghue_app_reports_a_tui_crash_as_an_error(
     )
 
     assert exit_reason == "error"
+
+
+async def test_pinghue_app_keeps_the_error_when_the_run_finishes_after_the_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A deadline, a completed --count or a stop signal can still finish the
+    # app after Textual handled the exception. That exit reset Textual's
+    # return code to 0, and the run looked normal again.
+    original_run_async = PinghueTextualApp.run_async
+    finishing: list[asyncio.Task[None]] = []
+
+    async def headless_run_async(app: PinghueTextualApp) -> None:
+        await original_run_async(app, headless=True)
+
+    real_refresh = PinghueTextualApp._refresh_table
+
+    def refresh_that_breaks_once_mounted(app: PinghueTextualApp, width: int | None = None) -> None:
+        if app._resolution_task is None:
+            real_refresh(app, width)
+            return
+        finishing.append(asyncio.get_running_loop().create_task(app._finish("deadline")))
+        raise RuntimeError(f"injected TUI fault at width {width}")
+
+    monkeypatch.setattr(PinghueTextualApp, "run_async", headless_run_async)
+    monkeypatch.setattr(PinghueTextualApp, "_refresh_table", refresh_that_breaks_once_mounted)
+
+    # A closed TCP port on loopback: probes are refused at once, nothing leaves the host.
+    _targets, exit_reason, _started_at, _ended_at = await asyncio.wait_for(
+        PinghueApp(
+            args=build_args(targets=["127.0.0.1"], numeric=True, port=1), mode=ProbeMode.TCP
+        ).run_async(),
+        timeout=10.0,
+    )
+    await asyncio.gather(*finishing, return_exceptions=True)
+
+    assert exit_reason == "error"
