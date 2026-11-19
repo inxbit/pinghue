@@ -804,3 +804,41 @@ def test_parse_args_rejects_an_empty_output_path(capsys: pytest.CaptureFixture[s
 
     assert excinfo.value.code == 2
     assert "argument --output: output path must not be empty" in capsys.readouterr().err
+
+
+def test_parse_args_rejects_a_space_inside_a_target(capsys: pytest.CaptureFixture[str]) -> None:
+    # A target is one host name or address. With a space in it, it can never
+    # resolve, and line output printed the rest of it as extra fields:
+    # "x ok latency=1.00ms" read like a reply from a host called x.
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["x ok latency=1.00ms"])
+
+    assert excinfo.value.code == 2
+    assert (
+        "target contains a space, expected one host name or address: x ok latency=1.00ms"
+        in capsys.readouterr().err
+    )
+
+
+def test_parse_args_rejects_a_host_file_line_with_two_words(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An /etc/hosts-style line is one target with a space in it, not an
+    # address and a name. It used to run as a row that never resolved.
+    host_file = tmp_path / "hosts.txt"
+    host_file.write_text("192.0.2.1 router-1\n127.0.0.1  # a comment is fine\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--file", str(host_file)])
+
+    assert excinfo.value.code == 2
+    assert "target contains a space" in capsys.readouterr().err
+
+
+def test_parse_args_still_accepts_padding_and_host_file_comments(tmp_path: Path) -> None:
+    host_file = tmp_path / "hosts.txt"
+    host_file.write_text("  192.0.2.1  \n127.0.0.1  # inline comment\n", encoding="utf-8")
+
+    args = parse_args(["  example.com  ", "--file", str(host_file)])
+
+    assert args.targets == ["example.com", "192.0.2.1", "127.0.0.1"]
