@@ -360,6 +360,16 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
             parser.error(f"invalid target: {sanitize_display(target)}")
         if _contains_control_characters(target):
             parser.error(f"target contains control characters: {sanitize_display(target)}")
+        if " " in target:
+            # A target is one host name or address, and neither has a space in
+            # it. Line output separates its fields with spaces, so the rest of
+            # such a target would read as fields of the line. Other separators
+            # are refused above (controls) or shown escaped (non-ASCII), so
+            # the plain space is the one to stop.
+            parser.error(
+                "target contains a space, expected one host name or address: "
+                f"{sanitize_display(target)}"
+            )
 
     if args.resolve_name is not None:
         _validate_text_length(

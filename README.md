@@ -104,6 +104,12 @@ line-break characters, such as form feeds or Unicode line separators, stay insid
 the line instead of splitting it into several targets: control characters make
 the target invalid, and anything else non-ASCII is shown escaped.
 
+A target is one host name or address, so a target with a space in it is refused
+(exit status `2`), on the command line and in a host file. A host-file line in
+`/etc/hosts` style, such as `192.0.2.1 router-1`, is one such target, not an
+address and a name: list `192.0.2.1` or `router-1`. Spaces around a target, and
+before an inline comment, are ignored.
+
 An IPv6 link-local target takes its zone, as in `fe80::1%en0`. A host name that
 resolves to a link-local address keeps the zone the resolver reports, shown by
 its interface index (`fe80::1%7`).
@@ -155,6 +161,8 @@ Starting with `1.0.0`, release versions follow semantic versioning: patch releas
 Since `2.0.0`, `--output` preserves an existing regular file unless `--overwrite` is passed. Scripts that intentionally reuse the same JSON path should add `--overwrite`.
 
 `6.0.0` used the security exception above for `--output` paths through which another local user could read the report: it refuses an existing FIFO owned by another user, an existing FIFO that group or other users can open in the default `private` output mode, and an `--overwrite` target owned by another user (see [JSON Output](#json-output)). It used the same exception for host files, whose lines end only at `\n`, `\r\n`, or a lone `\r`: a host file that separates targets with vertical tabs, form feeds, file/group/record separators, or NEL is refused as an invalid target, and Unicode line and paragraph separators no longer split a line (see [Quick Start](#quick-start)). Since that release, `--output ./-` names a file called `-` in the current directory; only a bare `-` writes the report to stdout.
+
+`8.0.0` used the same exception for targets: a target that contains a space is refused, on the command line and in a host file (see [Quick Start](#quick-start)). Line output separates its fields with spaces, so the rest of such a target read as fields of the line: `pinghue 'x ok latency=1.00ms'` printed a line that looked like a reply from a host named `x`.
 
 ## Modes
 
@@ -218,7 +226,7 @@ pinghue [OPTIONS] [TARGET ...]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `TARGET ...` | none | Hostnames or IP addresses to probe, up to 253 characters each. Required unless `-f` supplies targets or `--check` is used. |
+| `TARGET ...` | none | Hostnames or IP addresses to probe, up to 253 characters each and with no space inside a target. Required unless `-f` supplies targets or `--check` is used. |
 | `-f, --file PATH` | none | Read targets from a non-symlink plain-text host file. Blank lines and full-line/inline `#` comments are ignored. |
 | `-p, --port PORT` | ICMP | Enable TCP connect checks against `PORT`. Valid range: `1-65535`. |
 | `--ipv4` | off | Force IPv4 resolution/probing. |
