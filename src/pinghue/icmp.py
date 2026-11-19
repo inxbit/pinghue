@@ -93,6 +93,10 @@ _MAX_SOCKETS_PER_FAMILY = 16
 # A socket holds at most _MAX_PROBES_PER_SOCKET of the 65,536 sequence numbers,
 # so a random draw almost always finds a free one; a scan backs it up.
 _RANDOM_SEQUENCE_ATTEMPTS = 16
+# Reader passes an expiring probe may run to reach its queued reply: enough to
+# read the largest receive buffer full of small replies (about 1 KiB each),
+# whichever probes they belong to.
+_EXPIRY_READ_PASSES = _RECEIVE_BUFFER_SIZES[0] // 1024 // _READ_BUDGET
 
 # Longer waits are cut to this (about 68 years), far beyond any useful timeout.
 _MAX_ECHO_TIMEOUT_SECONDS = float(2**31)
@@ -647,12 +651,10 @@ class IcmpEngine:
             return
         # A reply may already be queued but unread: the reader runs after this
         # timer in some loop iterations, or stopped at its read budget. After a
-        # stall more replies can be queued than one pass reads, so read on
-        # while the budget keeps running out: at most one more pass for each
-        # budget of probes in flight on the socket.
-        icmp_socket = entry.icmp_socket
-        for _ in range(len(icmp_socket.pending) // _READ_BUDGET + 2):
-            if not self._on_readable(icmp_socket) or entry.future.done():
+        # stall more datagrams can be queued than one pass reads, so read on
+        # while the budget keeps running out, up to a full receive buffer.
+        for _ in range(_EXPIRY_READ_PASSES):
+            if not self._on_readable(entry.icmp_socket) or entry.future.done():
                 break
         if not entry.future.done():
             self._finish(entry, EchoResult(SampleStatus.TIMEOUT))

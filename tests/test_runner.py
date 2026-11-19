@@ -1436,3 +1436,37 @@ async def test_probe_now_retries_a_failed_lookup_without_waiting_for_the_dns_coo
     assert seen[0] is None
     assert seen[1] is not None and seen[1].status == SampleStatus.OK
     assert target.status == TargetStatus.HEALTHY
+
+
+async def test_run_exits_with_an_error_after_a_tui_crash_and_still_writes_the_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pinghue.app as app_module
+
+    captured: dict[str, object] = {}
+    timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
+
+    class CrashedApp:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
+            return (
+                [TargetRun("1.1.1.1", status=TargetStatus.HEALTHY)],
+                "error",
+                timestamp,
+                timestamp,
+            )
+
+    def fake_write_output_json(_: Path, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(app_module, "PinghueApp", CrashedApp)
+    monkeypatch.setattr(runner, "write_output_json", fake_write_output_json)
+
+    exit_code = await runner.run(
+        build_args(no_tui=False, output=tmp_path / "out.json"), mode=ProbeMode.ICMP
+    )
+
+    assert exit_code == 1
+    assert captured["exit_reason"] == "error"

@@ -722,4 +722,7 @@ class PinghueApp:
         # A signal before mount ends the app before it builds its target list.
         targets = app.targets or pending_target_runs(self.args.targets)
         ended_at = app.ended_at if app.ended_at != app.started_at else datetime.now(UTC)
-        return targets, app.exit_reason, app.started_at, ended_at
+        # Textual ends the app on an unhandled exception, prints the traceback
+        # and sets a non-zero return code: that is not a quit the operator chose.
+        exit_reason = "error" if app.return_code else app.exit_reason
+        return targets, exit_reason, app.started_at, ended_at

@@ -15,9 +15,11 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 - `--output ''` is a usage error (status `2`). Before, the empty path became the current directory and was refused at run time with status `1`.
 - `--output` with a file name too long for the filesystem, under a directory that does not exist yet, is refused before probing. Before, the run probed, failed to write the report, and left the directory it had created behind.
 - Line output and `--output -` redirected to a file now report an I/O error (`EIO`) from the storage. Before, it was taken for a reader that went away: the lines or the report were dropped without a message, and `--output -` exited `0`.
+- `--output -` redirected to a file that cannot take the report, such as a full disk or a file size limit, exits with status `1` after its error message. Before, the flush at exit failed a second time, printed `Exception ignored ...`, and turned the status into `120`.
 - TUI: `b` and `B` on a host whose name has not resolved look the name up again at once. Before, the request was spent on the DNS retry delay, and with `--count` it used up one of the host's probes without probing.
 - With `--output-mode private` on a filesystem without hard links, the report gets mode `0600` whatever the umask. Before, an unusual umask could leave it stricter, for example `0400`.
 - Linux: a reply that arrived in time is no longer reported as a timeout when more than 256 replies were waiting to be read after the event loop stalled, and a late reply is no longer reported as in time when the system clock was set back by less than the round trip while the probe was in flight.
+- A TUI that ends on an internal error now exits with status `1` and records `exit_reason` `error` in the report, which is still written. Before, it recorded `user_quit` and exited `0`, as if the operator had pressed `q`.
 - An abandoned DNS lookup that finishes late can no longer hand out its answer after a newer lookup of the same name returned.
 - `--check` reports the DNS test as failed, instead of ending in a traceback, when the system cannot start another thread.
 - The development launcher `scripts/pinghue` reports unparsable editable-install metadata instead of a traceback.
@@ -25,6 +27,7 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 ### Security
 
 - Messages that argparse writes for an unknown or ambiguous option now have control characters escaped, like PingHue's own messages. Before, an option such as `--x` followed by a terminal escape sequence reached the terminal as typed. Runtime dependencies are unchanged.
+- The README and the threat model now say that on macOS a report created in a directory with an inheritable ACL inherits it, and that mode `0600` does not remove an entry that lets other users read the file. The behavior is unchanged.
 
 ## 7.1.1 - 2026-10-27
 

@@ -904,6 +904,10 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
             output_mode=args.output_mode,
         )
 
+    if exit_reason == "error":
+        # The TUI ended on an internal error; the report above records it.
+        return 1
+
     return exit_code_for_targets(
         targets,
         fail_on_any_down=args.fail_on_any_down,

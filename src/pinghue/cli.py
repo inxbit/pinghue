@@ -19,7 +19,7 @@ from pinghue.export import check_output_path
 from pinghue.hostfile import TARGET_COUNT_MAXIMUM, TARGET_MAXIMUM, parse_host_file
 from pinghue.models import AddressFamily, ProbeMode
 from pinghue.runner import MIN_OVERRUN_SLEEP
-from pinghue.streams import flush_or_discard_output
+from pinghue.streams import write_text
 
 INTERVAL_MINIMUM = 0.1
 CONCURRENCY_DEFAULT_MINIMUM = 64
@@ -302,8 +302,13 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
     except SystemExit:
         # --help and --version print to stdout and exit here. Into a pipe whose
         # reader is gone (`pinghue --help | head -0`) the flush at exit would
-        # fail and turn the exit status into 120.
-        flush_or_discard_output(sys.stdout)
+        # fail and turn the exit status into 120, so flush now: a gone reader
+        # ends quietly, any other write error is a runtime error.
+        if sys.stdout is not None:
+            try:
+                write_text(sys.stdout, "")
+            except OSError as exc:
+                sys.exit(_report_error(exc))
         raise
 
     _validate_finite(parser, "interval", args.interval)

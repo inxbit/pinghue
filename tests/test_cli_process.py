@@ -558,3 +558,54 @@ def test_help_and_version_into_a_closed_pipe_stop_quietly(flag: str) -> None:
     assert result.returncode == 0
     assert b"Broken pipe" not in result.stderr
     assert b"Exception ignored" not in result.stderr
+
+
+def _cap_file_size_at_one_kibibyte() -> None:
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024))
+
+
+def test_output_dash_write_failure_exits_with_the_runtime_error_status(tmp_path: Path) -> None:
+    # `pinghue ... --output - > report.json` on storage that refuses the write
+    # (here a file size limit; a full disk fails the same way) reported the
+    # error, then failed again in the flush at exit: "Exception ignored" and
+    # status 120 instead of 1.
+    with (tmp_path / "report.json").open("wb") as report:
+        result = subprocess.run(
+            _cli_command("--no-tui", "--output", "-", "-c", "8", "-i", "0.1"),
+            stdin=subprocess.DEVNULL,
+            stdout=report,
+            stderr=subprocess.PIPE,
+            env=_cli_env(),
+            preexec_fn=_cap_file_size_at_one_kibibyte,
+            timeout=EXIT_TIMEOUT,
+            check=False,
+        )
+
+    assert b"pinghue: error: " in result.stderr
+    assert b"Exception ignored" not in result.stderr
+    assert result.returncode == 1
+
+
+def test_help_into_a_file_that_refuses_the_write_exits_with_the_runtime_error_status(
+    tmp_path: Path,
+) -> None:
+    # The help text is longer than the file size limit, so the flush fails
+    # with a real write error, not a reader that went away: that must not
+    # pass as success, nor fail again in the flush at exit (status 120).
+    with (tmp_path / "help.txt").open("wb") as help_file:
+        result = subprocess.run(
+            [sys.executable, "-m", "pinghue", "--help"],
+            stdin=subprocess.DEVNULL,
+            stdout=help_file,
+            stderr=subprocess.PIPE,
+            env=_cli_env(),
+            preexec_fn=_cap_file_size_at_one_kibibyte,
+            timeout=EXIT_TIMEOUT,
+            check=False,
+        )
+
+    assert b"pinghue: error: " in result.stderr
+    assert b"Exception ignored" not in result.stderr
+    assert result.returncode == 1

@@ -1305,3 +1305,28 @@ async def test_expiry_reads_past_one_read_budget_for_a_queued_reply(
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_expiry_reads_past_stale_datagrams_for_a_queued_reply(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    # Datagrams that belong to no probe in flight (replies to probes that
+    # already timed out, another process's echoes on macOS) can be queued ahead
+    # of the expiring probe's reply, however few probes are still in flight.
+    factory = FakeSocketFactory()
+    engine = make_engine(engines, factory)
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
+    await asyncio.sleep(0)
+    sock = factory.sockets[0]
+    loop.remove_reader(sock.fileno())
+    request = sock.sent[0][0]
+    entry = next(iter(engine._sockets[False][0].pending.values()))
+    stale = echo_reply_for(request, token=bytes(icmp.TOKEN_SIZE))
+    for _ in range(icmp._READ_BUDGET * 3):
+        sock.replies.append((stale, [], 0, ("127.0.0.1", 0)))
+    sock.deliver(echo_reply_for(request), ("127.0.0.1", 0))
+
+    engine._expire(entry)
+
+    assert (await task).status == SampleStatus.OK

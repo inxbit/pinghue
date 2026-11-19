@@ -63,12 +63,16 @@ def write_text(stream: TextIO, text: str) -> None:
     """Write and flush ``text``, dropping it quietly when the reader is gone.
 
     ``pinghue ... --output - | head -0`` must stop like line output does, not
-    print a BrokenPipeError and exit 120. Any other write error still raises.
+    print a BrokenPipeError and exit 120. Any other write error still raises;
+    what the stream could not take is discarded then too, or the flush at exit
+    would fail again and replace the caller's exit status with 120.
     """
     try:
         stream.write(text)
         stream.flush()
     except OSError as exc:
-        if not reader_is_gone(exc, stream):
-            raise
+        # Judged first: discarding points the descriptor at the null device.
+        gone = reader_is_gone(exc, stream)
         discard_output(stream)
+        if not gone:
+            raise
