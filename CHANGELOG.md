@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 8.0.0 - 2026-11-19
+
 ### Breaking
 
 - A target that contains a space is now refused before probing, on the command line and in a host file (exit status `2`, `target contains a space, expected one host name or address`). Before, it was accepted as one target, and line output, which separates its fields with spaces, printed the rest of it as if it were fields of the line: `pinghue 'x ok latency=1.00ms'` printed `x ok latency=1.00ms dns_failure error=...` after the timestamp, which reads like a reply from a host named `x` to anything that takes the first fields. A host-file line in `/etc/hosts` style, such as `192.0.2.1 router-1`, was one such target and ran as a row that never resolved; it is now an error, so list `192.0.2.1` or `router-1`. Spaces around a target and before an inline `#` comment are still ignored, and non-ASCII space and line-separator characters are still accepted and shown escaped. A host name cannot contain a space, so a target that names a real host is not expected to be refused. Two cases are known in which macOS did more than fail at once: an IPv6 address with a space in its zone, such as `::1%lo 0`, which TCP mode probed as if it had no zone, and a `.local` name with a space, which the system does look up. Write the first without the stray zone, and probe the second by its address.

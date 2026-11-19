@@ -111,6 +111,12 @@ controls, zero-width characters, or confusable Unicode. PingHue routes target,
 host-label, address, and error strings through display sanitization before
 terminal rendering or JSON export. New output paths must preserve that invariant.
 
+Line output separates its fields with spaces. A target that contains a space is
+refused before probing, so target text cannot supply words that read as the
+status or latency of a line. Control characters in a target are refused and
+every other non-ASCII character is shown escaped, which leaves a target no other
+separator to carry.
+
 ### 2. Inventory or history resource exhaustion
 
 Large target sets can multiply resolver tasks, probe workers, and retained
