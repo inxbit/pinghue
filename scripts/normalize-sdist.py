@@ -225,7 +225,9 @@ def main() -> int:
     arguments = parser.parse_args()
     try:
         normalize_sdist(arguments.archive, epoch=_source_date_epoch())
-    except (NormalizationError, OSError, tarfile.TarError) as exc:
+    except (ValueError, OSError, tarfile.TarError) as exc:
+        # ValueError covers NormalizationError and what tarfile raises for
+        # malformed PAX metadata, which is not a TarError.
         parser.exit(1, f"normalize-sdist: {exc}\n")
     return 0
 

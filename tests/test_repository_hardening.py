@@ -1506,3 +1506,104 @@ def test_security_policy_matches_stable_support_line() -> None:
     assert f"`{major}.x` | Yes" in security
     assert f"`<{major}.0` | No" in security
     assert supported_major_lines == [major]
+
+
+def changelog_section(changelog: str, version: str) -> str:
+    """Return a version's changelog section the way the publish workflow extracts it."""
+    section: list[str] = []
+    found = False
+    for line in changelog.splitlines():
+        if line.startswith(f"## {version} - "):
+            found = True
+            continue
+        if found and line.startswith("## "):
+            break
+        if found:
+            section.append(line)
+    return "\n".join(section).strip()
+
+
+def test_changelog_has_a_section_for_the_package_version() -> None:
+    # The GitHub release notes are this section, read from the sdist. A release
+    # PR with a misspelled heading must fail here, not after the tag is pushed.
+    assert changelog_section(read("CHANGELOG.md"), package_version())
+
+
+def test_publish_workflow_checks_the_changelog_section_before_pypi() -> None:
+    # The check ran only in the release job, which needs the publish job: a
+    # missing section let the package reach PyPI and then failed the release.
+    workflow = read(".github/workflows/publish.yml")
+    check_job = workflow.split("  check:", 1)[1].split("  validate:", 1)[0]
+
+    assert "Verify the changelog section for this release" in check_job
+    assert (
+        'tar -xzOf "dist/pinghue-${version}.tar.gz" "pinghue-${version}/CHANGELOG.md"' in check_job
+    )
+    assert "has no section for ${version}" in check_job
+
+
+def test_publish_workflow_binds_distributions_to_the_build_job() -> None:
+    # Jobs that install the development and audit locks run between the build
+    # and the upload, and an artifact is found by name only. The build job's
+    # digests travel as job outputs, which no other job can change.
+    workflow = read(".github/workflows/publish.yml")
+    build_job = workflow.split("  build:", 1)[1].split("  check:", 1)[0]
+    check_job = workflow.split("  check:", 1)[1].split("  validate:", 1)[0]
+    publish_job = workflow.split("  publish:", 1)[1].split("  release:", 1)[0]
+    release_job = workflow.split("  release:", 1)[1]
+
+    assert "sdist-sha256: ${{ steps.digests.outputs.sdist }}" in build_job
+    assert "wheel-sha256: ${{ steps.digests.outputs.wheel }}" in build_job
+    assert build_job.index("Normalize source distribution") < build_job.index(
+        "Record distribution digests"
+    )
+    for job in (check_job, publish_job, release_job):
+        assert "Verify distributions match the build job" in job
+        assert "SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}" in job
+        assert "WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}" in job
+        assert '[ "${sdist}" != "${SDIST_SHA256}" ] || [ "${wheel}" != "${WHEEL_SHA256}" ]' in job
+        assert "downloaded distributions differ from what the build job built" in job
+        assert job.index("Download distributions") < job.index(
+            "Verify distributions match the build job"
+        )
+    assert publish_job.index("Verify distributions match the build job") < publish_job.index(
+        "Generate artifact attestations"
+    )
+    assert release_job.index("Verify distributions match the build job") < release_job.index(
+        "gh release create"
+    )
+    assert "      - build\n      - publish" in release_job
+
+
+def test_pages_workflow_runs_for_every_file_the_site_test_reads() -> None:
+    # The site contract test runs only in this workflow. A change to a file it
+    # reads but the path filter did not list broke the contract unseen, and
+    # the next site push then failed to deploy.
+    import fnmatch
+
+    workflow = read(".github/workflows/pages.yml")
+    push_filter, pull_request_filter = (
+        re.findall(r'^      - "([^"]+)"$', block, re.MULTILINE)
+        for block in workflow.split("permissions:", 1)[0].split("  pull_request:", 1)
+    )
+    read_by_the_test = set(re.findall(r"read\('([^']+)'\)", read("tests/site_pages.test.mjs")))
+    assert {"README.md", "src/pinghue/app.py", "schemas/output-v1.schema.json"} <= read_by_the_test
+
+    for patterns in (push_filter, pull_request_filter):
+        unmatched = sorted(
+            path
+            for path in read_by_the_test
+            if not any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+        )
+        assert unmatched == []
+
+
+def test_release_checklist_lock_command_matches_the_lock_header() -> None:
+    # The lock records the command that made it; the checklist's copy lacked
+    # --python-version 3.11, which the lock and its test require.
+    recorded = read("requirements.txt").splitlines()[1].removeprefix("#").split()
+    checklist = read(".github/release-checklist.md")
+    documented = re.search(r"^uv pip compile pyproject\.toml[^`]*", checklist, re.MULTILINE)
+
+    assert documented is not None
+    assert documented.group(0).replace("\\\n", " ").split() == recorded

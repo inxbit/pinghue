@@ -8,10 +8,17 @@ on:
       - "docs/**"
       - "tests/site_pages.test.mjs"
       - ".github/workflows/pages.yml"
-      # the site test also reads these: the version, the generators, the card source
+      # the site test also reads these: the version, the generators, the card
+      # source, and what the page mirrors (the TUI and report code, the README,
+      # the report schema, the release checklist). It runs nowhere else, so a
+      # file it reads must be listed here and under pull_request.
       - "pyproject.toml"
       - "scripts/site-*"
       - "scripts/gen-site-*.sh"
+      - "src/pinghue/**"
+      - "README.md"
+      - "schemas/**"
+      - ".github/release-checklist.md"
   pull_request:
     paths:
       - "docs/**"
@@ -20,6 +27,10 @@ on:
       - "pyproject.toml"
       - "scripts/site-*"
       - "scripts/gen-site-*.sh"
+      - "src/pinghue/**"
+      - "README.md"
+      - "schemas/**"
+      - ".github/release-checklist.md"
 permissions:
   contents: read
 

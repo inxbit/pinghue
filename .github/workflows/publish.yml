@@ -16,6 +16,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The digests of what this job built. Job outputs cannot be changed by a
+    # later job, unlike an artifact, which is found by name: every job that
+    # downloads the distributions checks them against these.
+    outputs:
+      sdist-sha256: ${{ steps.digests.outputs.sdist }}
+      wheel-sha256: ${{ steps.digests.outputs.wheel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,6 +82,13 @@ jobs:
         run: python scripts/normalize-sdist.py dist/*.tar.gz
         env:
           SOURCE_DATE_EPOCH: "0"
+      - name: Record distribution digests
+        id: digests
+        run: |
+          sdist="$(sha256sum dist/*.tar.gz | cut -d ' ' -f 1)"
+          wheel="$(sha256sum dist/*.whl | cut -d ' ' -f 1)"
+          echo "sdist=${sdist}" >> "${GITHUB_OUTPUT}"
+          echo "wheel=${wheel}" >> "${GITHUB_OUTPUT}"
       - name: Upload distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -99,12 +112,50 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: Verify distributions match the build job
+        env:
+          SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+        run: |
+          set -- dist/*
+          if [ "$#" -ne 2 ]; then
+            echo "::error::expected exactly one source distribution and one wheel"
+            exit 1
+          fi
+          if [ "${#SDIST_SHA256}" -ne 64 ] || [ "${#WHEEL_SHA256}" -ne 64 ]; then
+            echo "::error::the build job recorded no distribution digests"
+            exit 1
+          fi
+          sdist="$(sha256sum dist/*.tar.gz | cut -d ' ' -f 1)"
+          wheel="$(sha256sum dist/*.whl | cut -d ' ' -f 1)"
+          if [ "${sdist}" != "${SDIST_SHA256}" ] || [ "${wheel}" != "${WHEEL_SHA256}" ]; then
+            echo "::error::downloaded distributions differ from what the build job built"
+            exit 1
+          fi
       - name: Install package checks and build backend (hash-pinned)
         run: |
           python -m pip install --require-hashes -r requirements-build.txt
           python -m pip install --require-hashes -r requirements.txt
       - name: Check package
         run: twine check dist/*
+      - name: Verify the changelog section for this release
+        env:
+          TAG: ${{ github.ref_name }}
+        # The GitHub release notes are this section, read from the sdist. It is
+        # checked here, before PyPI: found missing only in the release job, it
+        # would leave a published package without its release.
+        run: |
+          version="${TAG#v}"
+          tar -xzOf "dist/pinghue-${version}.tar.gz" "pinghue-${version}/CHANGELOG.md" > "${RUNNER_TEMP}/CHANGELOG.md"
+          awk -v heading="## ${version} - " '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' "${RUNNER_TEMP}/CHANGELOG.md" > "${RUNNER_TEMP}/changelog-section.md"
+          if ! grep -q '[^[:space:]]' "${RUNNER_TEMP}/changelog-section.md"; then
+            echo "::error::CHANGELOG.md in the sdist has no section for ${version}"
+            exit 1
+          fi
       - name: Verify staged Homebrew formula
         env:
           TAG: ${{ github.ref_name }}
@@ -281,6 +332,26 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: Verify distributions match the build job
+        env:
+          SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+        run: |
+          set -- dist/*
+          if [ "$#" -ne 2 ]; then
+            echo "::error::expected exactly one source distribution and one wheel"
+            exit 1
+          fi
+          if [ "${#SDIST_SHA256}" -ne 64 ] || [ "${#WHEEL_SHA256}" -ne 64 ]; then
+            echo "::error::the build job recorded no distribution digests"
+            exit 1
+          fi
+          sdist="$(sha256sum dist/*.tar.gz | cut -d ' ' -f 1)"
+          wheel="$(sha256sum dist/*.whl | cut -d ' ' -f 1)"
+          if [ "${sdist}" != "${SDIST_SHA256}" ] || [ "${wheel}" != "${WHEEL_SHA256}" ]; then
+            echo "::error::downloaded distributions differ from what the build job built"
+            exit 1
+          fi
       - name: Generate artifact attestations
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -320,7 +391,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: publish
+    needs:
+      - build
+      - publish
     permissions:
       contents: write
     steps:
@@ -329,6 +402,26 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: Verify distributions match the build job
+        env:
+          SDIST_SHA256: ${{ needs.build.outputs.sdist-sha256 }}
+          WHEEL_SHA256: ${{ needs.build.outputs.wheel-sha256 }}
+        run: |
+          set -- dist/*
+          if [ "$#" -ne 2 ]; then
+            echo "::error::expected exactly one source distribution and one wheel"
+            exit 1
+          fi
+          if [ "${#SDIST_SHA256}" -ne 64 ] || [ "${#WHEEL_SHA256}" -ne 64 ]; then
+            echo "::error::the build job recorded no distribution digests"
+            exit 1
+          fi
+          sdist="$(sha256sum dist/*.tar.gz | cut -d ' ' -f 1)"
+          wheel="$(sha256sum dist/*.whl | cut -d ' ' -f 1)"
+          if [ "${sdist}" != "${SDIST_SHA256}" ] || [ "${wheel}" != "${WHEEL_SHA256}" ]; then
+            echo "::error::downloaded distributions differ from what the build job built"
+            exit 1
+          fi
       - name: Verify release tag again
         env:
           GH_TOKEN: ${{ github.token }}

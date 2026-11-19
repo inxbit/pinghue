@@ -47,7 +47,7 @@ change, review the full diff, and repeat the hash-enforced installs above:
 
 ```sh
 uv pip compile pyproject.toml --extra dev --universal --generate-hashes \
-  --output-file requirements.txt
+  --python-version 3.11 --output-file requirements.txt
 ```
 
 ## Hosted Hardening Re-Verification
@@ -132,8 +132,11 @@ requires a verified annotated tag whose commit is reachable from `origin/main`,
 reruns Ruff, Mypy, and the coverage-gated test suite against that exact commit,
 audits all three hash locks under Python 3.11 and 3.13, and revalidates the tag
 identity immediately before PyPI publication and again before creating the
-GitHub release. It also installs and runs both exact distributions and verifies
-the staged Homebrew formula SHA before publication.
+GitHub release. It also installs and runs both exact distributions, verifies
+the staged Homebrew formula SHA, and requires a `## X.Y.Z - ` section in the
+sdist's `CHANGELOG.md`, all before publication. Every job that downloads the
+distributions first compares them with the SHA-256 digests the build job
+recorded.
 
 ## After PyPI Publish
 
