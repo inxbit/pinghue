@@ -33,7 +33,10 @@ see Website below); `node scripts/site-version.mjs` keeps its version current.
 
 `docs/` is the published site (pinghue.com): GitHub Pages, with DNS at
 Cloudflare in DNS-only mode (records not proxied). Every push to `main` that touches `docs/` deploys, gated by
-`tests/site_pages.test.mjs`. Do not keep working notes in `docs/`.
+`tests/site_pages.test.mjs`. So does a push that touches anything else that test reads (`src/pinghue/`,
+`README.md`, `schemas/`, the release checklist, `pyproject.toml`, the site scripts): the workflow's path
+filter lists them so the contract runs, and a deploy of the unchanged `docs/` follows. Do not keep working
+notes in `docs/`.
 
 What the page is made of (redesign of 2026-10, recorded in `DESIGN.md`):
 
