@@ -194,7 +194,10 @@ before probing starts so a refused path does not discard a completed run; the
 write-time checks remain authoritative. The containing directory itself is not
 judged: a user who owns it, or can write to it without the sticky bit, can
 still rename, replace, or remove a finished report, so evidence belongs in a
-directory only the operator controls.
+directory only the operator controls. The mode PingHue applies to a report is
+its permission bits only. On macOS a directory can carry an inheritable ACL: a
+report created there inherits it, and an entry that grants other users read
+access outlasts mode `0600`.
 
 Explicit `--overwrite` of an existing single-link regular file keeps the
 verified inode and rewrites it in place. The file must be owned by the
@@ -278,7 +281,7 @@ release gate.
 | TM-001 | Terminal/control-character injection | Central sanitization and adversarial rendering tests | A future output caller could omit sanitization | Low |
 | TM-002 | Unbounded target/probe/sample use | File, target, concurrency, timeout, and retention caps | 5,000 targets can still be intentionally expensive | Low |
 | TM-003 | Host-file symlink/special-file race or line-splitting confusion | Descriptor-based open/type validation, bounded reads, and line splitting only at `\n`, `\r\n`, or a lone `\r` | Same-user content modification remains possible | Low |
-| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, owner-only FIFO permissions in private mode, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report; `--output-mode umask` or a macOS ACL can still let other users read a FIFO; on macOS a pipe named by `/dev/fd/N`, or a FIFO behind such a path after its last name is removed, is accepted whatever its bits; a `chmod` does not revoke a reader that opened, or was waiting to open, a FIFO while its bits gave group or other users access | Medium |
+| TM-004 | Output replacement, disclosure, or partial report | No-clobber default, randomized temp, inode/type/link checks, effective-user ownership for FIFOs and overwritten files, owner-only FIFO permissions in private mode, pre-run path check | Explicit overwrite and no-hardlink copy fallback are not crash-atomic; a directory controlled by another user can still replace a finished report; `--output-mode umask` or a macOS ACL can still let other users read a FIFO; on macOS a report created in a directory with an inheritable ACL inherits it whatever its mode; on macOS a pipe named by `/dev/fd/N`, or a FIFO behind such a path after its last name is removed, is accepted whatever its bits; a `chmod` does not revoke a reader that opened, or was waiting to open, a FIFO while its bits gave group or other users access | Medium |
 | TM-005 | Misclassification from DNS/socket behavior | Failover, cooldown refresh, sinkhole-answer rejection, ordered errors, whole-run stats, token-matched ICMP replies, random ICMP sequence numbers | Remote routing/DNS state is inherently external; forged ICMP errors with short quotes can mark a probe `unreachable` | Low |
 | TM-006 | Overbroad ICMP privileges | Unprivileged design and platform-specific doctor guidance | Operators can ignore guidance | Medium |
 | TM-007 | Unauthorized or wrong-commit release | Signed tag checks, exact-commit validation, OIDC, attestations, split permissions | Hosted settings can drift; administrator-bypass setting is manual | Medium |

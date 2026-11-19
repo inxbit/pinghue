@@ -1193,3 +1193,166 @@ async def test_real_loopback_burst_is_cheap() -> None:
     assert elapsed < 5.0
     assert threading.active_count() == threads
     assert icmp.engine_for_running_loop().socket_count(ipv6=False) <= (icmp._MAX_SOCKETS_PER_FAMILY)
+
+
+# IPv6 zones: a link-local destination is only reachable with its scope id.
+
+
+async def test_echo_sends_a_zoned_ipv6_destination_with_its_scope_id(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    # A two-item address sends with scope id 0 whatever zone the host names,
+    # so a link-local target such as fe80::1%en0 never answered.
+    index, name = socket.if_nameindex()[0]
+    factory = FakeSocketFactory(responder=linux_echo())
+    engine = make_engine(engines, factory)
+
+    by_name = await engine.echo(f"fe80::1%{name}", ipv6=True, timeout_s=1.0)
+    by_index = await engine.echo("fe80::1%7", ipv6=True, timeout_s=1.0)
+
+    assert (by_name.status, by_index.status) == (SampleStatus.OK, SampleStatus.OK)
+    assert [address for _packet, address in factory.sockets[0].sent] == [
+        ("fe80::1", 0, 0, index),
+        ("fe80::1", 0, 0, 7),
+    ]
+
+
+@pytest.mark.parametrize("zone", ["no-such-interface", "4294967296"], ids=["name", "index"])
+async def test_echo_reports_an_ipv6_zone_it_cannot_use(
+    engines: list[icmp.IcmpEngine], zone: str
+) -> None:
+    factory = FakeSocketFactory(responder=linux_echo())
+    engine = make_engine(engines, factory)
+
+    result = await engine.echo(f"fe80::1%{zone}", ipv6=True, timeout_s=1.0)
+
+    assert result.status == SampleStatus.ERROR
+    assert result.error
+    assert all(sock.sent == [] for sock in factory.sockets)
+    assert pending_count(engine) == 0
+
+
+@pytest.mark.usefixtures("icmp_v6")
+async def test_real_loopback_echo_ipv6_link_local_with_a_zone() -> None:
+    # macOS gives its loopback interface fe80::1; Linux has no link-local
+    # address on lo, so this runs where the address exists.
+    name = "lo0"
+    try:
+        scope_id = socket.if_nametoindex(name)
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as probe:
+            probe.bind(("fe80::1", 0, 0, scope_id))
+    except OSError as exc:
+        pytest.skip(f"fe80::1%{name} is not configured: {exc}")
+
+    sample = await icmp_probe(f"fe80::1%{name}", timeout_s=2.0, address_family=AddressFamily.AUTO)
+
+    assert sample.status == SampleStatus.OK, sample.error
+
+
+async def test_small_backward_wall_clock_step_does_not_shorten_the_round_trip(
+    engines: list[icmp.IcmpEngine], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reply arrives 60 ms after the send, past the 30 ms timeout, and the
+    # wall clock has stepped back 40 ms by then, so the kernel stamp reads
+    # 20 ms. A step smaller than the round trip stays inside [0, monotonic]
+    # and was taken at face value: a late reply counted as ok.
+    step_ns = [0]
+    stepped_clock = SimpleNamespace(
+        perf_counter_ns=time.perf_counter_ns,
+        time_ns=lambda: time.time_ns() + step_ns[0],
+    )
+    monkeypatch.setattr(icmp, "time", stepped_clock)
+
+    def respond(sock: FakeIcmpSocket, data: bytes, address: Any) -> None:
+        step_ns[0] = -40_000_000
+        arrival_ns = time.time_ns() + 60_000_000 + step_ns[0]
+        sock.deliver(echo_reply_for(data), address, [timestamp_cmsg(arrival_ns)])
+
+    engine = make_engine(engines, FakeSocketFactory(responder=respond), kernel_timestamps=True)
+    task = asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=0.03))
+    await asyncio.sleep(0)
+
+    time.sleep(0.07)  # the loop reads the reply 70 ms after the send
+
+    assert (await task).status == SampleStatus.TIMEOUT
+
+
+async def test_expiry_reads_past_one_read_budget_for_a_queued_reply(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    # After a stall more replies can be queued than one reader pass handles.
+    # The expiring probe's reply sits behind a full budget of other replies;
+    # it was declared a timeout with its reply still unread.
+    factory = FakeSocketFactory()
+    engine = make_engine(
+        engines, factory, kernel_timestamps=True, probes_per_socket=icmp._READ_BUDGET * 2
+    )
+    loop = asyncio.get_running_loop()
+    tasks = [
+        asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
+        for _ in range(icmp._READ_BUDGET + 2)
+    ]
+    await asyncio.sleep(0)
+    sock = factory.sockets[0]
+    loop.remove_reader(sock.fileno())
+    requests = [packet for packet, _address in sock.sent]
+    for request in requests[1:] + requests[:1]:
+        sock.deliver(echo_reply_for(request), ("127.0.0.1", 0))
+    first_sequence = ECHO_HEADER.unpack_from(requests[0])[4]
+    entry = engine._sockets[False][0].pending[first_sequence]
+
+    engine._expire(entry)
+
+    assert entry.future.result().status == SampleStatus.OK
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_expiry_reads_past_stale_datagrams_for_a_queued_reply(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    # Datagrams that belong to no probe in flight (replies to probes that
+    # already timed out, another process's echoes on macOS) can be queued ahead
+    # of the expiring probe's reply, however few probes are still in flight.
+    factory = FakeSocketFactory()
+    engine = make_engine(engines, factory, kernel_timestamps=True)
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
+    await asyncio.sleep(0)
+    sock = factory.sockets[0]
+    loop.remove_reader(sock.fileno())
+    request = sock.sent[0][0]
+    entry = next(iter(engine._sockets[False][0].pending.values()))
+    stale = echo_reply_for(request, token=bytes(icmp.TOKEN_SIZE))
+    for _ in range(icmp._READ_BUDGET * 3):
+        sock.replies.append((stale, [], 0, ("127.0.0.1", 0)))
+    sock.deliver(echo_reply_for(request), ("127.0.0.1", 0))
+
+    engine._expire(entry)
+
+    assert (await task).status == SampleStatus.OK
+
+
+async def test_expiry_reads_one_budget_where_a_late_read_cannot_count(
+    engines: list[icmp.IcmpEngine],
+) -> None:
+    # Without a kernel receive stamp a reply read after the deadline is a
+    # timeout however deep it was queued, so expiry does not read further.
+    factory = FakeSocketFactory()
+    engine = make_engine(engines, factory)
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(engine.echo("127.0.0.1", ipv6=False, timeout_s=5.0))
+    await asyncio.sleep(0)
+    sock = factory.sockets[0]
+    loop.remove_reader(sock.fileno())
+    request = sock.sent[0][0]
+    entry = next(iter(engine._sockets[False][0].pending.values()))
+    stale = echo_reply_for(request, token=bytes(icmp.TOKEN_SIZE))
+    for _ in range(icmp._READ_BUDGET * 3):
+        sock.replies.append((stale, [], 0, ("127.0.0.1", 0)))
+
+    engine._expire(entry)
+
+    assert (await task).status == SampleStatus.TIMEOUT
+    assert len(sock.replies) == icmp._READ_BUDGET * 2

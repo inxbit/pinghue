@@ -594,6 +594,11 @@ async def probe_target_loop(
             continue
         finally:
             immediate_event.clear()
+        # A "probe now" request for a host whose name has not resolved looks
+        # the name up again at once, instead of spending the request (and,
+        # with --count, one of the host's probes) on the DNS cooldown.
+        if not target.resolved_address:
+            target._last_resolve_time = None
 
 
 def print_sample(
@@ -786,7 +791,7 @@ class _SampleLinePrinter:
 
     def _close(self, stream: TextIO, error: BaseException) -> None:
         self._closed = True
-        if not reader_is_gone(error):
+        if not reader_is_gone(error, stream):
             _warn(f"could not write probe lines, stopping the run: {error}")
         discard_output(stream)
         self._on_closed()
@@ -898,6 +903,10 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
             overwrite=args.overwrite,
             output_mode=args.output_mode,
         )
+
+    if exit_reason == "error":
+        # The TUI ended on an internal error; the report above records it.
+        return 1
 
     return exit_code_for_targets(
         targets,

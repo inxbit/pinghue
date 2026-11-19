@@ -489,3 +489,20 @@ def test_doctor_reports_unavailable_open_file_limit(monkeypatch: pytest.MonkeyPa
 
     assert exit_code == 0
     assert "[warn]  Open-file limit not available on this platform" in text
+
+
+def test_dns_probe_reports_a_resolver_thread_that_cannot_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # At a thread limit Thread.start() raises RuntimeError outside the
+    # worker's own handler: `--check` died with a traceback instead of
+    # reporting DNS as one failed diagnostic.
+    def cannot_start(_thread: threading.Thread) -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", cannot_start)
+
+    address, elapsed_ms, error = doctor._dns_probe("example.com")
+
+    assert (address, elapsed_ms) == (None, None)
+    assert error == "could not start a resolver thread: can't start new thread"

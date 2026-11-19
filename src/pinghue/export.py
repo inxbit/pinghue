@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from pinghue import __version__
 from pinghue.display import sanitize_display
@@ -263,10 +263,12 @@ def _existing_special_device_fd(output_path: Path, *, output_mode: str = "privat
     return fd
 
 
-def _write_temp_to_created_fd(tmp_path: Path, output_path: Path, fd: int) -> None:
+def _write_temp_to_created_fd(tmp_path: Path, output_path: Path, fd: int, *, mode: int) -> None:
     created = os.fstat(fd)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as destination:
+            # os.open applied the umask to the mode it was asked for.
+            os.fchmod(destination.fileno(), mode)
             destination.write(tmp_path.read_text(encoding="utf-8"))
     except BaseException:
         try:
@@ -356,7 +358,7 @@ def _overwrite_output_file(tmp_path: Path, output_path: Path, *, mode: int) -> N
                     fd = os.open(output_path, flags, mode)
                 except FileExistsError:
                     continue
-                _write_temp_to_created_fd(tmp_path, output_path, fd)
+                _write_temp_to_created_fd(tmp_path, output_path, fd, mode=mode)
                 return
 
         if not stat.S_ISREG(observed.st_mode):
@@ -397,7 +399,7 @@ def _install_output_file(tmp_path: Path, output_path: Path, *, overwrite: bool, 
         fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     except FileExistsError as exc:
         raise _existing_output_error(output_path) from exc
-    _write_temp_to_created_fd(tmp_path, output_path, fd)
+    _write_temp_to_created_fd(tmp_path, output_path, fd, mode=mode)
 
 
 def _require_writable_directory(output_path: Path) -> None:
@@ -412,7 +414,21 @@ def _require_writable_directory(output_path: Path) -> None:
             raise NotADirectoryError(_directory_error(parent, directory, "not a directory"))
         if not os.access(directory, os.W_OK | os.X_OK):
             raise PermissionError(_directory_error(parent, directory, "not writable"))
+        _require_creatable_names(output_path, directory)
         return
+
+
+def _require_creatable_names(output_path: Path, existing: Path) -> None:
+    # lstat stops at the first missing directory, so nothing has judged the
+    # names below it. One the filesystem cannot hold would fail the write
+    # after the run, with the directories above it already created.
+    try:
+        name_max = os.pathconf(existing, "PC_NAME_MAX")
+    except (OSError, ValueError):
+        return
+    for name in output_path.relative_to(existing).parts:
+        if 0 < name_max < len(os.fsencode(name)):
+            raise OSError(errno.ENAMETOOLONG, os.strerror(errno.ENAMETOOLONG), str(output_path))
 
 
 def _directory_error(parent: Path, existing: Path, problem: str) -> str:
@@ -426,6 +442,14 @@ def _directory_error(parent: Path, existing: Path, problem: str) -> str:
 def _require_writable_node(output_path: Path) -> None:
     if not os.access(output_path, os.W_OK):
         raise PermissionError(f"output path is not writable: {output_path}")
+
+
+def _require_stdout() -> TextIO:
+    # A stdout closed at startup (`>&-`) is None: `--output -` has nowhere to
+    # write the report.
+    if sys.stdout is None:
+        raise OSError("stdout is closed, so --output - has nowhere to write the report")
+    return sys.stdout
 
 
 def _temp_prefix(output_path: Path) -> str:
@@ -453,6 +477,7 @@ def check_output_path(
     node when it writes, so a path changed during the run is still refused.
     """
     if str(path) == "-":
+        _require_stdout()
         return
 
     output_path = Path(path)
@@ -501,7 +526,7 @@ def write_output_json(
     output_text = json.dumps(document, indent=2, sort_keys=False) + "\n"
 
     if str(path) == "-":
-        write_text(sys.stdout, output_text)
+        write_text(_require_stdout(), output_text)
         return
 
     output_path = Path(path)

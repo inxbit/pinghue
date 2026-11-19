@@ -4,15 +4,26 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 from typing import TextIO
 
 
-def reader_is_gone(error: BaseException) -> bool:
-    """Return whether a write failed because nothing reads the stream any more."""
+def _is_regular_file(stream: TextIO) -> bool:
+    try:
+        return stat.S_ISREG(os.fstat(stream.fileno()).st_mode)
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def reader_is_gone(error: BaseException, stream: TextIO | None = None) -> bool:
+    """Return whether a write to ``stream`` failed because nothing reads it any more."""
     if isinstance(error, (BrokenPipeError, ConnectionResetError)):
         return True
-    # A hung-up terminal fails writes with EIO.
-    return isinstance(error, OSError) and error.errno == errno.EIO
+    # A hung-up terminal fails writes with EIO. So does failing storage under a
+    # redirect to a file, where no reader went away and the error is reported.
+    if not isinstance(error, OSError) or error.errno != errno.EIO:
+        return False
+    return stream is None or not _is_regular_file(stream)
 
 
 def discard_output(stream: TextIO) -> None:
@@ -52,12 +63,16 @@ def write_text(stream: TextIO, text: str) -> None:
     """Write and flush ``text``, dropping it quietly when the reader is gone.
 
     ``pinghue ... --output - | head -0`` must stop like line output does, not
-    print a BrokenPipeError and exit 120. Any other write error still raises.
+    print a BrokenPipeError and exit 120. Any other write error still raises;
+    what the stream could not take is discarded then too, or the flush at exit
+    would fail again and replace the caller's exit status with 120.
     """
     try:
         stream.write(text)
         stream.flush()
     except OSError as exc:
-        if not reader_is_gone(exc):
-            raise
+        # Judged first: discarding points the descriptor at the null device.
+        gone = reader_is_gone(exc, stream)
         discard_output(stream)
+        if not gone:
+            raise

@@ -104,6 +104,10 @@ line-break characters, such as form feeds or Unicode line separators, stay insid
 the line instead of splitting it into several targets: control characters make
 the target invalid, and anything else non-ASCII is shown escaped.
 
+An IPv6 link-local target takes its zone, as in `fe80::1%en0`. A host name that
+resolves to a link-local address keeps the zone the resolver reports, shown by
+its interface index (`fe80::1%7`).
+
 ```text
 # edge and core checks
 1.1.1.1
@@ -185,6 +189,8 @@ Pass `--tui` to start the TUI even though stdout is not a terminal, for example
 when a wrapper redirects stdout but stderr is still your terminal. The TUI
 draws on stderr, so with stderr closed (for example `2>&-`) it does not start
 and pinghue exits with status `1`; line output does not need stderr and runs.
+With stdout closed (for example `>&-`), `--output -` has nowhere to write the
+report: pinghue refuses it before probing and exits with status `1`.
 
 Example no-TUI output:
 
@@ -246,7 +252,7 @@ pinghue [OPTIONS] [TARGET ...]
 | Code | Meaning |
 | --- | --- |
 | `0` | Run completed (and no `--fail-on-*` condition triggered). Interrupting a run with Ctrl-C in `--no-tui` mode, or with `SIGTERM` or `SIGHUP` in either mode, still evaluates the fail conditions and writes `--output`, matching classic `ping` behavior; the JSON `exit_reason` field records `interrupted`. A `SIGHUP` that is already ignored when pinghue starts (for example under `nohup`) stays ignored. In the TUI, use `q`, which records `user_quit`. |
-| `1` | Runtime error (for example the `--output` file could not be written), or `--check` found the environment not ICMP-ready. |
+| `1` | Runtime error (for example the `--output` file could not be written, or the TUI ended on an internal error, which the JSON `exit_reason` field records as `error`), or `--check` found the environment not ICMP-ready. |
 | `2` | Usage error: unknown flag or invalid value. |
 | `3` | `--fail-on-any-down` / `--fail-on-all-down` condition triggered. |
 
@@ -264,8 +270,8 @@ up.
 | `a` | Show or hide resolved addresses. |
 | `r` | Reset the selected host. |
 | `R` | Reset all hosts. |
-| `b` | Probe the selected host immediately. |
-| `B` | Probe all hosts immediately. |
+| `b` | Probe the selected host immediately. A host whose name has not resolved is looked up again first. |
+| `B` | Probe all hosts immediately, looking up again every name that has not resolved. |
 | `/` | Search hosts and addresses. `Enter` returns to the table with the search kept, `Esc` clears it. |
 
 Click any column header except mode and history to sort by it. The first click sorts host names and addresses up and every other column worst first (down hosts, full loss, the slowest replies), the second click reverses it, and the third goes back to the input order. Host names and addresses sort by value: `10.1.9.9` comes before `10.1.10.10`, `host-2` before `host-10`, IPv4 before IPv6 and both before names. Rows with nothing to sort by, such as a host with no reply yet, stay last either way, and sorting by address also shows the address column. The sort follows the values as they change, so a host that starts losing packets moves up on the next refresh while the selection stays on its row. Header clicks need a terminal that passes mouse clicks through (in tmux, `set -g mouse on`).
@@ -362,7 +368,7 @@ The doctor also reports the open-file limit, which bounds TCP mode only. Every i
 
 `--output PATH` writes one JSON document per run. Existing regular files are preserved by default; add `--overwrite` when replacing a known report path is intentional. Symlinks, sockets, multiply linked regular files, and other unsupported special nodes are never replaced. Existing character devices and FIFOs are written directly only when they can be opened safely as the same node. The schema lives at [`schemas/output-v1.schema.json`](https://github.com/inxbit/pinghue/blob/main/schemas/output-v1.schema.json), and an example lives at [`examples/pinghue-output-example.json`](https://github.com/inxbit/pinghue/blob/main/examples/pinghue-output-example.json).
 
-In a shared directory such as `/tmp`, another local user can create the report path before pinghue does. A FIFO is written only when it is owned by the effective user, and `--overwrite` refuses a regular file owned by anyone else; character devices are accepted regardless of owner, because the only one an unprivileged user can create is the driverless `0:0` whiteout device on Linux, which is refused. In the default `private` output mode a FIFO is also written only when its permissions give group and other users no access: `mkfifo` under the usual umask `022` creates mode `0644`, which lets every local user open it and read the report, so create it with `mkfifo -m 600`, or pass `--output-mode umask` to accept its permissions as they are. The bits are checked when pinghue opens the FIFO, and a `chmod` does not revoke a reader that opened the FIFO, or was waiting to open it, while group or other users had access, so remove a FIFO that was ever open to them and recreate it with `mkfifo -m 600` instead of changing its mode. On macOS a `/dev/fd/N` path names one of the run's own descriptors, and pinghue judges the file open on it. A pipe, which process substitution passes, is accepted whatever its fixed permission bits show, because it has no name that other users could open it by; a named FIFO behind the descriptor, as in `--output /dev/fd/3 3>report.fifo`, is judged by its own permissions like any other FIFO. These refusals exit with status 1 and write nothing. pinghue checks the output path before probing starts, so a path it would refuse, an existing node or directory it cannot write, or a parent that is not a directory is reported at once instead of after the run, and checks again when it writes the report. The directory itself is not checked: a user who owns it, or can write to it without the sticky bit, can still replace a finished report, so keep evidence in a directory that only you control.
+In a shared directory such as `/tmp`, another local user can create the report path before pinghue does. A FIFO is written only when it is owned by the effective user, and `--overwrite` refuses a regular file owned by anyone else; character devices are accepted regardless of owner, because the only one an unprivileged user can create is the driverless `0:0` whiteout device on Linux, which is refused. In the default `private` output mode a FIFO is also written only when its permissions give group and other users no access: `mkfifo` under the usual umask `022` creates mode `0644`, which lets every local user open it and read the report, so create it with `mkfifo -m 600`, or pass `--output-mode umask` to accept its permissions as they are. The bits are checked when pinghue opens the FIFO, and a `chmod` does not revoke a reader that opened the FIFO, or was waiting to open it, while group or other users had access, so remove a FIFO that was ever open to them and recreate it with `mkfifo -m 600` instead of changing its mode. On macOS a `/dev/fd/N` path names one of the run's own descriptors, and pinghue judges the file open on it. A pipe, which process substitution passes, is accepted whatever its fixed permission bits show, because it has no name that other users could open it by; a named FIFO behind the descriptor, as in `--output /dev/fd/3 3>report.fifo`, is judged by its own permissions like any other FIFO. These refusals exit with status 1 and write nothing. pinghue checks the output path before probing starts, so a path it would refuse, an existing node or directory it cannot write, or a parent that is not a directory is reported at once instead of after the run, and checks again when it writes the report. The directory itself is not checked: a user who owns it, or can write to it without the sticky bit, can still replace a finished report, so keep evidence in a directory that only you control. That includes the directory's access control list: on macOS a report created in a directory with an inheritable ACL inherits it, and mode `0600` does not remove an entry that lets other users read the file (`ls -le` shows such entries).
 
 New report creation is no-clobber and first tries to hard-link a complete temporary report into place atomically. On filesystems without hardlink support (for example exFAT and some FUSE mounts), it falls back to an exclusive create and copy: ordinary errors and handled interrupts remove that fallback file, but an abrupt process or system failure can leave a partial new report. Explicitly overwriting an existing regular file uses a descriptor-verified in-place rewrite so a path race cannot replace a symlink, socket, FIFO, or device node; that path is also not crash-atomic. Evidence workflows should accept a report only after pinghue exits successfully and the JSON parses, then rotate it as a separate step.
 

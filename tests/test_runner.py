@@ -1390,3 +1390,83 @@ def test_dns_lookup_budget_outlasts_glibc_nameserver_failover() -> None:
     usable_budget = runner.DNS_LOOKUP_TIMEOUT_SECONDS - probes.DNS_THREAD_WAIT_SECONDS
     assert usable_budget > 2 * glibc_default_nameserver_timeout
     assert probes.MAX_DNS_DAEMON_THREADS > runner.DNS_RESOLVE_CONCURRENCY
+
+
+async def test_probe_now_retries_a_failed_lookup_without_waiting_for_the_dns_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # b / B in the TUI wake a host's loop. For a host whose name had not
+    # resolved, the wake-up was spent on the DNS cooldown: no lookup, no probe,
+    # and under --count one of the host's probes used up.
+    lookups = 0
+
+    async def fails_then_resolves(name: str, *_: object, **__: object) -> ResolvedTarget:
+        nonlocal lookups
+        lookups += 1
+        if lookups == 1:
+            return ResolvedTarget(name, None, None, "getaddrinfo: Name or service not known")
+        return ResolvedTarget(name, "192.0.2.61", AddressFamily.IPV4, addresses=("192.0.2.61",))
+
+    monkeypatch.setattr(runner, "resolve_target", fails_then_resolves)
+    monkeypatch.setattr(runner, "_probe_address", _ok_probe)
+    target = TargetRun(target="recover.example", status=TargetStatus.RESOLVING)
+    probe_now = asyncio.Event()
+    seen: list[ProbeSample | None] = []
+
+    def press_probe_now_after_the_failure(_target: TargetRun, sample: ProbeSample | None) -> None:
+        seen.append(sample)
+        if len(seen) == 1:
+            probe_now.set()
+
+    await asyncio.wait_for(
+        runner.probe_target_loop(
+            target,
+            args=build_args(count=2, interval=30.0, targets=["recover.example"]),
+            mode=ProbeMode.ICMP,
+            semaphore=asyncio.Semaphore(1),
+            stop_event=asyncio.Event(),
+            immediate_event=probe_now,
+            initial_delay=0.0,
+            on_sample=press_probe_now_after_the_failure,
+        ),
+        timeout=5.0,
+    )
+
+    assert lookups == 2
+    assert seen[0] is None
+    assert seen[1] is not None and seen[1].status == SampleStatus.OK
+    assert target.status == TargetStatus.HEALTHY
+
+
+async def test_run_exits_with_an_error_after_a_tui_crash_and_still_writes_the_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pinghue.app as app_module
+
+    captured: dict[str, object] = {}
+    timestamp = datetime(2026, 5, 14, 18, 32, 11, tzinfo=UTC)
+
+    class CrashedApp:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def run_async(self) -> tuple[list[TargetRun], str, datetime, datetime]:
+            return (
+                [TargetRun("1.1.1.1", status=TargetStatus.HEALTHY)],
+                "error",
+                timestamp,
+                timestamp,
+            )
+
+    def fake_write_output_json(_: Path, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(app_module, "PinghueApp", CrashedApp)
+    monkeypatch.setattr(runner, "write_output_json", fake_write_output_json)
+
+    exit_code = await runner.run(
+        build_args(no_tui=False, output=tmp_path / "out.json"), mode=ProbeMode.ICMP
+    )
+
+    assert exit_code == 1
+    assert captured["exit_reason"] == "error"

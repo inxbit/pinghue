@@ -476,3 +476,136 @@ def test_check_into_a_closed_pipe_keeps_its_exit_status() -> None:
     assert result.returncode == baseline.returncode
     assert b"Broken pipe" not in result.stderr
     assert b"Exception ignored" not in result.stderr
+
+
+def _run_with_stdout_closed(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run ``command`` as a shell's ``>&-`` does: descriptor 1 closed at startup."""
+    return subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=_cli_env(),
+        preexec_fn=lambda: os.close(1),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+
+def _check_command(*arguments: str) -> list[str]:
+    # A local name keeps the DNS part of the check off the network.
+    return [sys.executable, "-m", "pinghue", "--check", "--resolve-name", "localhost", *arguments]
+
+
+def _check_exit_status(*arguments: str) -> int:
+    return subprocess.run(
+        _check_command(*arguments),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=_cli_env(),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    ).returncode
+
+
+@pytest.mark.parametrize("arguments", [(), ("--quiet",)], ids=["check", "check-quiet"])
+def test_check_with_stdout_closed_keeps_its_exit_status(arguments: tuple[str, ...]) -> None:
+    # `pinghue --check --quiet >&-` died on `None.isatty()`: a traceback and
+    # status 1 on a host that is ready.
+    result = _run_with_stdout_closed(_check_command(*arguments))
+
+    assert result.returncode == _check_exit_status(*arguments)
+    assert b"Traceback" not in result.stderr
+
+
+def test_output_dash_with_stdout_closed_is_refused_before_probing() -> None:
+    # The run probed, then died writing the report to a stdout of None. With
+    # `--output -` the probe lines go to stderr, so none must show up there.
+    result = _run_with_stdout_closed(_cli_command("--no-tui", "--output", "-", "-c", "1"))
+
+    assert result.returncode == 1
+    assert b"Traceback" not in result.stderr
+    assert result.stderr.startswith(b"pinghue: error: ")
+    assert b"stdout is closed" in result.stderr
+    assert b"127.0.0.1" not in result.stderr
+
+
+def test_check_prints_on_a_stdout_that_cannot_encode_its_symbols() -> None:
+    # The report's dash and arrows are not ASCII; on a stdout with a legacy
+    # encoding `--check` died with UnicodeEncodeError.
+    result = subprocess.run(
+        _check_command(),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        env=_cli_env(PYTHONIOENCODING="ascii"),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == _check_exit_status()
+    assert b"Traceback" not in result.stderr
+    text = result.stdout.decode("ascii")
+    assert "- environment check" in text
+    assert 'getaddrinfo("localhost")' in text
+
+
+@pytest.mark.parametrize("flag", ["--help", "--version"])
+def test_help_and_version_into_a_closed_pipe_stop_quietly(flag: str) -> None:
+    # `pinghue --help | head -0` printed "Exception ignored ... BrokenPipeError"
+    # and exited 120, like `--check` and `--output -` before 7.1.1.
+    result = _run_into_a_closed_pipe([sys.executable, "-m", "pinghue", flag])
+
+    assert result.returncode == 0
+    assert b"Broken pipe" not in result.stderr
+    assert b"Exception ignored" not in result.stderr
+
+
+def _cap_file_size_at_one_kibibyte() -> None:
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024))
+
+
+def test_output_dash_write_failure_exits_with_the_runtime_error_status(tmp_path: Path) -> None:
+    # `pinghue ... --output - > report.json` on storage that refuses the write
+    # (here a file size limit; a full disk fails the same way) reported the
+    # error, then failed again in the flush at exit: "Exception ignored" and
+    # status 120 instead of 1.
+    with (tmp_path / "report.json").open("wb") as report:
+        result = subprocess.run(
+            _cli_command("--no-tui", "--output", "-", "-c", "8", "-i", "0.1"),
+            stdin=subprocess.DEVNULL,
+            stdout=report,
+            stderr=subprocess.PIPE,
+            env=_cli_env(),
+            preexec_fn=_cap_file_size_at_one_kibibyte,
+            timeout=EXIT_TIMEOUT,
+            check=False,
+        )
+
+    assert b"pinghue: error: " in result.stderr
+    assert b"Exception ignored" not in result.stderr
+    assert result.returncode == 1
+
+
+def test_help_into_a_file_that_refuses_the_write_exits_with_the_runtime_error_status(
+    tmp_path: Path,
+) -> None:
+    # The help text is longer than the file size limit, so the flush fails
+    # with a real write error, not a reader that went away: that must not
+    # pass as success, nor fail again in the flush at exit (status 120).
+    with (tmp_path / "help.txt").open("wb") as help_file:
+        result = subprocess.run(
+            [sys.executable, "-m", "pinghue", "--help"],
+            stdin=subprocess.DEVNULL,
+            stdout=help_file,
+            stderr=subprocess.PIPE,
+            env=_cli_env(),
+            preexec_fn=_cap_file_size_at_one_kibibyte,
+            timeout=EXIT_TIMEOUT,
+            check=False,
+        )
+
+    assert b"pinghue: error: " in result.stderr
+    assert b"Exception ignored" not in result.stderr
+    assert result.returncode == 1

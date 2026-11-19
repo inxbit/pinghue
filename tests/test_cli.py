@@ -775,3 +775,32 @@ def test_parse_args_rejects_dash_prefixed_target(
     with pytest.raises(SystemExit):
         parse_args(["-4", "1.1.1.1"])
     assert "invalid target" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--bad\x1b[2J", "127.0.0.1"], ["--fail-on\x1b[2J", "127.0.0.1"]],
+    ids=["unrecognized-argument", "ambiguous-option"],
+)
+def test_parse_args_escapes_control_bytes_in_argparse_messages(
+    capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    # argparse echoes an unknown or ambiguous option as typed; pinghue's own
+    # messages were escaped, these were not.
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(argv)
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 2
+    assert "\x1b" not in captured.err
+    assert "\\x1b[2J" in captured.err
+
+
+def test_parse_args_rejects_an_empty_output_path(capsys: pytest.CaptureFixture[str]) -> None:
+    # pathlib turns "" into ".", which was then refused at run time (status 1)
+    # as "output path already exists and is not a regular file: .".
+    with pytest.raises(SystemExit) as excinfo:
+        parse_args(["--output", "", "127.0.0.1"])
+
+    assert excinfo.value.code == 2
+    assert "argument --output: output path must not be empty" in capsys.readouterr().err

@@ -139,7 +139,11 @@ def _dns_probe(
             outcome.append(exc)
 
     thread = threading.Thread(target=worker, name="pinghue-doctor-dns", daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except RuntimeError as exc:
+        # "can't start new thread": a thread or process limit, not a DNS verdict.
+        return None, None, f"could not start a resolver thread: {exc}"
     thread.join(timeout_s)
 
     if not outcome:
@@ -297,16 +301,43 @@ def _write_fd_limit(lines: list[str], *, use_color: bool) -> None:
     )
 
 
+def _encodable(stream: TextIO, text: str) -> str:
+    """Return ``text`` as ``stream`` can encode it.
+
+    The report's dash and arrows are not ASCII. On a stdout with a legacy
+    encoding they become their ASCII spelling, and anything else the encoding
+    lacks becomes ``?``, instead of the write raising UnicodeEncodeError.
+    """
+    encoding = getattr(stream, "encoding", None)
+    if not encoding:
+        return text
+    try:
+        text.encode(encoding)
+    except LookupError:
+        return text
+    except UnicodeEncodeError:
+        plain = text.replace("\N{EM DASH}", "-").replace("\N{RIGHTWARDS ARROW}", "->")
+        return plain.encode(encoding, "replace").decode(encoding)
+    return text
+
+
 def run_check(
     *,
-    stream: TextIO = sys.stdout,
+    stream: TextIO | None = None,
     quiet: bool = False,
     use_color: bool | None = None,
     resolve_name: str | None = None,
 ) -> int:
-    """Run environment diagnostics and return a process exit code."""
+    """Run environment diagnostics and return a process exit code.
+
+    The report goes to ``stream``, by default the current stdout. A stdout
+    closed at startup is None: the checks still run and set the exit code, and
+    nothing is printed.
+    """
+    if stream is None:
+        stream = sys.stdout
     if use_color is None:
-        use_color = stream.isatty()
+        use_color = stream is not None and stream.isatty()
 
     lines: list[str] = []
     _write_header(lines)
@@ -416,7 +447,7 @@ def run_check(
         exit_code = 1
         lines.extend(["", "Not ready for ICMP. TCP mode works. See fixes above."])
 
-    if not quiet:
-        write_text(stream, "\n".join(lines) + "\n")
+    if not quiet and stream is not None:
+        write_text(stream, _encodable(stream, "\n".join(lines) + "\n"))
 
     return exit_code
