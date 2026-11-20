@@ -438,7 +438,7 @@ class PinghueTextualApp(App[None]):
             top + table.size.height + VIEWPORT_MARGIN_ROWS,
         )
 
-    def _refresh_table(self, width: int | None = None) -> None:
+    def _refresh_table(self, width: int | None = None, *, from_top: bool = False) -> None:
         try:
             table = self.query_one("#targets", DataTable)
         except NoMatches:
@@ -465,11 +465,16 @@ class PinghueTextualApp(App[None]):
         rows, fleet = self._view()
         row_count = table.row_count if isinstance(table, DataTable) else 0
         cursor_row = table.cursor_row if isinstance(table, DataTable) else 0
+        priority = self._priority_rows(table)
         summary = self._table_renderer.sync(
             table,
             rows,
             fleet=fleet,
-            priority=self._priority_rows(table),
+            priority=priority,
+            # A table that loses a row is rebuilt. Unless the caller goes to
+            # the top anyway, the rows it showed and the row of the cursor
+            # have to be back at once; the others are added in chunks.
+            at_least=0 if from_top else max(priority.stop, cursor_row + 1),
             full=full,
         )
         if isinstance(table, DataTable) and table.row_count < row_count:
@@ -544,7 +549,7 @@ class PinghueTextualApp(App[None]):
     def _show_new_view(self) -> None:
         """Apply a changed sort or search at once, from the top of the table."""
         self._update_display_order()
-        self._refresh_table()
+        self._refresh_table(from_top=True)
         table = self.query_one("#targets", DataTable)
         for key, column in table.columns.items():
             column.label = Text(

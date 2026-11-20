@@ -137,10 +137,16 @@ SUMMARY_CATEGORIES: tuple[CellValue, ...] = (
 # loop never blocks for much longer than the budget, every changed row is
 # refreshed within FULL_SWEEP_PASSES + 1 full passes however large the table,
 # and small tables are refreshed whole every pass.
+#
+# Rows the table lacks (at startup, or when a search is cleared or widened)
+# are added the same way: MIN_ROWS_ADDED_PER_CALL of them at once, which is
+# more than a screen, then more while the budget lasts, and the rest in the
+# catch-up chunks.
 ROW_REFRESH_BUDGET_S = 0.02
 ROW_CATCH_UP_DELAY_S = 0.02
 FULL_SWEEP_PASSES = 8
 MIN_ROWS_PER_PASS = 256
+MIN_ROWS_ADDED_PER_CALL = 256
 VIEWPORT_MARGIN_ROWS = 4
 
 _NO_SAMPLE = datetime.max.replace(tzinfo=UTC)
@@ -734,6 +740,8 @@ class TargetTable(DataTable[Any]):
     every visible cell (about 100 us each) dominates the cost of a refresh.
     Inside ``batch_updates()`` those requests are dropped and the caller
     repaints the rows it changed with ``refresh_rows()``.
+
+    New rows are not measured: see ``_update_dimensions()``.
     """
 
     _batch_depth = 0
@@ -758,6 +766,19 @@ class TargetTable(DataTable[Any]):
             return self
         super().refresh(*regions, repaint=repaint, layout=layout, recompose=recompose)
         return self
+
+    def _update_dimensions(self, new_rows: Iterable[Any]) -> None:
+        """Recompute the scroll extent without measuring ``new_rows``.
+
+        DataTable measures every cell of a new row for the content width of
+        its column, which takes about twice as long as adding the row. That
+        width only sizes a column without a set width. Every column of this
+        table has one, and its rows are one line high and have no label, so
+        the measurements change nothing. tests/test_ui_rendering.py pins
+        this against a plain DataTable.
+        """
+        del new_rows
+        super()._update_dimensions(())
 
     def refresh_rows(self, indices: Iterable[int]) -> None:
         """Repaint the given rows where they are on screen.
@@ -818,7 +839,8 @@ class TargetTableRenderer:
     cells whose text or style changed are sent to the table. Rows near the
     viewport are refreshed first and the rest round-robin within a time
     budget, continued by catch_up(); a changed state label is written at once
-    on every full pass, so no state change is held back.
+    on every full pass, so no state change is held back. Rows the table
+    lacks are added a chunk per call, the rest by catch_up() too.
     """
 
     def __init__(
@@ -860,12 +882,14 @@ class TargetTableRenderer:
         self._generation = 0
         self._cursor = 0
         self._owed = 0
+        self._unadded = 0
         self._syncing = False
 
     @property
     def behind(self) -> bool:
-        """Whether rows owed by the last full pass are waiting for catch_up()."""
-        return self._owed > 0
+        """Whether rows are waiting for catch_up(): rows the last full pass
+        owes a refresh, or rows the table does not have yet."""
+        return self._owed > 0 or self._unadded > 0
 
     def set_layout(self, *, show_address: bool, widths: ColumnWidths) -> None:
         """Record the layout the cells depend on; a change re-renders every row."""
@@ -881,6 +905,7 @@ class TargetTableRenderer:
         *,
         fleet: Sequence[TargetRun] | None = None,
         priority: range = range(0),
+        at_least: int = 0,
         full: bool = True,
         now: datetime | None = None,
     ) -> FleetSummary | None:
@@ -894,6 +919,11 @@ class TargetTableRenderer:
         time budget, and returns the fleet summary; while ``behind``,
         catch_up() refreshes the rest of the rows the pass owes.
 
+        A table with fewer rows than ``targets`` gets its first ``at_least``
+        rows in this call, for a caller that needs them at once (a rebuilt
+        table starts again from its first row, and the cursor has to go back
+        to its own), and a chunk more; catch_up() adds the rest.
+
         A sync started while one runs does nothing: DataTable.clear() resets
         the scroll position, and Textual runs the app's scroll watcher, which
         syncs the visible rows, inside that call. The running sync draws
@@ -903,7 +933,15 @@ class TargetTableRenderer:
             return None
         self._syncing = True
         try:
-            return self._sync(table, targets, fleet=fleet, priority=priority, full=full, now=now)
+            return self._sync(
+                table,
+                targets,
+                fleet=fleet,
+                priority=priority,
+                at_least=at_least,
+                full=full,
+                now=now,
+            )
         finally:
             self._syncing = False
 
@@ -914,6 +952,7 @@ class TargetTableRenderer:
         *,
         fleet: Sequence[TargetRun] | None,
         priority: range,
+        at_least: int,
         full: bool,
         now: datetime | None,
     ) -> FleetSummary | None:
@@ -927,7 +966,7 @@ class TargetTableRenderer:
             self._clear_rows(table)
         # Rows are added outside the batch: add_row's own repaint request
         # must not be dropped.
-        self._add_missing_rows(table, targets)
+        self._add_missing_rows(table, targets, at_least=at_least, deadline=deadline)
         count = min(len(targets), len(self._rows))
         changed: list[int] = []
         batch = getattr(table, "batch_updates", nullcontext)
@@ -944,16 +983,21 @@ class TargetTableRenderer:
         self._repaint(table, changed)
         if not full:
             return None
-        if fleet is targets:
+        if fleet is targets and not self._unadded:
             return self._summary(self._categories[:count], self._newest[:count], now)
         return self._fleet_summary(fleet, now)
 
     def catch_up(self, table: Any, targets: Sequence[TargetRun]) -> bool:
-        """Refresh more of the rows the last full pass owes, within the time
-        budget, and return whether rows are still owed."""
+        """Add more of the rows the table lacks and refresh more of the rows
+        the last full pass owes, within the time budget, and return whether
+        rows are still waiting."""
         if not self.behind:
             return False
         deadline = time.perf_counter() + self.budget_s
+        # Outside the batch, as in sync().
+        self._add_missing_rows(table, targets, at_least=0, deadline=deadline)
+        if not self._owed:
+            return self.behind
         count = min(len(targets), len(self._rows))
         changed: list[int] = []
         batch = getattr(table, "batch_updates", nullcontext)
@@ -1049,7 +1093,7 @@ class TargetTableRenderer:
         ``owed_only`` also until no rows are owed."""
         start = bisect_left(stale, self._cursor)
         for done, index in enumerate(stale[start:] + stale[:start]):
-            if (done and time.perf_counter() >= deadline) or (owed_only and not self.behind):
+            if (done and time.perf_counter() >= deadline) or (owed_only and not self._owed):
                 return
             if self._render_row(table, index, targets[index]):
                 changed.append(index)
@@ -1112,8 +1156,18 @@ class TargetTableRenderer:
             self._history_value(row, target.samples),
         )
 
-    def _add_missing_rows(self, table: Any, targets: Sequence[TargetRun]) -> None:
-        for index in range(len(self._rows), len(targets)):
+    def _add_missing_rows(
+        self, table: Any, targets: Sequence[TargetRun], *, at_least: int, deadline: float
+    ) -> None:
+        """Add rows the table lacks, in order: the first ``at_least`` rows
+        and MIN_ROWS_ADDED_PER_CALL more than it has at once, then rows until
+        the deadline."""
+        # The host labels are those of the targets the last sync() was given.
+        count = min(len(targets), len(self._host_labels))
+        guaranteed = max(at_least, len(self._rows) + MIN_ROWS_ADDED_PER_CALL)
+        for index in range(len(self._rows), count):
+            if index >= guaranteed and time.perf_counter() >= deadline:
+                break
             target = targets[index]
             row = _RowState()
             values = self._values(index, row, target)
@@ -1130,6 +1184,7 @@ class TargetTableRenderer:
             self._categories.append(PENDING_LABEL)
             self._newest.append(_NO_SAMPLE)
             self._mark_rendered(index, target)
+        self._unadded = max(0, count - len(self._rows))
 
     def _mark_rendered(self, index: int, target: TargetRun) -> None:
         row = self._rows[index]

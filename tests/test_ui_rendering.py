@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import textual.widgets._data_table as data_table_module
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.geometry import Region
@@ -1192,3 +1193,272 @@ async def test_rows_a_full_pass_leaves_are_refreshed_by_catch_up_chunks(
         assert all(
             table.get_cell(target_row_key(index), "last").plain == "321.00" for index in range(60)
         )
+
+
+def _fill(
+    renderer: TargetTableRenderer, table: RecordingTable, targets: list[TargetRun]
+) -> list[int]:
+    """Run catch_up() until nothing is owed; return the row count after each call."""
+    counts: list[int] = []
+    behind = renderer.behind
+    while behind:
+        behind = renderer.catch_up(table, targets)
+        counts.append(len(table.rows))
+    return counts
+
+
+def test_a_table_that_grows_is_filled_in_chunks() -> None:
+    # Clearing a search that matched one of 1,000 hosts added the other 999
+    # rows in one call, however long that held the event loop.
+    targets = [healthy(f"host-{index:04d}") for index in range(1000)]
+    table = RecordingTable()
+    # With a zero budget every call adds exactly the guaranteed minimum.
+    renderer = make_renderer(budget_s=0.0)
+    renderer.sync(table, targets[:1], fleet=targets)
+    assert not renderer.behind
+    chunk = ui.MIN_ROWS_ADDED_PER_CALL
+
+    renderer.sync(table, targets)
+
+    assert len(table.rows) == 1 + chunk
+    assert renderer.behind
+    assert _fill(renderer, table, targets) == [*range(1 + 2 * chunk, 1000, chunk), 1000]
+    assert not renderer.behind
+    assert renderer.catch_up(table, targets) is False
+    labels = host_labels([target.target for target in targets], WIDTHS["host"])
+    assert [table.cell(index, "host").plain for index in range(1000)] == labels
+
+
+def test_a_pass_with_time_left_adds_more_than_the_minimum() -> None:
+    targets = [healthy(f"host-{index:04d}") for index in range(1000)]
+    table = RecordingTable()
+    renderer = make_renderer(budget_s=60.0)
+
+    renderer.sync(table, targets)
+
+    assert len(table.rows) == 1000
+    assert not renderer.behind
+
+
+def test_the_summary_counts_every_host_while_rows_are_still_being_added() -> None:
+    targets = [healthy(f"host-{index:04d}") for index in range(600)]
+    targets[500].status = TargetStatus.DOWN
+    targets[550] = healthy("host-0550", ok(5.0, at=-30.0))
+    table = RecordingTable()
+    renderer = make_renderer(budget_s=0.0)
+
+    summary = renderer.sync(table, targets, now=T0)
+
+    assert len(table.rows) < 600
+    assert summary is not None
+    assert summary.counts == {"healthy": 599, "down": 1}
+    assert summary.oldest_result_age_s == 30.0
+
+
+def test_a_row_added_by_catch_up_shows_what_its_host_reports_by_then() -> None:
+    targets = [healthy(f"host-{index:04d}") for index in range(600)]
+    table = RecordingTable()
+    renderer = make_renderer(budget_s=0.0)
+    renderer.sync(table, targets)
+    assert target_row_key(599) not in table.rows
+
+    add(targets[599], ok(42.0))
+    _fill(renderer, table, targets)
+
+    assert table.cell(599, "last").plain == "42.00"
+    # The row is current: the next pass has nothing to write.
+    table.updates.clear()
+    renderer.sync(table, targets)
+    assert table.updates == []
+
+
+def test_catch_up_adds_rows_and_refreshes_the_rows_a_pass_owes() -> None:
+    targets = [healthy(f"host-{index:04d}") for index in range(600)]
+    table = RecordingTable()
+    renderer = make_renderer(budget_s=0.0)
+    renderer.sync(table, targets)
+    for index in (3, 4, 5):
+        add(targets[index], ok(77.0))
+
+    # A zero budget refreshes one changed row per call and owes the others.
+    renderer.sync(table, targets)
+    assert [table.cell(index, "last").plain for index in (3, 4, 5)].count("77.00") == 1
+
+    _fill(renderer, table, targets)
+
+    assert len(table.rows) == 600
+    assert [table.cell(index, "last").plain for index in (3, 4, 5)] == ["77.00"] * 3
+    assert not renderer.behind
+
+
+def test_rows_the_caller_needs_at_once_are_added_in_the_same_call() -> None:
+    # A table that loses a row is rebuilt from its first row, and the caller
+    # puts the cursor back: the rows up to it cannot wait for catch_up().
+    targets = [healthy(f"host-{index:04d}") for index in range(1000)]
+    table = RecordingTable()
+    renderer = make_renderer(budget_s=0.0)
+    renderer.sync(table, targets)
+    _fill(renderer, table, targets)
+    assert len(table.rows) == 1000
+    labels = host_labels([target.target for target in targets], WIDTHS["host"])
+
+    renderer.sync(table, targets[1:], fleet=targets, at_least=700)
+
+    assert len(table.rows) == 700
+    assert table.cell(699, "host").plain == labels[700]
+    assert renderer.behind
+    _fill(renderer, table, targets[1:])
+    assert [table.cell(index, "host").plain for index in range(999)] == labels[1:]
+
+
+@pytest.fixture
+def rows_in_small_chunks(monkeypatch: pytest.MonkeyPatch) -> int:
+    """Add rows eight at a time, so a table of a few dozen hosts fills in chunks."""
+    monkeypatch.setattr(ui, "MIN_ROWS_ADDED_PER_CALL", 8)
+    monkeypatch.setattr(app_module, "ROW_CATCH_UP_DELAY_S", 0.001)
+    return 8
+
+
+def _chunked_app(targets: list[str]) -> PinghueTextualApp:
+    app = PinghueTextualApp(args=build_args(targets=targets), mode=ProbeMode.ICMP)
+    # A zero budget adds exactly the minimum number of rows per call.
+    app._table_renderer.budget_s = 0.0
+    return app
+
+
+async def _start_filled(pilot: Any, app: PinghueTextualApp) -> DataTable[Any]:
+    table = await _start(pilot, app)
+    assert await _wait_until(pilot, lambda: table.row_count == len(app.targets), ticks=400)
+    return table
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_clearing_a_search_fills_the_table_in_chunks(rows_in_small_chunks: int) -> None:
+    targets = [f"host-{index:02d}.example" for index in range(30)]
+    app = _chunked_app(targets)
+    async with app.run_test(size=(140, 40)) as pilot:
+        table = await _start_filled(pilot, app)
+        await pilot.press("slash", *"host-07")
+        await pilot.pause()
+        assert table.row_count == 1
+        summary = app.sub_title
+        assert "30 healthy" in summary
+
+        app._last_full_refresh = float("-inf")
+        app.action_clear_search()
+
+        # A first chunk is there at once, and the header counts every host.
+        assert table.row_count == 1 + rows_in_small_chunks
+        assert app._table_renderer.behind
+        assert app.sub_title == summary
+        assert await _wait_until(pilot, lambda: table.row_count == 30, ticks=400)
+        await pilot.pause()
+        assert [table.get_row_at(row)[0].plain for row in range(30)] == targets
+        region = Region(0, 0, *table.outer_size)
+        shown = "\n".join(strip.text for strip in table.render_lines(region))
+        assert all(name in shown for name in targets)
+
+
+@pytest.mark.usefixtures("stub_network", "rows_in_small_chunks")
+async def test_the_cursor_keeps_its_row_when_a_search_loses_a_host() -> None:
+    targets = [f"host-{index:02d}.example" for index in range(60)]
+    app = _chunked_app(targets)
+    async with app.run_test(size=(140, 20)) as pilot:
+        table = await _start_filled(pilot, app)
+        # Every stubbed host has this address, so the search keeps all 60 rows.
+        await pilot.press("slash", *"127.0.253", "enter")
+        assert await _wait_until(pilot, lambda: table.row_count == 60, ticks=400)
+        table.move_cursor(row=40, animate=False)
+        await pilot.pause()
+
+        # One host fails over to an address the search does not match.
+        app.targets[55].resolved_address = "10.9.9.9"
+        app._last_full_refresh = float("-inf")
+        app._refresh_table()
+
+        # The table was rebuilt: the rows up to the cursor are back at once.
+        assert table.cursor_row == 40
+        assert 40 < table.row_count < 59
+        assert await _wait_until(pilot, lambda: table.row_count == 59, ticks=400)
+        assert table.cursor_row == 40
+        assert table.get_row_at(40)[0].plain == "host-40.example"
+        assert table.get_row_at(58)[0].plain == "host-59.example"
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_a_new_search_starts_at_the_top_without_adding_rows_up_to_the_old_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ui, "MIN_ROWS_ADDED_PER_CALL", 8)
+    targets = [f"{'web' if number % 2 else 'db'}-{number:02}.example" for number in range(60)]
+    app = _chunked_app(targets)
+    async with app.run_test(size=(140, 20)) as pilot:
+        table = await _start_filled(pilot, app)
+        table.move_cursor(row=55, animate=False)
+        await pilot.pause()
+        # No catch-up from here on: the test sees what the key press itself adds.
+        monkeypatch.setattr(app_module, "ROW_CATCH_UP_DELAY_S", 60.0)
+
+        await pilot.press("slash", "w")
+        await pilot.pause()
+
+        matches = [name for name in targets if "w" in name]
+        assert table.cursor_row == 0
+        assert 0 < table.row_count < len(matches)
+        shown = [table.get_row_at(row)[0].plain for row in range(table.row_count)]
+        assert shown == matches[: table.row_count]
+
+
+class TwoTablesApp(App[None]):
+    def compose(self) -> ComposeResult:
+        yield TargetTable(id="ours")
+        yield DataTable(id="plain")
+
+
+async def test_new_rows_are_not_measured_and_the_table_matches_a_plain_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # DataTable measures every cell of a new row for its column's content
+    # width: twice the cost of adding the row, and 330 ms in one piece when a
+    # search over 5,000 hosts is cleared. TargetTable skips it, because every
+    # column has a set width. A Textual upgrade that makes the measurements
+    # matter, or stops calling the method TargetTable overrides, fails here.
+    targets = [healthy(f"host-{index:03d}.example", ok(5.0), lost()) for index in range(300)]
+    widths = compute_table_layout(width=120, targets=targets, show_address=True)
+    app = TwoTablesApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        ours = app.query_one("#ours", TargetTable)
+        plain = app.query_one("#plain", DataTable)
+        for table in (ours, plain):
+            for key in COLUMN_KEYS:
+                table.add_column(key, key=key, width=widths[key])
+        await pilot.pause()
+        measured: list[Any] = []
+        measure = data_table_module.measure
+
+        def counting_measure(console: Any, renderable: Any, default: int, **kwargs: Any) -> int:
+            measured.append(renderable)
+            return measure(console, renderable, default, **kwargs)
+
+        monkeypatch.setattr(data_table_module, "measure", counting_measure)
+
+        def fill(table: DataTable[Any]) -> None:
+            renderer = make_renderer()
+            renderer.set_layout(show_address=True, widths=widths)
+            renderer.sync(table, targets)
+
+        fill(ours)
+        await pilot.pause()
+        assert ours.row_count == 300
+        assert measured == []
+
+        fill(plain)
+        await pilot.pause()
+        assert len(measured) == 300 * len(COLUMN_KEYS)
+        assert ours.virtual_size == plain.virtual_size
+        assert [column.get_render_width(ours) for column in ours.columns.values()] == [
+            column.get_render_width(plain) for column in plain.columns.values()
+        ]
+        assert [ours.render_line(y).text for y in range(12)] == [
+            plain.render_line(y).text for y in range(12)
+        ]
