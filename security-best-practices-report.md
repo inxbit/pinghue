@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; audited again on 2026-11-19; verification evidence refreshed for 8.0.0 on 2026-11-19
+Review date: 2026-07-11; audited again on 2026-11-19; verification evidence refreshed for 8.0.1 on 2026-11-20
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -175,35 +175,39 @@ model state this. Removing or refusing the ACL in code is an open decision.
 
 ## Verification evidence
 
-Refreshed for the 8.0.0 release candidate on 2026-11-19 (the 7.1.2 evidence
+Refreshed for the 8.0.1 release candidate on 2026-11-20 (the 8.0.0 evidence
 this section previously recorded is superseded):
 
 - Audit of 2026-11-19: two independent reads of `src/` and the scripts (an
   OpenAI Codex read-only audit split into four areas, and a separate review),
   each finding reproduced before it was accepted. No critical or high finding.
-  19 defects were fixed test-first in 7.1.2, after three Codex review passes
-  of that diff. One more, a target with a space in it, changes accepted input
-  and is fixed in this release; a fourth Codex pass on its diff found no
-  defect in the code and one overclaim in the changelog, corrected before
-  merge. Rerun against the 7.1.2, 7.1.1, 7.1.0, 7.0.0, and 6.0.0 sources, the
-  space defect shows on each of them and not on this release, and the 19
-  earlier defects show on every release before 7.1.2 and on neither 7.1.2 nor
-  this one, with one qualification: `--output -` and `--check` dropped an I/O
-  error from a file silently only from 7.1.1 on (earlier releases failed the
-  flush at exit with status 120 instead). The 7.1.2 sdist's copy of this
-  report says of those 19 "none is a regression of 7.1.x"; that was written
-  before 15 of them had been measured against older releases.
-- Fuzzing with fixed harness seeds, rerun on this release: 778,453 datagrams
-  and 173,495 Linux error-queue messages through an in-memory socket on both
-  platform branches of the ICMP engine, with no probe completed by a datagram
-  that was not its reply or a matching error; 3,000 host files, 9,000 argument
-  vectors, 9,000 display strings, 3,000 host-name sets, 3,000 resolver
-  answers, and 1,000 reports checked against the schema. The argument stage
-  now also requires that no accepted target contains a space: 98 of the 9,000
-  vectors broke that rule on 7.1.2, none on this release.
-- Full tests: 785 passed and 8 skipped (Linux-only kernel features, a
+  19 defects were fixed test-first in 7.1.2, and one more, a target with a
+  space in it, in 8.0.0. This release fixes the two remaining findings that
+  needed no decision. Neither gave a wrong result. `--check --quiet` ran
+  checks whose only product is the report it does not print, and waited up to
+  12 seconds for them. The TUI held its event loop while it added every table
+  row, at startup and after a cleared search: between 260 and 500 ms at 5,000
+  hosts on the test machine, and between 43 and 98 ms on this release. Rerun
+  against the 8.0.0, 7.1.2, 7.1.1, 7.1.0, 7.0.0, and 6.0.0 sources, both show
+  on each of them (the search exists since 7.1.0) and not on this release, so
+  neither is a regression. A fifth Codex pass, over these two diffs, found
+  two defects, both fixed before merge: the IPv6 loopback probe still ran
+  under `--quiet`, and Ctrl+End selected the last row present while rows were
+  still being added. It raised two more points that were left as they are: a
+  stdout pipe whose reader has gone still gets the full check, and a
+  `--count` run can end before the rows below the screen are added, which
+  nothing reads. One audit finding is still open: whether to act in code on
+  the inherited ACL that BP-004 documents awaits the owner's decision.
+- Fuzzing with fixed harness seeds, rerun on this release, which changes no
+  parser: 778,464 datagrams and 173,494 Linux error-queue messages through an
+  in-memory socket on both platform branches of the ICMP engine, with no
+  probe completed by a datagram that was not its reply or a matching error;
+  3,000 host files, 9,000 argument vectors, 9,000 display strings, 3,000
+  host-name sets, 3,000 resolver answers, and 1,000 reports checked against
+  the schema. No accepted target among the 9,000 vectors contains a space.
+- Full tests: 800 passed and 8 skipped (Linux-only kernel features, a
   Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.16, with total branch-aware coverage of 94.64% against the 85% floor;
+  3.12.16, with total branch-aware coverage of 94.70% against the 85% floor;
   localhost TCP and Unix-socket cases executed. The same suite passed under
   CPython 3.11.15, the supported floor, and 3.14.10, each from fresh
   `--require-hashes` installs. CI ran it on Linux and macOS under Python 3.11
@@ -212,7 +216,7 @@ this section previously recorded is superseded):
 - Mypy strict mode: no issues across 17 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 28 Node tests passed. The 8.0.0 site change updates
+- Static site contract: 28 Node tests passed. The 8.0.1 site change updates
   the version strings.
 - Semgrep 1.186.0 Python, security-audit, and secrets rule packs: 0 findings
   across 88 scanned files.
@@ -220,7 +224,7 @@ this section previously recorded is superseded):
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 170-commit release-history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 175-commit release-history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -229,10 +233,10 @@ this section previously recorded is superseded):
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`. The
   same procedure applied to the previous release's tag reproduced the
-  published 7.1.2 wheel and sdist byte for byte.
-- The final normalized sdist and wheel passed `twine check`; all 686 tests
+  published 8.0.0 wheel and sdist byte for byte.
+- The final normalized sdist and wheel passed `twine check`; all 701 tests
   shipped in the unpacked sdist passed against its own sources (8 skipped as
-  above); fresh wheel and sdist installs both reported `pinghue 8.0.0`
+  above); fresh wheel and sdist installs both reported `pinghue 8.0.1`
   through the console-script entry point and completed the localhost TCP
   smoke test, choosing line output without `--no-tui` because stdout was a
   pipe.
@@ -243,19 +247,17 @@ this section previously recorded is superseded):
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 8.0.0 is a
-major release with one change: a target that contains a space is refused.
-Line output separates its fields with spaces, so such a target could supply
-words that read as the status and latency of a line. The 2026-11 audit found
-it, and it could not ship in the patch release that carried the audit's other
-fixes, because it changes which targets the command line accepts; the
-stability policy allows such a limit without a deprecation release only in a
-major release. BP-004 remains documented only. The release adds no input
-source, output path, privilege, or network behavior, and leaves the runtime
-dependencies unchanged. Its release PR changes no workflow or packaging step,
-but its tag is the first to run the changelog and artifact-digest checks
-merged into the publish workflow after 7.1.2; those steps were run locally
-against the candidate, with the workflow's own script text, before tagging.
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 8.0.1 is a
+patch release with two fixes from the 2026-11 audit, neither of them to a
+wrong result: with nothing to print, `--check` runs only the check that sets
+its exit status, and the TUI adds the rows of a large table in chunks and no
+longer has every new cell measured. BP-004 remains documented only. The
+release adds no input source, output path, privilege, or network behavior,
+changes no flag, exit status, line output, or JSON content, and leaves the
+runtime dependencies unchanged. Its release PR changes no workflow or
+packaging step. The publish workflow's changelog, artifact-digest, and
+staged-formula steps were run locally against the candidate, with the
+workflow's own script text, before tagging.
 The local candidate passed the security, QA, deterministic-artifact,
 installed-artifact, and staged-formula gates. Publishing remains gated on
 release-PR review and exact-head CI.
