@@ -6,10 +6,12 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 8.0.1 - 2026-11-20
+
 ### Fixed
 
 - `--check --quiet` no longer runs the checks that only add to the report: the IPv6 loopback probe, the DNS test and the open-file limit. None of them changes the exit status, so with nothing printed they were only waiting time: a second when `::1` does not answer, up to 12 seconds when the resolver does not answer, and 5 seconds on macOS for a `.local` name that does not exist. `--check` with stdout closed (`>&-`) skips them for the same reason. The exit status is unchanged.
-- TUI: with thousands of hosts, startup and clearing or widening a search no longer hold the program for as long as it takes to add every row. While it was held, keys, redraws and probe replies waited. The rows on screen and a first chunk are added at once and the rest in short chunks, and new rows are no longer measured for column widths that are set anyway. Measured at 5,000 hosts on one Mac: the longest hold after a cleared search fell from 465-482 ms to 43-75 ms, and at startup from 447-503 ms to 95-98 ms. The table is complete again about 0.45 s after a cleared search (was 0.6 to 0.7 s) and 0.5 s after startup (unchanged).
+- TUI: with thousands of hosts, startup and clearing or widening a search no longer hold the program for as long as it takes to add every row. While it was held, keys, redraws and probe replies waited. The rows on screen and a first chunk are added at once and the rest in short chunks, and new rows are no longer measured for column widths that are set anyway. Measured at 5,000 hosts on one Mac: the longest hold after a cleared search fell from between 260 and 480 ms to between 43 and 75 ms, and at startup from between 435 and 503 ms to between 66 and 98 ms. The table is complete again about 0.4 s after a cleared search (was 0.5 to 0.7 s) and 0.5 s after startup (as before).
 
 ## 8.0.0 - 2026-11-19
 
