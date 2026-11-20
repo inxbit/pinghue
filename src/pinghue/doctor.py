@@ -331,8 +331,8 @@ def run_check(
     """Run environment diagnostics and return a process exit code.
 
     The report goes to ``stream``, by default the current stdout. A stdout
-    closed at startup is None: the checks that set the exit code still run,
-    and nothing is printed.
+    closed at startup is None: nothing is printed. With nothing to print,
+    only the check that sets the exit code runs.
     """
     if stream is None:
         stream = sys.stdout
@@ -392,6 +392,13 @@ def run_check(
                     lines.append(f'          Current value: "{raw}"{suffix}')
             _write_linux_fix(lines, egid=egid)
 
+    if quiet or stream is None:
+        # Nothing is printed, and the rest of the report (IPv6, DNS, the
+        # open-file limit) never changes the exit status. It would only be
+        # waiting time: the probe timeout for a silent ::1, and
+        # DNS_PROBE_TIMEOUT_SECONDS for a lookup that hangs.
+        return 0 if icmp_ready else 1
+
     icmp6 = _check_dgram_icmp_socket(family=socket.AF_INET6, proto=IPPROTO_ICMPV6)
     if icmp6.ok:
         loopback6_ms, loopback6_error = _loopback_icmp_probe("::1")
@@ -419,26 +426,21 @@ def run_check(
         ]
     )
 
-    # The DNS test only adds to the report and never changes the exit status,
-    # so it is not run when nothing is printed: a lookup that hangs takes
-    # DNS_PROBE_TIMEOUT_SECONDS.
-    printing = not quiet and stream is not None
-    if printing:
-        dns_name = resolve_name or DEFAULT_DNS_PROBE_NAME
-        address, dns_ms, dns_error = _dns_probe(dns_name)
-        display_dns_name = sanitize_display(dns_name)
-        lines.extend(["", "DNS"])
-        if dns_error:
-            lines.append(
-                f"  {_status(WARN, use_color=use_color)}  "
-                f'getaddrinfo("{display_dns_name}") failed: {sanitize_display(dns_error)}'
-            )
-        else:
-            lines.append(
-                f"  {_status(OK, use_color=use_color)}    "
-                f'getaddrinfo("{display_dns_name}") → '
-                f"{sanitize_display(address or '')} ({dns_ms:.0f} ms)"
-            )
+    dns_name = resolve_name or DEFAULT_DNS_PROBE_NAME
+    address, dns_ms, dns_error = _dns_probe(dns_name)
+    display_dns_name = sanitize_display(dns_name)
+    lines.extend(["", "DNS"])
+    if dns_error:
+        lines.append(
+            f"  {_status(WARN, use_color=use_color)}  "
+            f'getaddrinfo("{display_dns_name}") failed: {sanitize_display(dns_error)}'
+        )
+    else:
+        lines.append(
+            f"  {_status(OK, use_color=use_color)}    "
+            f'getaddrinfo("{display_dns_name}") → '
+            f"{sanitize_display(address or '')} ({dns_ms:.0f} ms)"
+        )
 
     _write_fd_limit(lines, use_color=use_color)
 
@@ -452,7 +454,5 @@ def run_check(
         exit_code = 1
         lines.extend(["", "Not ready for ICMP. TCP mode works. See fixes above."])
 
-    if printing:
-        write_text(stream, _encodable(stream, "\n".join(lines) + "\n"))
-
+    write_text(stream, _encodable(stream, "\n".join(lines) + "\n"))
     return exit_code
