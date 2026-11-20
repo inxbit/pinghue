@@ -745,6 +745,14 @@ class TargetTable(DataTable[Any]):
     """
 
     _batch_depth = 0
+    # Called before the cursor goes to the last row: the rows of a large
+    # table are added in chunks, so the last one may not be there yet.
+    add_every_row: Callable[[], None] | None = None
+
+    def action_scroll_bottom(self) -> None:
+        if self.add_every_row is not None:
+            self.add_every_row()
+        super().action_scroll_bottom()
 
     @contextmanager
     def batch_updates(self) -> Iterator[None]:

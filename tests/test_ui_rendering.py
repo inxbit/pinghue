@@ -1462,3 +1462,25 @@ async def test_new_rows_are_not_measured_and_the_table_matches_a_plain_one(
         assert [ours.render_line(y).text for y in range(12)] == [
             plain.render_line(y).text for y in range(12)
         ]
+
+
+@pytest.mark.usefixtures("stub_network")
+async def test_ctrl_end_goes_to_the_last_host_while_rows_are_still_being_added(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ui, "MIN_ROWS_ADDED_PER_CALL", 8)
+    # No catch-up: the key meets a table that has only its first rows.
+    monkeypatch.setattr(app_module, "ROW_CATCH_UP_DELAY_S", 60.0)
+    targets = [f"host-{index:02d}.example" for index in range(60)]
+    app = _chunked_app(targets)
+    async with app.run_test(size=(140, 20)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#targets", DataTable)
+        assert 0 < table.row_count < 60
+
+        await pilot.press("ctrl+end")
+        await pilot.pause()
+
+        assert table.row_count == 60
+        assert table.cursor_row == 59
+        assert table.get_row_at(59)[0].plain == "host-59.example"

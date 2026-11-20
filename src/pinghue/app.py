@@ -220,6 +220,8 @@ class PinghueTextualApp(App[None]):
     async def on_mount(self) -> None:
         table = self.query_one("#targets", DataTable)
         table.cursor_type = "row"
+        if isinstance(table, TargetTable):
+            table.add_every_row = self._add_every_row
         self.targets = [
             TargetRun(target=target, status=TargetStatus.RESOLVING)
             for target in self.args_config.targets
@@ -505,6 +507,15 @@ class PinghueTextualApp(App[None]):
             return
         self._table_renderer.catch_up(table, self._view()[0])
         self._schedule_row_catch_up()
+
+    def _add_every_row(self) -> None:
+        """Add the rows the table still lacks, for a key that goes to the last one."""
+        try:
+            table = self.query_one("#targets", DataTable)
+        except NoMatches:
+            return
+        rows, fleet = self._view()
+        self._table_renderer.sync(table, rows, fleet=fleet, at_least=len(rows), full=False)
 
     def _refresh_visible_rows(self) -> None:
         try:
