@@ -506,3 +506,58 @@ def test_dns_probe_reports_a_resolver_thread_that_cannot_start(
 
     assert (address, elapsed_ms) == (None, None)
     assert error == "could not start a resolver thread: can't start new thread"
+
+
+def _record_dns_tests(monkeypatch: pytest.MonkeyPatch, *, icmp_ready: bool = True) -> list[str]:
+    """Fake the ICMP checks and record every name the DNS test looks up."""
+    names: list[str] = []
+
+    def dns_probe(name: str) -> tuple[str, float, None]:
+        names.append(name)
+        return "192.0.2.10 (ipv4)", 1.0, None
+
+    loopback = (0.12, None) if icmp_ready else (None, "timeout")
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", lambda *_: loopback)
+    monkeypatch.setattr(doctor, "_dns_probe", dns_probe)
+    return names
+
+
+@pytest.mark.parametrize(("icmp_ready", "status"), [(True, 0), (False, 1)])
+def test_quiet_check_skips_the_dns_test_it_cannot_report(
+    monkeypatch: pytest.MonkeyPatch, icmp_ready: bool, status: int
+) -> None:
+    # The DNS test never changes the exit status, and a lookup that hangs
+    # held `--check --quiet` for up to 12 seconds with nothing to print.
+    names = _record_dns_tests(monkeypatch, icmp_ready=icmp_ready)
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=True, resolve_name="internal.example")
+
+    assert exit_code == status
+    assert output.getvalue() == ""
+    assert names == []
+
+
+def test_check_with_stdout_closed_skips_the_dns_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    names = _record_dns_tests(monkeypatch)
+    monkeypatch.setattr(doctor.sys, "stdout", None)
+
+    exit_code = doctor.run_check(resolve_name="internal.example")
+
+    assert exit_code == 0
+    assert names == []
+
+
+def test_check_that_prints_its_report_still_runs_the_dns_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = _record_dns_tests(monkeypatch)
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, use_color=False, resolve_name="internal.example")
+
+    assert exit_code == 0
+    assert names == ["internal.example"]
+    assert '[ok]    getaddrinfo("internal.example") → 192.0.2.10 (ipv4) (1 ms)' in output.getvalue()
