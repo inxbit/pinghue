@@ -250,7 +250,7 @@ pinghue [OPTIONS] [TARGET ...]
 | `--history-style STYLE` | `bar` | One of `bar`, `dots`, `sparkline` (an alias of `bar`), or `none`. |
 | `--check` | off | Run the environment doctor and exit. |
 | `--resolve-name HOST` | `example.com` | With `--check`, resolve this host for DNS diagnostics, up to 253 characters. Defaults to the first target when provided. |
-| `--quiet` | off | With `--check`, suppress output and use only the exit code. |
+| `--quiet` | off | With `--check`, suppress output and use only the exit code. The checks that never change the exit code (IPv6, DNS, the open-file limit) are not run. |
 | `--host-label LABEL` | `local` | Operator-controlled host label written to JSON output, up to 128 characters. |
 | `-v, --version` | none | Print the installed version. |
 | `-h, --help` | none | Print help. |

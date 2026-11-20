@@ -331,8 +331,8 @@ def run_check(
     """Run environment diagnostics and return a process exit code.
 
     The report goes to ``stream``, by default the current stdout. A stdout
-    closed at startup is None: the checks still run and set the exit code, and
-    nothing is printed.
+    closed at startup is None: nothing is printed. With nothing to print,
+    only the check that sets the exit code runs.
     """
     if stream is None:
         stream = sys.stdout
@@ -392,6 +392,13 @@ def run_check(
                     lines.append(f'          Current value: "{raw}"{suffix}')
             _write_linux_fix(lines, egid=egid)
 
+    if quiet or stream is None:
+        # Nothing is printed, and the rest of the report (IPv6, DNS, the
+        # open-file limit) never changes the exit status. It would only be
+        # waiting time: the probe timeout for a silent ::1, and
+        # DNS_PROBE_TIMEOUT_SECONDS for a lookup that hangs.
+        return 0 if icmp_ready else 1
+
     icmp6 = _check_dgram_icmp_socket(family=socket.AF_INET6, proto=IPPROTO_ICMPV6)
     if icmp6.ok:
         loopback6_ms, loopback6_error = _loopback_icmp_probe("::1")
@@ -447,7 +454,5 @@ def run_check(
         exit_code = 1
         lines.extend(["", "Not ready for ICMP. TCP mode works. See fixes above."])
 
-    if not quiet and stream is not None:
-        write_text(stream, _encodable(stream, "\n".join(lines) + "\n"))
-
+    write_text(stream, _encodable(stream, "\n".join(lines) + "\n"))
     return exit_code

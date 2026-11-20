@@ -6,6 +6,10 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Fixed
+
+- `--check --quiet` no longer runs the checks that only add to the report: the IPv6 loopback probe, the DNS test and the open-file limit. None of them changes the exit status, so with nothing printed they were only waiting time: a second when `::1` does not answer, up to 12 seconds when the resolver does not answer, and 5 seconds on macOS for a `.local` name that does not exist. `--check` with stdout closed (`>&-`) skips them for the same reason. The exit status is unchanged.
+
 ## 8.0.0 - 2026-11-19
 
 ### Breaking

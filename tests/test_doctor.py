@@ -506,3 +506,67 @@ def test_dns_probe_reports_a_resolver_thread_that_cannot_start(
 
     assert (address, elapsed_ms) == (None, None)
     assert error == "could not start a resolver thread: can't start new thread"
+
+
+def _record_checks(monkeypatch: pytest.MonkeyPatch, *, icmp_ready: bool = True) -> list[str]:
+    """Fake the network and record the probes and lookups the check runs."""
+    ran: list[str] = []
+
+    def loopback_probe(address: str = "127.0.0.1") -> tuple[float | None, str | None]:
+        ran.append(f"icmp {address}")
+        return (0.12, None) if icmp_ready else (None, "timeout")
+
+    def dns_probe(name: str) -> tuple[str, float, None]:
+        ran.append(f"dns {name}")
+        return "192.0.2.10 (ipv4)", 1.0, None
+
+    monkeypatch.setattr(doctor.socket, "socket", lambda *_: FakeSocket())
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(doctor, "_loopback_icmp_probe", loopback_probe)
+    monkeypatch.setattr(doctor, "_dns_probe", dns_probe)
+    return ran
+
+
+@pytest.mark.parametrize(("icmp_ready", "status"), [(True, 0), (False, 1)])
+def test_quiet_check_runs_only_the_check_that_sets_the_exit_status(
+    monkeypatch: pytest.MonkeyPatch, icmp_ready: bool, status: int
+) -> None:
+    # The IPv6 probe and the DNS test only add to the report. With nothing to
+    # print they were waiting time: a second for a silent ::1, and up to 12
+    # seconds for a lookup that hangs.
+    ran = _record_checks(monkeypatch, icmp_ready=icmp_ready)
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, quiet=True, resolve_name="internal.example")
+
+    assert exit_code == status
+    assert output.getvalue() == ""
+    assert ran == ["icmp 127.0.0.1"]
+
+
+def test_check_with_stdout_closed_runs_only_the_check_that_sets_the_exit_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _record_checks(monkeypatch)
+    monkeypatch.setattr(doctor.sys, "stdout", None)
+
+    exit_code = doctor.run_check(resolve_name="internal.example")
+
+    assert exit_code == 0
+    assert ran == ["icmp 127.0.0.1"]
+
+
+def test_check_that_prints_its_report_still_runs_every_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _record_checks(monkeypatch)
+    output = io.StringIO()
+
+    exit_code = doctor.run_check(stream=output, use_color=False, resolve_name="internal.example")
+
+    assert exit_code == 0
+    assert ran == ["icmp 127.0.0.1", "icmp ::1", "dns internal.example"]
+    text = output.getvalue()
+    assert "[ok]    DGRAM ICMPv6 probe to ::1 succeeded (0.12 ms)" in text
+    assert '[ok]    getaddrinfo("internal.example") → 192.0.2.10 (ipv4) (1 ms)' in text
+    assert "Open-file limit" in text
