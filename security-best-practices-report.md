@@ -109,6 +109,13 @@ by the mode. Found in the 2026-11 audit and measured: a report created under a
 directory with `everyone allow read,file_inherit` showed mode `0600` and the
 inherited entry. Reading it from a second account was not tested.
 
+Linux is not affected in the same way: there the mode is the mask of a POSIX
+ACL, so an inherited entry grants nothing to a `0600` file. A test, run in CI
+on Linux, creates a private report under a directory whose inheritable ACL
+gives another account read access: that account can read a file created
+beside it with group permission bits, and cannot read the report. Network
+filesystems with their own ACL model (NFSv4, SMB) were not tested.
+
 Impact: only where the operator, or whoever controls the directory, configured
 such an ACL; default macOS directories do not grant inherited read access.
 
