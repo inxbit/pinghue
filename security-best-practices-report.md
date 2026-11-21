@@ -100,7 +100,7 @@ but the target limit was an incompatible CLI behavior. The changelog invoked
 the narrowly scoped resource-safety exception to the deprecation window, and
 the cap shipped in the 5.0.0 major release rather than a patch or minor version.
 
-### BP-004 — An inherited macOS ACL outlasts the private report mode (Low, documented)
+### BP-004 — An inherited macOS ACL outlasts the private report mode (Low, accepted 2026-11-21)
 
 `--output-mode private` sets the report's permission bits to `0600`. On macOS a
 directory can carry an inheritable access control list; a report created there
@@ -121,7 +121,12 @@ such an ACL; default macOS directories do not grant inherited read access.
 
 Operational guidance: keep evidence in a directory that only the operator
 controls, ACL included (`ls -le` shows the entries). The README and the threat
-model state this. Removing or refusing the ACL in code is an open decision.
+model state this.
+
+Decision: the owner accepted this risk on 2026-11-21. It stays documented; the
+code neither removes nor refuses such an ACL. Removing it would add
+macOS-only code for a setting the directory's owner chose, and refusing the
+directory would break scripts that write there.
 
 ## Resolved findings
 
@@ -203,8 +208,9 @@ this section previously recorded is superseded):
   still being added. It raised two more points that were left as they are: a
   stdout pipe whose reader has gone still gets the full check, and a
   `--count` run can end before the rows below the screen are added, which
-  nothing reads. One audit finding is still open: whether to act in code on
-  the inherited ACL that BP-004 documents awaits the owner's decision.
+  nothing reads. The last audit finding, the inherited ACL that BP-004
+  documents, was accepted by the owner after this release and stays
+  documented, so no audit finding is open.
 - Fuzzing with fixed harness seeds, rerun on this release, which changes no
   parser: 778,464 datagrams and 173,494 Linux error-queue messages through an
   in-memory socket on both platform branches of the ICMP engine, with no
