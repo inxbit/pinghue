@@ -203,7 +203,9 @@ still rename, replace, or remove a finished report, so evidence belongs in a
 directory only the operator controls. The mode PingHue applies to a report is
 its permission bits only. On macOS a directory can carry an inheritable ACL: a
 report created there inherits it, and an entry that grants other users read
-access outlasts mode `0600`.
+access outlasts mode `0600`. On Linux the mode is the mask of a POSIX ACL, so
+an inherited entry grants nothing to a private report; a test has a second
+account try to read one.
 
 Explicit `--overwrite` of an existing single-link regular file keeps the
 verified inode and rewrites it in place. The file must be owned by the

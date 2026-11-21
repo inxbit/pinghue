@@ -2,9 +2,13 @@ import errno
 import fcntl
 import json
 import os
+import pwd
 import re
+import shutil
 import socket
 import stat
+import struct
+import subprocess
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -1405,3 +1409,99 @@ def test_check_output_path_refuses_an_overlong_name_under_a_missing_directory(
     assert excinfo.value.errno == errno.ENAMETOOLONG
     assert not (tmp_path / "new-directory").exists()
     check_output_path(tmp_path / "new-directory" / ("x" * name_max))
+
+
+# POSIX ACL extended attributes, as Linux stores them (posix_acl_xattr.h): a
+# version word, then one (tag, permissions, id) entry per ACL line.
+_ACL_USER_OBJ, _ACL_USER, _ACL_GROUP_OBJ, _ACL_MASK, _ACL_OTHER = 0x01, 0x02, 0x04, 0x10, 0x20
+_ACL_NO_ID = 0xFFFFFFFF
+_ACL_READ = 4
+
+
+def _posix_acl(*entries: tuple[int, int, int]) -> bytes:
+    return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+
+
+def _access_acl(path: Path) -> dict[tuple[int, int], int]:
+    """The access ACL of ``path`` as {(tag, id): permissions}."""
+    raw = os.getxattr(path, "system.posix_acl_access")
+    return {
+        (tag, owner): permissions for tag, permissions, owner in struct.iter_unpack("<HHI", raw[4:])
+    }
+
+
+def _read_as(account: pwd.struct_passwd, path: Path) -> subprocess.CompletedProcess[bytes]:
+    """Read ``path`` from another account: directly as root, through sudo otherwise."""
+    if os.geteuid() == 0:
+        return subprocess.run(
+            ["cat", str(path)],
+            user=account.pw_uid,
+            group=account.pw_gid,
+            extra_groups=[],
+            capture_output=True,
+            check=False,
+        )
+    return subprocess.run(
+        ["sudo", "-n", "-u", account.pw_name, "cat", str(path)],
+        capture_output=True,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX ACLs with a mask are the Linux kind")
+def test_private_report_is_unreadable_to_an_account_an_inherited_acl_names() -> None:
+    # On macOS an inherited ACL entry outlasts mode 0600. On Linux the mode is
+    # the ACL's mask: a private report inherits the entry, and it grants
+    # nothing. A second account proves it by trying to read the file.
+    try:
+        other = pwd.getpwnam("nobody")
+    except KeyError:
+        pytest.skip("no account named nobody to read with")
+    if os.geteuid() != 0 and (
+        shutil.which("sudo") is None
+        or subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False).returncode
+    ):
+        pytest.skip("reading as another account needs root or passwordless sudo")
+
+    directory = Path(tempfile.mkdtemp(prefix="pinghue-acl-"))
+    try:
+        # The other account can enter the directory; only the ACL decides
+        # whether it can read a file in it.
+        os.chmod(directory, 0o755)
+        inherited = _posix_acl(
+            (_ACL_USER_OBJ, 6, _ACL_NO_ID),
+            (_ACL_USER, _ACL_READ, other.pw_uid),
+            (_ACL_GROUP_OBJ, 0, _ACL_NO_ID),
+            (_ACL_MASK, _ACL_READ, _ACL_NO_ID),
+            (_ACL_OTHER, 0, _ACL_NO_ID),
+        )
+        try:
+            os.setxattr(directory, "system.posix_acl_default", inherited)
+        except OSError as error:
+            pytest.skip(f"the temporary filesystem takes no POSIX ACL: {error}")
+
+        # A file created beside the report with group permission bits: the
+        # inherited entry is in force, and the other account reads it.
+        control = directory / "control.txt"
+        with os.fdopen(os.open(control, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640), "w") as file:
+            file.write("control\n")
+        control_read = _read_as(other, control)
+        if control_read.returncode != 0:
+            pytest.skip(f"the other account cannot reach the temporary directory: {directory}")
+        assert control_read.stdout == b"control\n"
+
+        report = directory / "report.json"
+        _write(report)
+
+        assert stat.S_IMODE(report.stat().st_mode) == 0o600
+        acl = _access_acl(report)
+        # The report did inherit the entry, and its mask grants nothing.
+        assert acl[(_ACL_USER, other.pw_uid)] == _ACL_READ
+        assert acl[(_ACL_MASK, _ACL_NO_ID)] == 0
+        report_read = _read_as(other, report)
+        assert report_read.returncode != 0
+        assert report_read.stdout == b""
+        assert b"Permission denied" in report_read.stderr
+        assert json.loads(report.read_text(encoding="utf-8"))["pinghue_version"]
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
