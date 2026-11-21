@@ -150,10 +150,14 @@ recorded.
   `files.pythonhosted.org` and must not contain `/packages/source/`.
 - Download that exact URL and verify its exact published SHA256 matches the
   reviewed `packaging/homebrew/pinghue.rb` value. Stop the release if it differs.
-- Run `brew update-python-resources packaging/homebrew/pinghue.rb` now that the
-  PyPI release metadata is available. Confirm the command changed only resource
-  stanzas and preserved the exact top-level URL and reviewed SHA256, then merge
-  that formula refresh into `inxbit/pinghue`.
+- Refresh the resource stanzas now that the PyPI release metadata is
+  available. `brew update-python-resources` takes a tapped formula, not a
+  path: copy the final formula into the local tap checkout, run
+  `brew update-python-resources --ignore-main-package-cooldown inxbit/tap/pinghue`
+  (the flag is needed while the release is less than a day old), and copy the
+  result back to `packaging/homebrew/pinghue.rb`. Confirm the command changed
+  only resource stanzas and preserved the exact top-level URL and reviewed
+  SHA256, then merge that formula refresh into `inxbit/pinghue`.
 - Copy the exact reviewed `packaging/homebrew/pinghue.rb` into
   `inxbit/homebrew-tap/Formula/pinghue.rb` on a tap release branch. In the tap,
   run:
@@ -169,3 +173,8 @@ pinghue --version
 - Commit the tap formula, push the branch, merge its PR after tap CI passes,
   and fetch/install the published `inxbit/tap/pinghue` formula once more to
   verify the public tap serves the released version.
+- Upload `docs/assets/pinghue-social-card.png` as the repository's social
+  preview image (GitHub repository settings, "Social preview"). GitHub has no
+  API for it, so this step needs a signed-in browser. The card was re-rendered
+  for the new version in the Version Update step; until it is uploaded, a link
+  to the repository still shows the previous version.
