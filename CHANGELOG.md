@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 8.0.2 - 2026-11-23
+
 ### Fixed
 
 - A second Ctrl-C, or a repeated `SIGTERM` or `SIGHUP`, while pinghue writes its `--output` report no longer loses the report. pinghue stops handling these signals once probing has ended, so one that arrived while the report was being built ended the process: after Ctrl-C a Python traceback of about 40 lines, after `SIGTERM` or `SIGHUP` a silent death, and in both cases no report, although an interrupted run is documented to write it. The report takes about a quarter of a second to build at the 100,000 samples a run keeps at most (measured on one Mac with 1,000 hosts in line output), and a few milliseconds for a small run, so it took a large run and a quick second signal. Such a signal is now held back for the first five seconds of writing the report, wherever the report goes. After five seconds it acts as before, so a write that never ends (a FIFO or pipe whose reader does not read, a stalled filesystem) can still be stopped; in the first five seconds it now cannot. Two short windows remain: a signal in the instant between the end of probing and the start of the report can still lose it, and one that arrives after the report is written, while the process exits, can still end the process with the signal's status or print a short `Exception ignored` message; the report is complete by then.
