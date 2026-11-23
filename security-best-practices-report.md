@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; audited again on 2026-11-19; reviewed again on 2026-11-23; verification evidence refreshed for 8.0.2 on 2026-11-23
+Review date: 2026-07-11; audited again on 2026-11-19; reviewed again on 2026-11-23; verification evidence refreshed for 8.0.3 on 2026-11-23
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -212,7 +212,7 @@ it is a decision for the owner and has not been made.
 
 ## Verification evidence
 
-Refreshed for the 8.0.2 release candidate on 2026-11-23 (the 8.0.1 evidence
+Refreshed for the 8.0.3 release candidate on 2026-11-23 (the 8.0.2 evidence
 this section previously recorded is superseded):
 
 - Audit of 2026-11-19: two independent reads of `src/` and the scripts (an
@@ -224,20 +224,34 @@ this section previously recorded is superseded):
 - Second review of 2026-11-23: one more full read of the 15 runtime modules,
   the launcher, the workflows and the sdist normalizer, made before reading
   the earlier findings, then about 45 hermetic hand runs on macOS. No critical
-  or high finding. Three results, all in this release. A stop signal repeated
+  or high finding. Three results, shipped in 8.0.2. A stop signal repeated
   while the report was built lost the report: measured on 8.0.1 with 1,000
   hosts, a second SIGINT 0.03 to 0.15 s after the first gave exit status 130,
   a traceback, and no report; it is now held back for the first five seconds
   of writing the report. The TUI search could not find an IPv6 literal target
-  written in a long form. And BP-005, documented only. A Codex pass over the
-  fix diff found that the first version of the signal fix, which ignored the
-  signals only for report files, could not be interrupted when a FIFO
-  appeared in between or a filesystem stalled; the grace period replaced it
-  before merge. The final version was checked by its tests, by hand runs and
-  by CI, not by a second Codex pass. Not closed: a signal in the instant
-  between the end of probing and the start of the report, and one after the
-  report is written, while the process exits; the changelog names both.
-  Linux-only paths were read, not run by hand; CI runs the suite on Linux.
+  written in a long form. And BP-005, documented only.
+- The hold on stop signals, 8.0.2 to 8.0.3: 8.0.2 shipped it as a handler per
+  signal that decided on arrival whether the five seconds were over. The
+  shipped version had not had its Codex pass before the release. Three passes
+  run after it found races in that handler, none seen in use and all needing a
+  report write of more than five seconds: a `KeyError` or a dropped signal
+  when one arrived just as such a write ended, handlers left held after a
+  Ctrl-C at that moment, and a signal taken by another thread not seen while
+  the main thread was blocked. 8.0.3 replaces the mechanism: a held signal has
+  a handler that does nothing and keeps no state, and the process's real-time
+  timer (SIGALRM) puts the handlers found back after five seconds. A fourth
+  pass read that mechanism and listed ten points. Four about the new tests and
+  one wrong changelog sentence were fixed. Six were rejected with this reason:
+  they need another program that runs pinghue's code in its own process with
+  SIGALRM blocked, a native SIGALRM handler or its own real-time timer, or a
+  signal aimed at one thread from inside the process; the command line does
+  none of that. No source line changed after that pass. Measured on macOS
+  with eight idle threads alive and the main thread blocked in a pipe write:
+  180 of 180 signals sent to the process after the grace period ended it.
+  Not closed: a signal in the instant between the end of probing and the
+  start of the report, and one after the report is written, while the process
+  exits; the changelog names both. Linux-only paths were read, not run by
+  hand; CI runs the suite on Linux.
 - Fuzzing with fixed harness seeds, rerun on this release, which changes no
   parser: 778,464 datagrams and 173,494 Linux error-queue messages through an
   in-memory socket on both platform branches of the ICMP engine, with no
@@ -245,9 +259,9 @@ this section previously recorded is superseded):
   3,000 host files, 9,000 argument vectors, 9,000 display strings, 3,000
   host-name sets, 3,000 resolver answers, and 1,000 reports checked against
   the schema. No accepted target among the 9,000 vectors contains a space.
-- Full tests: 812 passed and 9 skipped (Linux-only kernel features, a
+- Full tests: 819 passed and 9 skipped (Linux-only kernel features, a
   Linux-only pty hangup, a Linux-only ACL case, and a root-only ownership
-  change) under CPython 3.12.16, with total branch-aware coverage of 94.74%
+  change) under CPython 3.12.16, with total branch-aware coverage of 94.76%
   against the 85% floor; localhost TCP and Unix-socket cases executed. The
   same suite passed under CPython 3.11.15, the supported floor, and 3.14.10,
   each from fresh `--require-hashes` installs. CI ran it on Linux and macOS
@@ -256,7 +270,7 @@ this section previously recorded is superseded):
 - Mypy strict mode: no issues across 17 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 28 Node tests passed. The 8.0.2 site change updates
+- Static site contract: 28 Node tests passed. The 8.0.3 site change updates
   the version strings.
 - Semgrep 1.186.0 Python, security-audit, and secrets rule packs: 0 findings
   across 88 scanned files.
@@ -264,7 +278,7 @@ this section previously recorded is superseded):
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 180-commit history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 183-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -273,10 +287,10 @@ this section previously recorded is superseded):
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`. The
   same procedure applied to the previous release's tag reproduced the
-  published 8.0.1 wheel and sdist byte for byte.
-- The final normalized sdist and wheel passed `twine check`; all 713 tests
+  published 8.0.2 wheel and sdist byte for byte.
+- The final normalized sdist and wheel passed `twine check`; all 720 tests
   shipped in the unpacked sdist passed against its own sources (9 skipped as
-  above); fresh wheel and sdist installs both reported `pinghue 8.0.2`
+  above); fresh wheel and sdist installs both reported `pinghue 8.0.3`
   through the console-script entry point and completed the localhost TCP
   smoke test, choosing line output without `--no-tui` because stdout was a
   pipe.
@@ -287,18 +301,18 @@ this section previously recorded is superseded):
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 8.0.2 is a
-patch release with two fixes from the second review of 2026-11-23: a stop
-signal repeated while the report is written no longer loses the report, and
-the TUI search finds an IPv6 literal target written in a long form. BP-004
-and BP-005 remain documented only. The release adds no input source, output
-path, privilege, or network behavior, and changes no flag, line output, or
-JSON content. One behavior changes on purpose: a stop signal in the first
-five seconds of writing the report is dropped instead of ending the process.
-The runtime dependencies are unchanged. Its release PR changes no workflow or
-packaging step. The publish workflow's changelog, artifact-digest, and
-staged-formula steps were run locally against the candidate, with the
-workflow's own script text, before tagging.
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 8.0.3 is a
+patch release with one change: the hold on repeated stop signals that 8.0.2
+put around the report write ends by a timer instead of deciding in a signal
+handler. What 8.0.2 documented is unchanged: a stop signal in the first five
+seconds of writing the report is dropped, and after that it acts as before
+8.0.2. While the report is written the process uses its real-time interval
+timer and SIGALRM. BP-004 and BP-005 remain documented only. The release adds
+no input source, output path, privilege, or network behavior, and changes no
+flag, line output, or JSON content. The runtime dependencies are unchanged.
+Its release PR changes no workflow or packaging step. The publish workflow's
+changelog, artifact-digest, and staged-formula steps were run locally against
+the candidate, with the workflow's own script text, before tagging.
 The local candidate passed the security, QA, deterministic-artifact,
 installed-artifact, and staged-formula gates. Publishing remains gated on
 release-PR review and exact-head CI.

@@ -6,6 +6,8 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+## 8.0.3 - 2026-11-23
+
 ### Fixed
 
 - The hold on repeated stop signals that 8.0.2 added around the report write had faults, all found by review and none seen in use. They need a report write that takes more than five seconds, which means a reader that does not read or a stalled filesystem. A stop signal that arrived just as such a write ended could end the run with a `KeyError` traceback, or be dropped. A Ctrl-C at that moment could leave `SIGTERM` and `SIGHUP` without effect for a program that runs pinghue's code in its own process and catches the interrupt. And a stop signal that a thread other than the main one took, which needs a signal aimed at that thread, was not seen while the write was blocked. The hold no longer decides anything when a signal arrives: during the five seconds a stop signal does nothing, and a timer then puts the previous handling back, so after five seconds a stop signal acts as it did before 8.0.2. What 8.0.2 documented is unchanged. The timer is the process's real-time interval timer with `SIGALRM`, used only while the report is written.
