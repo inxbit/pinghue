@@ -2,7 +2,7 @@
 
 ## Status
 
-Review date: 2026-07-11; audited again on 2026-11-19; verification evidence refreshed for 8.0.1 on 2026-11-20
+Review date: 2026-07-11; audited again on 2026-11-19; reviewed again on 2026-11-23; verification evidence refreshed for 8.0.2 on 2026-11-23
 
 No open critical or high-severity vulnerability was found in the local
 CLI/runtime code. The reviewed implementation is a local, unprivileged
@@ -128,6 +128,31 @@ code neither removes nor refuses such an ACL. Removing it would add
 macOS-only code for a setting the directory's owner chose, and refusing the
 directory would break scripts that write there.
 
+### BP-005 — A descriptor opened before `--overwrite` keeps reading the report (Low, documented)
+
+`--overwrite` rewrites the existing file in place: the inode is kept, its mode
+is set to `0600` in private mode, and the new report is written into it. The
+mode is checked when a file is opened, not when it is read. A process that
+opened the file earlier, while its mode allowed that, keeps its descriptor and
+reads the new report. Found in the second review of 2026-11-23 and measured
+with one account: a descriptor opened on a `0644` file read the new JSON after
+the rewrite, with the file at mode `0600` and the same inode. Reading through a
+descriptor held by a second account was not tested; it follows from the same
+rule.
+
+Impact: only when a private report is written over a file that other users
+could read before, for example one created with `--output-mode umask`, and
+one of them still holds it open. A report pinghue created in private mode was
+never readable by others, so overwriting it does not expose anything.
+
+Operational guidance: before writing a private report to a path whose file
+other users could ever read, remove that file instead of overwriting it. The
+README and the threat model state this.
+
+Status: documented in 8.0.2, with no change in behavior. Refusing to overwrite
+a file that group or other users can read would stop runs that work today, so
+it is a decision for the owner and has not been made.
+
 ## Resolved findings
 
 | Area | Resolution |
@@ -187,30 +212,32 @@ directory would break scripts that write there.
 
 ## Verification evidence
 
-Refreshed for the 8.0.1 release candidate on 2026-11-20 (the 8.0.0 evidence
+Refreshed for the 8.0.2 release candidate on 2026-11-23 (the 8.0.1 evidence
 this section previously recorded is superseded):
 
 - Audit of 2026-11-19: two independent reads of `src/` and the scripts (an
   OpenAI Codex read-only audit split into four areas, and a separate review),
   each finding reproduced before it was accepted. No critical or high finding.
-  19 defects were fixed test-first in 7.1.2, and one more, a target with a
-  space in it, in 8.0.0. This release fixes the two remaining findings that
-  needed no decision. Neither gave a wrong result. `--check --quiet` ran
-  checks whose only product is the report it does not print, and waited up to
-  12 seconds for them. The TUI held its event loop while it added every table
-  row, at startup and after a cleared search: between 260 and 500 ms at 5,000
-  hosts on the test machine, and between 43 and 98 ms on this release. Rerun
-  against the 8.0.0, 7.1.2, 7.1.1, 7.1.0, 7.0.0, and 6.0.0 sources, both show
-  on each of them (the search exists since 7.1.0) and not on this release, so
-  neither is a regression. A fifth Codex pass, over these two diffs, found
-  two defects, both fixed before merge: the IPv6 loopback probe still ran
-  under `--quiet`, and Ctrl+End selected the last row present while rows were
-  still being added. It raised two more points that were left as they are: a
-  stdout pipe whose reader has gone still gets the full check, and a
-  `--count` run can end before the rows below the screen are added, which
-  nothing reads. The last audit finding, the inherited ACL that BP-004
-  documents, was accepted by the owner after this release and stays
-  documented, so no audit finding is open.
+  19 defects were fixed test-first in 7.1.2, one more in 8.0.0, and the last
+  two that needed no decision in 8.0.1. The inherited ACL that BP-004
+  documents was accepted by the owner.
+- Second review of 2026-11-23: one more full read of the 15 runtime modules,
+  the launcher, the workflows and the sdist normalizer, made before reading
+  the earlier findings, then about 45 hermetic hand runs on macOS. No critical
+  or high finding. Three results, all in this release. A stop signal repeated
+  while the report was built lost the report: measured on 8.0.1 with 1,000
+  hosts, a second SIGINT 0.03 to 0.15 s after the first gave exit status 130,
+  a traceback, and no report; it is now held back for the first five seconds
+  of writing the report. The TUI search could not find an IPv6 literal target
+  written in a long form. And BP-005, documented only. A Codex pass over the
+  fix diff found that the first version of the signal fix, which ignored the
+  signals only for report files, could not be interrupted when a FIFO
+  appeared in between or a filesystem stalled; the grace period replaced it
+  before merge. The final version was checked by its tests, by hand runs and
+  by CI, not by a second Codex pass. Not closed: a signal in the instant
+  between the end of probing and the start of the report, and one after the
+  report is written, while the process exits; the changelog names both.
+  Linux-only paths were read, not run by hand; CI runs the suite on Linux.
 - Fuzzing with fixed harness seeds, rerun on this release, which changes no
   parser: 778,464 datagrams and 173,494 Linux error-queue messages through an
   in-memory socket on both platform branches of the ICMP engine, with no
@@ -218,18 +245,18 @@ this section previously recorded is superseded):
   3,000 host files, 9,000 argument vectors, 9,000 display strings, 3,000
   host-name sets, 3,000 resolver answers, and 1,000 reports checked against
   the schema. No accepted target among the 9,000 vectors contains a space.
-- Full tests: 800 passed and 8 skipped (Linux-only kernel features, a
-  Linux-only pty hangup, and a root-only ownership change) under CPython
-  3.12.16, with total branch-aware coverage of 94.70% against the 85% floor;
-  localhost TCP and Unix-socket cases executed. The same suite passed under
-  CPython 3.11.15, the supported floor, and 3.14.10, each from fresh
-  `--require-hashes` installs. CI ran it on Linux and macOS under Python 3.11
-  to 3.14.
+- Full tests: 812 passed and 9 skipped (Linux-only kernel features, a
+  Linux-only pty hangup, a Linux-only ACL case, and a root-only ownership
+  change) under CPython 3.12.16, with total branch-aware coverage of 94.74%
+  against the 85% floor; localhost TCP and Unix-socket cases executed. The
+  same suite passed under CPython 3.11.15, the supported floor, and 3.14.10,
+  each from fresh `--require-hashes` installs. CI ran it on Linux and macOS
+  under Python 3.11 to 3.14.
 - Ruff: `ruff check` and `ruff format --check` passed for all files.
 - Mypy strict mode: no issues across 17 runtime modules plus the sdist
   normalizer script.
 - Python bytecode compilation: all runtime and script modules passed.
-- Static site contract: 28 Node tests passed. The 8.0.1 site change updates
+- Static site contract: 28 Node tests passed. The 8.0.2 site change updates
   the version strings.
 - Semgrep 1.186.0 Python, security-audit, and secrets rule packs: 0 findings
   across 88 scanned files.
@@ -237,7 +264,7 @@ this section previously recorded is superseded):
   the `random.uniform` jitter on DNS retry delays, which is not a security
   value; ICMP identifiers, sequence numbers, and reply tokens use
   `os.urandom`. No medium or high findings.
-- Gitleaks 8.30.1 working-tree and 175-commit release-history scans: 0 leaks.
+- Gitleaks 8.30.1 working-tree and 180-commit history scans: 0 leaks.
 - `pip-audit --strict --disable-pip`: no known vulnerabilities in
   `requirements.txt`, `requirements-build.txt`, or
   `requirements-audit.txt`.
@@ -246,10 +273,10 @@ this section previously recorded is superseded):
 - Two builds from independent source trees with different mtimes produced byte-identical
   normalized sdists and byte-identical wheels with `SOURCE_DATE_EPOCH=0`. The
   same procedure applied to the previous release's tag reproduced the
-  published 8.0.0 wheel and sdist byte for byte.
-- The final normalized sdist and wheel passed `twine check`; all 701 tests
-  shipped in the unpacked sdist passed against its own sources (8 skipped as
-  above); fresh wheel and sdist installs both reported `pinghue 8.0.1`
+  published 8.0.1 wheel and sdist byte for byte.
+- The final normalized sdist and wheel passed `twine check`; all 713 tests
+  shipped in the unpacked sdist passed against its own sources (9 skipped as
+  above); fresh wheel and sdist installs both reported `pinghue 8.0.2`
   through the console-script entry point and completed the localhost TCP
   smoke test, choosing line output without `--no-tui` because stdout was a
   pipe.
@@ -260,14 +287,15 @@ this section previously recorded is superseded):
 
 ## Release decision
 
-The breaking target cap shipped in 5.0.0 and BP-001 is closed. 8.0.1 is a
-patch release with two fixes from the 2026-11 audit, neither of them to a
-wrong result: with nothing to print, `--check` runs only the check that sets
-its exit status, and the TUI adds the rows of a large table in chunks and no
-longer has every new cell measured. BP-004 remains documented only. The
-release adds no input source, output path, privilege, or network behavior,
-changes no flag, exit status, line output, or JSON content, and leaves the
-runtime dependencies unchanged. Its release PR changes no workflow or
+The breaking target cap shipped in 5.0.0 and BP-001 is closed. 8.0.2 is a
+patch release with two fixes from the second review of 2026-11-23: a stop
+signal repeated while the report is written no longer loses the report, and
+the TUI search finds an IPv6 literal target written in a long form. BP-004
+and BP-005 remain documented only. The release adds no input source, output
+path, privilege, or network behavior, and changes no flag, line output, or
+JSON content. One behavior changes on purpose: a stop signal in the first
+five seconds of writing the report is dropped instead of ending the process.
+The runtime dependencies are unchanged. Its release PR changes no workflow or
 packaging step. The publish workflow's changelog, artifact-digest, and
 staged-formula steps were run locally against the candidate, with the
 workflow's own script text, before tagging.
