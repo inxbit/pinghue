@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from itertools import pairwise
 from typing import Any
 
@@ -355,6 +356,8 @@ def _name_sort_key(name: str) -> tuple[Any, ...]:
     )
 
 
+# Room for every host name and address of the largest fleet, and the search terms.
+@lru_cache(maxsize=16_384)
 def _canonical_ip(value: str) -> str | None:
     try:
         return str(ipaddress.ip_address(value))
@@ -373,8 +376,10 @@ def search_matcher(query: str) -> Callable[[TargetRun], bool]:
     terms = [term for term in _SEARCH_SEPARATORS.split(query.lower()) if term]
     if not terms:
         return lambda _target: True
-    # Resolved addresses are already canonical, so comparing strings is
-    # enough and stays cheap on every refresh of a large fleet.
+    # An address is compared in its canonical form on both sides: a literal
+    # target keeps the form it was typed in (2001:0db8:0:0:0:0:0:1), as the
+    # host name and as the address. The forms are cached, so this stays cheap
+    # on every refresh of a large fleet.
     addresses: set[str] = set()
     fragments: list[str] = []
     for term in terms:
@@ -387,7 +392,7 @@ def search_matcher(query: str) -> Callable[[TargetRun], bool]:
     def matches(target: TargetRun) -> bool:
         name = target.target.lower()
         address = (target.resolved_address or "").lower()
-        if name in addresses or address in addresses:
+        if addresses and (_canonical_ip(name) in addresses or _canonical_ip(address) in addresses):
             return True
         return any(fragment in name or fragment in address for fragment in fragments)
 

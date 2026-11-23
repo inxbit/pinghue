@@ -192,6 +192,156 @@ def test_tui_restores_the_terminal_and_writes_output_on_signal(
     assert _exit_reason(report) == "interrupted"
 
 
+# Runs the CLI in a child that gets a stop signal while its report is being
+# built: the moment an operator presses Ctrl-C a second time, or a service
+# manager repeats its signal, after the run has already stopped.
+_SIGNAL_DURING_REPORT = """
+import os
+import signal
+import sys
+
+import pinghue.export as export
+from pinghue.cli import main
+
+build = export.build_output_document
+
+
+def build_while_signalled(**kwargs):
+    os.kill(os.getpid(), getattr(signal, sys.argv[1]))
+    return build(**kwargs)
+
+
+export.build_output_document = build_while_signalled
+sys.exit(main(sys.argv[2:]))
+"""
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
+def test_a_stop_signal_while_the_report_is_written_does_not_lose_it(
+    tmp_path: Path, signal_name: str
+) -> None:
+    # The stop-signal handlers are gone once probing has ended. A signal that
+    # arrived while the report was built then ended the process: a traceback
+    # (or a silent death) and no report, although an interrupted run is
+    # documented to write it.
+    if signal.getsignal(getattr(signal, signal_name)) is signal.SIG_IGN:
+        pytest.skip(f"{signal_name} is ignored by the test runner and its children")
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _SIGNAL_DURING_REPORT,
+            signal_name,
+            "-n",
+            "-p",
+            str(_closed_loopback_port()),
+            "--no-tui",
+            "-c",
+            "1",
+            "--output",
+            str(report),
+            "127.0.0.1",
+        ],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        env=_cli_env(),
+        timeout=EXIT_TIMEOUT,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == b""
+    assert _exit_reason(report) == "completed"
+
+
+# Runs the CLI in a child that says on stderr when it starts on its report,
+# with the grace period for repeated stop signals given as the first argument.
+_ANNOUNCED_REPORT = """
+import sys
+
+import pinghue.export as export
+import pinghue.runner as runner
+from pinghue.cli import main
+
+build = export.build_output_document
+
+
+def announced_build(**kwargs):
+    sys.stderr.write("building the report\\n")
+    sys.stderr.flush()
+    return build(**kwargs)
+
+
+export.build_output_document = announced_build
+runner.REPORT_SIGNAL_GRACE_SECONDS = float(sys.argv[1])
+sys.exit(main(sys.argv[2:]))
+"""
+
+
+def test_a_report_write_that_never_ends_can_be_interrupted_after_the_grace_period(
+    tmp_path: Path,
+) -> None:
+    # A reader that holds the FIFO open and never reads holds the write for
+    # good. A repeated Ctrl-C is held back at first, like for any report, but
+    # not for ever: after the grace period it ends the process. The report is
+    # larger than any pipe buffer.
+    grace = 5.0
+    fifo = tmp_path / "report.fifo"
+    os.mkfifo(fifo, 0o600)
+    hosts = tmp_path / "hosts.txt"
+    hosts.write_text("".join(f"127.0.{index // 250}.{index % 250 + 1}\n" for index in range(600)))
+    reader = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            _ANNOUNCED_REPORT,
+            str(grace),
+            "-n",
+            "-p",
+            str(_closed_loopback_port()),
+            "--no-tui",
+            "-c",
+            "1",
+            "-i",
+            "0.1",
+            "--timeout",
+            "0.2",
+            "-f",
+            str(hosts),
+            "--output",
+            str(fifo),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=_cli_env(),
+    )
+    try:
+        assert proc.stderr is not None
+        announced = _read_until(proc.stderr.fileno(), b"building the report\n", timeout=60.0)
+        started = time.monotonic()
+        time.sleep(0.3)
+        proc.send_signal(signal.SIGINT)
+        time.sleep(0.7)
+        alive_after_the_held_signal = proc.poll() is None
+        time.sleep(max(0.0, started + grace + 0.5 - time.monotonic()))
+        proc.send_signal(signal.SIGINT)
+        try:
+            returncode: int | None = proc.wait(timeout=EXIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            returncode = None
+    finally:
+        _stop(proc)
+        os.close(reader)
+
+    assert b"building the report\n" in announced
+    assert alive_after_the_held_signal, "the first repeated signal ended the write"
+    assert returncode is not None, "SIGINT did not end a write that never ends"
+    assert returncode != 0
+
+
 def test_tui_exits_at_once_when_stderr_is_closed(tmp_path: Path) -> None:
     # The TUI draws on stderr. With descriptor 2 closed, Textual's output
     # thread died, the app hung before probing and ignored SIGTERM and SIGHUP.

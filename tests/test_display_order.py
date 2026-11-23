@@ -249,3 +249,42 @@ def test_the_sorted_column_header_carries_an_arrow_that_fits_its_width() -> None
     # jitter is 7 cells wide at its narrowest: no room for the space.
     assert column_label("jitter", "jitter", True) == "jitter▼"
     assert column_label("avg", "loss", True) == "avg"
+
+
+def test_search_finds_an_ipv6_literal_target_written_in_a_long_form() -> None:
+    # A literal target is shown, and stored as its address, the way it was
+    # typed. A complete address in the search matches exactly, and the typed
+    # text was compared with the short form: such a host could not be found
+    # by its own text, nor by the short form, only by part of it.
+    long_form = "2001:0db8:0:0:0:0:0:1"
+    zoned = "fe80:0::1%en0"
+    unresolved = "0:0:0:0:0:0:0:1"
+    targets = [
+        TargetRun(long_form, resolved_address=long_form),
+        TargetRun("2001:db8::10", resolved_address="2001:db8::10"),
+        TargetRun(zoned, resolved_address=zoned),
+        TargetRun(unresolved),
+    ]
+
+    def found(query: str) -> list[str]:
+        order = display_order(targets, sort_column=None, descending=False, query=query)
+        return names(targets, order)
+
+    assert found(long_form) == [long_form]
+    assert found("2001:db8::1") == [long_form]
+    assert found("2001:DB8:0:0::1") == [long_form]
+    assert found("fe80::1%en0") == [zoned]
+    assert found(zoned) == [zoned]
+    assert found("::1") == [unresolved]
+    # Still exact: the short form of one address is not part of another.
+    assert found("2001:db8::10") == ["2001:db8::10"]
+
+
+def test_search_for_a_long_form_address_finds_the_host_that_resolved_to_it() -> None:
+    targets = [TargetRun("v6.example", resolved_address="2001:db8::1")]
+
+    order = display_order(
+        targets, sort_column=None, descending=False, query="2001:0db8:0:0:0:0:0:1"
+    )
+
+    assert names(targets, order) == ["v6.example"]
