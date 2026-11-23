@@ -11,6 +11,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -904,6 +905,96 @@ def test_held_stop_signals_leaves_no_handler_behind_when_the_old_one_is_unknown(
         real_signal(signal.SIGTERM, original)
 
     assert after is signal.SIG_DFL
+
+
+def test_held_stop_signals_puts_every_handler_back_when_one_of_them_raises_meanwhile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # While the handlers are put back, Ctrl-C can arrive for a signal that
+    # already has its handler again, and that handler raises. The handlers
+    # still waiting must go back all the same, or a caller that catches the
+    # interrupt is left with stop signals that do nothing.
+    received: list[int] = []
+    previous = _recording_handlers(received)
+    recording = signal.getsignal(signal.SIGTERM)
+    real_signal = signal.signal
+    real_signal(signal.SIGINT, signal.default_int_handler)
+    interrupted: list[int] = []
+
+    def interrupt_once_sigint_is_back(number: int, handler: Any) -> Any:
+        replaced = real_signal(number, handler)
+        if number == signal.SIGINT and handler is signal.default_int_handler and not interrupted:
+            interrupted.append(number)
+            signal.raise_signal(signal.SIGINT)
+            for _ in range(1000):
+                pass
+        return replaced
+
+    try:
+        with pytest.raises(KeyboardInterrupt), runner.held_stop_signals(grace_s=60.0):
+            monkeypatch.setattr(signal, "signal", interrupt_once_sigint_is_back)
+        monkeypatch.undo()
+        after = {number: signal.getsignal(number) for number in runner.stop_signals()}
+    finally:
+        monkeypatch.undo()
+        _put_back(previous)
+
+    assert interrupted == [signal.SIGINT]
+    assert after[signal.SIGINT] is signal.default_int_handler
+    assert {after[number] for number in after if number != signal.SIGINT} == {recording}
+
+
+def test_held_stop_signals_lets_signals_through_once_its_timer_has_run() -> None:
+    # The hold ends by a timer, not by the next signal: after the grace
+    # period the handlers found are back in place while the block still runs.
+    received: list[int] = []
+    previous = _recording_handlers(received)
+    recording = signal.getsignal(signal.SIGTERM)
+    try:
+        with runner.held_stop_signals(grace_s=1.0):
+            # Only a pause of a whole second before this line could let the
+            # timer run first.
+            signal.raise_signal(signal.SIGTERM)
+            held = list(received)
+            deadline = time.monotonic() + 30.0
+            while signal.getsignal(signal.SIGTERM) is not recording:
+                assert time.monotonic() < deadline, "the timer never ended the hold"
+                time.sleep(0.01)
+            signal.raise_signal(signal.SIGTERM)
+            for _ in range(1000):
+                pass
+    finally:
+        _put_back(previous)
+
+    assert held == []
+    assert received == [signal.SIGTERM]
+
+
+def test_held_stop_signals_restores_the_alarm_handler_and_timer_it_found() -> None:
+    # The grace period runs on ITIMER_REAL and SIGALRM. A block that ends
+    # early must leave neither behind: a late SIGALRM with the default
+    # action would end the process.
+    alarms: list[int] = []
+
+    def on_alarm(number: int, _frame: object) -> None:
+        alarms.append(number)
+
+    alarm_before = signal.signal(signal.SIGALRM, on_alarm)
+    try:
+        with runner.held_stop_signals(grace_s=60.0):
+            during = signal.getsignal(signal.SIGALRM)
+            armed = signal.getitimer(signal.ITIMER_REAL)[0]
+        after = signal.getsignal(signal.SIGALRM)
+        timer_after = signal.getitimer(signal.ITIMER_REAL)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, alarm_before)
+
+    assert during is not on_alarm
+    assert 0.0 < armed <= 60.0
+    assert after is on_alarm
+    assert timer_after == (0.0, 0.0)
+    assert alarms == []
 
 
 def test_held_stop_signals_runs_its_block_outside_the_main_thread() -> None:

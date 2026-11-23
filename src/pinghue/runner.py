@@ -472,34 +472,59 @@ def held_stop_signals(grace_s: float | None = None) -> Iterator[None]:
     writes the report and lose it. Inside the block such a signal is dropped
     for the first ``grace_s`` seconds (REPORT_SIGNAL_GRACE_SECONDS by default);
     after that it acts as it would have without the block, so a write that
-    never ends can still be stopped. The handlers found are put back when the
-    block ends. Outside the main thread, where Python cannot change how a
-    signal is handled, the block runs unprotected.
+    never ends can still be stopped.
+
+    While held, a signal has a handler that does nothing and keeps no state,
+    so it does not matter which thread the signal is sent to or when it
+    arrives. (Not SIG_IGN: stop_signals() takes an ignored SIGHUP for one the
+    caller wants left alone.) A timer (ITIMER_REAL, SIGALRM) ends the hold:
+    all its handler does is put the handlers found back, which is safe to do
+    twice. They are put back when the block ends too, and the timer and the
+    SIGALRM handler found are restored. Outside the main thread, where Python
+    cannot change how a signal is handled, the block runs unprotected.
     """
     grace = REPORT_SIGNAL_GRACE_SECONDS if grace_s is None else grace_s
-    started = monotonic_time()
-    previous: dict[int, Any] = {}
+    found: list[tuple[int, Any]] = []
+    alarm_handler_found: list[Any] = []
+    timer_found: list[tuple[float, float]] = []
 
-    def restore(signal_number: int) -> None:
-        # None: the handler was not installed from Python and cannot be put
-        # back; the default action is the closest to it.
-        handler = previous.pop(signal_number)
-        signal.signal(signal_number, signal.SIG_DFL if handler is None else handler)
-
-    def hold(signal_number: int, _frame: object) -> None:
-        if monotonic_time() - started < grace or signal_number not in previous:
+    def put_back(handlers: Sequence[tuple[int, Any]]) -> None:
+        # One of the signals may arrive while the others are put back, and
+        # its handler may raise (Ctrl-C does): the rest still goes back.
+        if not handlers:
             return
-        restore(signal_number)
-        signal.raise_signal(signal_number)
+        number, handler = handlers[0]
+        try:
+            # None: the handler was not installed from Python and cannot be
+            # put back; the default action is the closest to it.
+            signal.signal(number, signal.SIG_DFL if handler is None else handler)
+        finally:
+            put_back(handlers[1:])
+
+    def drop(_number: int, _frame: object) -> None:
+        return None
+
+    def end_hold(_number: int, _frame: object) -> None:
+        put_back(found)
 
     try:
-        with contextlib.suppress(ValueError):
-            for signal_number in stop_signals():
-                previous[signal_number] = signal.signal(signal_number, hold)
+        if grace > 0:
+            with contextlib.suppress(ValueError):
+                for stop_signal in stop_signals():
+                    found.append((stop_signal, signal.signal(stop_signal, drop)))
+                alarm_handler_found.append(signal.signal(signal.SIGALRM, end_hold))
+                timer_found.append(signal.setitimer(signal.ITIMER_REAL, grace))
         yield
     finally:
-        for held in list(previous):
-            restore(held)
+        try:
+            # The timer first: with the handler found back in place, a SIGALRM
+            # of ours would be taken for someone else's, or end the process.
+            if timer_found:
+                signal.setitimer(signal.ITIMER_REAL, *timer_found[0])
+            if alarm_handler_found:
+                put_back([(signal.SIGALRM, alarm_handler_found[0])])
+        finally:
+            put_back(found)
 
 
 def stagger_delay(*, index: int, count: int, interval: float) -> float:

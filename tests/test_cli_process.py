@@ -342,6 +342,108 @@ def test_a_report_write_that_never_ends_can_be_interrupted_after_the_grace_perio
     assert returncode != 0
 
 
+# A child with other threads alive (as lookups stuck in the resolver would
+# be) that holds the stop signals for a grace period and blocks writing to its
+# stdout, which the test never reads. It says so on stderr once the hold is on.
+_BLOCKED_WRITE_WITH_THREADS = """
+import os
+import sys
+import threading
+import time
+
+from pinghue.runner import held_stop_signals
+
+for _ in range(8):
+    threading.Thread(target=time.sleep, args=(120,), daemon=True).start()
+with held_stop_signals(grace_s=float(sys.argv[1])):
+    os.write(2, b"held\\n")
+    while True:
+        os.write(1, b"x" * 65536)
+"""
+
+
+def _blocked_writer(grace: float) -> tuple[subprocess.Popen[bytes], float]:
+    """Start the child; return it and when its hold was seen, once its write is blocked.
+
+    Fails unless the write was blocked before the grace period could have
+    ended, so that the hold ends while the main thread is in the write.
+    """
+    import array
+    import fcntl
+    import termios
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _BLOCKED_WRITE_WITH_THREADS, str(grace)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_cli_env(),
+    )
+    try:
+        assert proc.stdout is not None and proc.stderr is not None
+        marker = _read_until(proc.stderr.fileno(), b"held\n", timeout=STARTUP_TIMEOUT)
+        # The hold began before this moment, so it ends before held_at + grace.
+        held_at = time.monotonic()
+        assert marker == b"held\n"
+        # The pipe is full when the bytes waiting in it stop growing.
+        waiting = array.array("i", [0])
+        seen = -1
+        while time.monotonic() < held_at + grace:
+            fcntl.ioctl(proc.stdout.fileno(), termios.FIONREAD, waiting, True)
+            if waiting[0] > 0 and waiting[0] == seen:
+                break
+            seen = waiting[0]
+            time.sleep(0.05)
+        blocked_in_time = waiting[0] > 0 and waiting[0] == seen and proc.poll() is None
+        assert blocked_in_time, (
+            "the child was not blocked in its write before the grace period ended"
+        )
+    except BaseException:
+        _stop(proc)
+        raise
+    return proc, held_at
+
+
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGTERM", "SIGHUP"])
+def test_a_signal_to_the_process_ends_a_blocked_write_while_other_threads_are_alive(
+    signal_name: str,
+) -> None:
+    # Python runs a signal handler in the main thread only. The grace period
+    # ends while the main thread is blocked in the write and other threads
+    # are alive; a signal sent to the process (kill, Ctrl-C) after it must
+    # end that write, by the signal itself and not by some other failure.
+    signal_number = getattr(signal, signal_name)
+    if signal.getsignal(signal_number) is signal.SIG_IGN:
+        pytest.skip(f"{signal_name} is ignored by the test runner and its children")
+    grace = 3.0
+    proc, held_at = _blocked_writer(grace)
+    try:
+        time.sleep(max(0.0, held_at + grace + 0.7 - time.monotonic()))
+        still_blocked = proc.poll() is None
+        proc.send_signal(signal_number)
+        try:
+            returncode: int | None = proc.wait(timeout=EXIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            returncode = None
+    finally:
+        _stop(proc)
+
+    assert still_blocked
+    assert returncode == -signal_number
+
+
+def test_a_signal_in_the_grace_period_does_not_end_a_blocked_write() -> None:
+    proc, _held_at = _blocked_writer(60.0)
+    try:
+        proc.send_signal(signal.SIGTERM)
+        time.sleep(0.7)
+        alive = proc.poll() is None
+    finally:
+        _stop(proc)
+
+    assert alive
+
+
 def test_tui_exits_at_once_when_stderr_is_closed(tmp_path: Path) -> None:
     # The TUI draws on stderr. With descriptor 2 closed, Textual's output
     # thread died, the app hung before probing and ignored SIGTERM and SIGHUP.
