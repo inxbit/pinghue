@@ -9,10 +9,10 @@ import random
 import signal
 import sys
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TextIO
+from typing import Any, TextIO
 
 from pinghue.config import RunConfig
 from pinghue.display import sanitize_display
@@ -456,6 +456,52 @@ def install_stop_signal_handlers(stop_event: asyncio.Event) -> StopSignalCleanup
     return install_stop_signal_callback(stop_event.set)
 
 
+# How long after probing has ended a repeated stop signal is held back so that
+# the report gets written. Building the largest report takes a fraction of a
+# second; a write still running after this is waiting on something (a FIFO or
+# pipe whose reader does not read, a stalled filesystem) and can be stopped.
+REPORT_SIGNAL_GRACE_SECONDS = 5.0
+
+
+@contextlib.contextmanager
+def held_stop_signals(grace_s: float | None = None) -> Iterator[None]:
+    """Hold ``stop_signals()`` back for ``grace_s`` seconds while the block runs.
+
+    The run's own handlers are gone once probing has ended, so a second Ctrl-C,
+    or a signal a service manager repeats, would end the process while it
+    writes the report and lose it. Inside the block such a signal is dropped
+    for the first ``grace_s`` seconds (REPORT_SIGNAL_GRACE_SECONDS by default);
+    after that it acts as it would have without the block, so a write that
+    never ends can still be stopped. The handlers found are put back when the
+    block ends. Outside the main thread, where Python cannot change how a
+    signal is handled, the block runs unprotected.
+    """
+    grace = REPORT_SIGNAL_GRACE_SECONDS if grace_s is None else grace_s
+    started = monotonic_time()
+    previous: dict[int, Any] = {}
+
+    def restore(signal_number: int) -> None:
+        # None: the handler was not installed from Python and cannot be put
+        # back; the default action is the closest to it.
+        handler = previous.pop(signal_number)
+        signal.signal(signal_number, signal.SIG_DFL if handler is None else handler)
+
+    def hold(signal_number: int, _frame: object) -> None:
+        if monotonic_time() - started < grace or signal_number not in previous:
+            return
+        restore(signal_number)
+        signal.raise_signal(signal_number)
+
+    try:
+        with contextlib.suppress(ValueError):
+            for signal_number in stop_signals():
+                previous[signal_number] = signal.signal(signal_number, hold)
+        yield
+    finally:
+        for held in list(previous):
+            restore(held)
+
+
 def stagger_delay(*, index: int, count: int, interval: float) -> float:
     """Return a start delay that spreads hosts evenly across one interval."""
     if count <= 0:
@@ -891,18 +937,21 @@ async def run(args: RunConfig, *, mode: ProbeMode) -> int:
         targets, exit_reason, started_at, ended_at = await app.run_async()
 
     if args.output:
-        write_output_json(
-            args.output,
-            started_at=started_at,
-            ended_at=ended_at,
-            host=sanitize_display(args.host_label),
-            exit_reason=exit_reason,
-            probe=probe,
-            targets=targets,
-            include_samples=not args.no_samples,
-            overwrite=args.overwrite,
-            output_mode=args.output_mode,
-        )
+        # A stop signal repeated while the report is built and written is held
+        # back rather than allowed to lose the report.
+        with held_stop_signals():
+            write_output_json(
+                args.output,
+                started_at=started_at,
+                ended_at=ended_at,
+                host=sanitize_display(args.host_label),
+                exit_reason=exit_reason,
+                probe=probe,
+                targets=targets,
+                include_samples=not args.no_samples,
+                overwrite=args.overwrite,
+                output_mode=args.output_mode,
+            )
 
     if exit_reason == "error":
         # The TUI ended on an internal error; the report above records it.

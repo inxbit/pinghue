@@ -6,6 +6,15 @@ Starting with `1.0.0`, this project follows semantic versioning. CLI flags and J
 
 ## [Unreleased]
 
+### Fixed
+
+- A second Ctrl-C, or a repeated `SIGTERM` or `SIGHUP`, while pinghue writes its `--output` report no longer loses the report. pinghue stops handling these signals once probing has ended, so one that arrived while the report was being built ended the process: after Ctrl-C a Python traceback of about 40 lines, after `SIGTERM` or `SIGHUP` a silent death, and in both cases no report, although an interrupted run is documented to write it. The report takes about a quarter of a second to build at the 100,000 samples a run keeps at most (measured on one Mac with 1,000 hosts in line output), and a few milliseconds for a small run, so it took a large run and a quick second signal. Such a signal is now held back for the first five seconds of writing the report, wherever the report goes. After five seconds it acts as before, so a write that never ends (a FIFO or pipe whose reader does not read, a stalled filesystem) can still be stopped; in the first five seconds it now cannot. Two short windows remain: a signal in the instant between the end of probing and the start of the report can still lose it, and one that arrives after the report is written, while the process exits, can still end the process with the signal's status or print a short `Exception ignored` message; the report is complete by then.
+- TUI: the `/` search now finds an IPv6 literal target that was written in a long form, such as `2001:0db8:0:0:0:0:0:1`. The host is shown as it was typed, but a complete address in the search was compared with the short form only: typing exactly what the row shows found nothing, and neither did the short form `2001:db8::1`. While typing, the row was there until the term became a complete address. Addresses are now compared in one form on both sides. A complete address still matches exactly.
+
+### Security
+
+- Documented, with no change in behavior: `--overwrite` rewrites the existing file in place, so a process that opened that file earlier, while its mode allowed it, keeps its descriptor and reads the new report although its mode is now `0600`. In the default `private` output mode, remove a report that other users could ever read before writing a private one to the same path. The README and the threat model say so now.
+
 ## 8.0.1 - 2026-11-20
 
 ### Fixed

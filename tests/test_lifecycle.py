@@ -10,6 +10,7 @@ import json
 import os
 import signal
 import sys
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -796,3 +797,126 @@ async def test_sample_printer_warns_about_an_io_error_on_a_regular_file(
         "pinghue: warning: could not write probe lines, stopping the run: "
         "[Errno 5] Input/output error\n"
     )
+
+
+def _recording_handlers(received: list[int]) -> dict[signal.Signals, Any]:
+    """Install a recording handler for every stop signal; return the handlers replaced."""
+
+    def record(signal_number: int, _frame: object) -> None:
+        received.append(signal_number)
+
+    return {number: signal.signal(number, record) for number in runner.stop_signals()}
+
+
+def _put_back(previous: dict[signal.Signals, Any]) -> None:
+    for number, handler in previous.items():
+        signal.signal(number, handler)
+
+
+def test_held_stop_signals_drops_a_signal_sent_during_the_grace_period() -> None:
+    # runner.run() holds the stop signals while it writes the report: one
+    # that is repeated then must not reach the handler that would end the run.
+    received: list[int] = []
+    previous = _recording_handlers(received)
+    try:
+        with runner.held_stop_signals(grace_s=60.0):
+            for number in runner.stop_signals():
+                signal.raise_signal(number)
+            reached_the_end = True
+    finally:
+        _put_back(previous)
+
+    assert reached_the_end
+    assert received == []
+
+
+def test_held_stop_signals_lets_a_signal_through_after_the_grace_period() -> None:
+    # A write that is still running after the grace period is waiting on
+    # something, and must not be left unstoppable.
+    received: list[int] = []
+    previous = _recording_handlers(received)
+    try:
+        with runner.held_stop_signals(grace_s=0.0):
+            signal.raise_signal(signal.SIGTERM)
+    finally:
+        _put_back(previous)
+
+    assert received == [signal.SIGTERM]
+
+
+def test_held_stop_signals_lets_ctrl_c_interrupt_after_the_grace_period() -> None:
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        with pytest.raises(KeyboardInterrupt), runner.held_stop_signals(grace_s=0.0):
+            signal.raise_signal(signal.SIGINT)
+            # The interrupt is raised at the next bytecode at the latest.
+            for _ in range(1000):
+                pass
+        after = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    assert after is signal.default_int_handler
+
+
+def test_held_stop_signals_puts_the_handlers_back() -> None:
+    # run() also runs inside other programs' processes (these tests, for
+    # one), so the handlers it found have to be back when the block ends,
+    # after an error too.
+    received: list[int] = []
+    previous = _recording_handlers(received)
+    try:
+        installed = {number: signal.getsignal(number) for number in runner.stop_signals()}
+        with runner.held_stop_signals():
+            during = {number: signal.getsignal(number) for number in runner.stop_signals()}
+        after = {number: signal.getsignal(number) for number in runner.stop_signals()}
+        with pytest.raises(OSError, match="disk full"), runner.held_stop_signals():
+            raise OSError("disk full")
+        after_an_error = {number: signal.getsignal(number) for number in runner.stop_signals()}
+    finally:
+        _put_back(previous)
+
+    assert all(during[number] is not installed[number] for number in installed)
+    assert after == installed
+    assert after_an_error == installed
+
+
+def test_held_stop_signals_leaves_no_handler_behind_when_the_old_one_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # signal.signal() returns None for a handler that was not installed from
+    # Python. It cannot be put back; the hold must not stay in its place.
+    real_signal = signal.signal
+    original = real_signal(signal.SIGTERM, signal.SIG_DFL)
+
+    def unknown_previous_handler(number: int, handler: Any) -> Any:
+        replaced = real_signal(number, handler)
+        return None if number == signal.SIGTERM and callable(handler) else replaced
+
+    try:
+        monkeypatch.setattr(signal, "signal", unknown_previous_handler)
+        with runner.held_stop_signals():
+            pass
+        monkeypatch.undo()
+        after = signal.getsignal(signal.SIGTERM)
+    finally:
+        monkeypatch.undo()
+        real_signal(signal.SIGTERM, original)
+
+    assert after is signal.SIG_DFL
+
+
+def test_held_stop_signals_runs_its_block_outside_the_main_thread() -> None:
+    # Python refuses to change a signal's handling there; the report must
+    # still be written.
+    ran: list[str] = []
+
+    def worker() -> None:
+        with runner.held_stop_signals():
+            ran.append("block")
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert ran == ["block"]

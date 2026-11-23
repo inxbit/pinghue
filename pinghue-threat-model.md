@@ -212,7 +212,12 @@ verified inode and rewrites it in place. The file must be owned by the
 effective user, both as observed and as opened, because its owner could
 otherwise read the rewritten report whatever mode PingHue applies. This closes
 replacement races against special nodes, but an abrupt process or system
-failure during the final write can leave a partial report. Evidence-preserving
+failure during the final write can leave a partial report. Because the inode is
+kept, a process that opened the file before the rewrite, while its mode allowed
+that, keeps its descriptor and reads the new report after PingHue has set mode
+`0600`: the mode is checked when a file is opened, not when it is read. A
+private report should therefore not be written over a file that other users
+could ever read; remove that file first. Evidence-preserving
 workflows should accept output only after a successful exit and JSON
 validation, then rotate it separately.
 
