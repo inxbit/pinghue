@@ -128,7 +128,7 @@ code neither removes nor refuses such an ACL. Removing it would add
 macOS-only code for a setting the directory's owner chose, and refusing the
 directory would break scripts that write there.
 
-### BP-005 — A descriptor opened before `--overwrite` keeps reading the report (Low, documented)
+### BP-005 — A descriptor opened before `--overwrite` keeps reading the report (Low, accepted 2026-11-23)
 
 `--overwrite` rewrites the existing file in place: the inode is kept, its mode
 is set to `0600` in private mode, and the new report is written into it. The
@@ -149,9 +149,11 @@ Operational guidance: before writing a private report to a path whose file
 other users could ever read, remove that file instead of overwriting it. The
 README and the threat model state this.
 
-Status: documented in 8.0.2, with no change in behavior. Refusing to overwrite
-a file that group or other users can read would stop runs that work today, so
-it is a decision for the owner and has not been made.
+Decision: the owner accepted this risk on 2026-11-23. It stays documented, as
+it has been since 8.0.2; the code does not refuse the overwrite. Refusing to
+overwrite a file that group or other users can read would stop runs that work
+today, for example over a file made with `touch`, and would need a major
+release.
 
 ## Resolved findings
 
