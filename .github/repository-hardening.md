@@ -50,8 +50,11 @@ Limits:
 
 - Auto-merge does not update a branch that falls behind `main`, and
   `update-branch` would create unsigned commits. The two Dependabot ecosystems
-  are scheduled on different days so their pull requests rarely overlap. A
-  pull request left behind needs an `@dependabot rebase` comment.
+  are scheduled on different days so their pull requests rarely overlap.
+  `.github/workflows/dependabot-rebase.yml` runs hourly and comments
+  `@dependabot rebase` on armed Dependabot pull requests that are behind,
+  once per head commit. If Dependabot ignores the bot's comment, post it by
+  hand.
 - Merges made this way are attributed to `github-actions[bot]`, so they do not
   start `push` workflows: CI does not rerun on `main` after them. The strict
   checks already ran on the same tree.

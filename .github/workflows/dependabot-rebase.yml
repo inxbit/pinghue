@@ -1,0 +1,45 @@
+name: Dependabot rebase
+
+# Auto-merge cannot update a branch that falls behind main: the ruleset wants
+# up-to-date branches and signed commits. Every hour this asks Dependabot to
+# rebase its own armed pull requests that are behind, once per head commit.
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebase:
+    name: Rebase stuck Dependabot PRs
+    if: github.repository == 'inxbit/pinghue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Ask Dependabot to rebase pull requests behind main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          prs="$(gh pr list --repo "${REPO}" --author app/dependabot --state open \
+            --json number,mergeStateStatus,autoMergeRequest \
+            --jq '.[] | select(.mergeStateStatus == "BEHIND" and .autoMergeRequest != null) | .number')"
+          for pr in ${prs}; do
+            # Skip when a rebase was already asked for after the newest commit.
+            # $head below is a jq variable, not a shell one.
+            # shellcheck disable=SC2016
+            asked="$(gh pr view "${pr}" --repo "${REPO}" --json commits,comments \
+              --jq '(.commits[-1].committedDate) as $head
+                | [.comments[] | select(.body == "@dependabot rebase" and .createdAt > $head)]
+                | length')"
+            if [[ "${asked}" != "0" ]]; then
+              echo "#${pr}: rebase already requested for this head"
+              continue
+            fi
+            gh pr comment "${pr}" --repo "${REPO}" --body "@dependabot rebase"
+            echo "#${pr}: rebase requested"
+          done
