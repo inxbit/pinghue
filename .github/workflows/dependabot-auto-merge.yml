@@ -1,0 +1,40 @@
+name: Dependabot auto-merge
+
+# Arms GitHub auto-merge on Dependabot pull requests, so each one squash-merges
+# as soon as the required checks in the main ruleset pass. Major version bumps
+# are left for a person. No pull-request code is checked out or run here.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    name: Arm auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'inxbit/pinghue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Arm auto-merge unless an update is a major version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Dependabot writes an update-type line per dependency into its
+          # commit message. A failed read stops the step before anything is armed.
+          messages="$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/commits" --jq '.[].commit.message')"
+          if ! grep -q 'update-type: version-update:' <<<"${messages}"; then
+            echo "::notice::No Dependabot update metadata found; left for manual review."
+            exit 0
+          fi
+          if grep -q 'update-type: version-update:semver-major' <<<"${messages}"; then
+            echo "::notice::Major version update; left for manual review."
+            exit 0
+          fi
+          gh pr merge --auto --squash "${PR_URL}"
