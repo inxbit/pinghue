@@ -12,6 +12,7 @@ This repository is intended to be operated with strict release controls.
 - Default workflow token permissions: read-only, without pull-request approval
 - Branch and tag rulesets: active
 - `pypi` environment: protected
+- Allow auto-merge: enabled (used by the Dependabot auto-merge workflow)
 
 ## Branch Ruleset
 
@@ -34,6 +35,28 @@ authors to approve their own pull requests, so a one-review requirement blocks
 all solo-maintainer releases. If the repository gains another maintainer with
 write access, raise `required_approving_review_count` in
 `.github/repo-settings/main-ruleset.json`.
+
+## Dependabot Auto-Merge
+
+`.github/workflows/dependabot-auto-merge.yml` arms GitHub auto-merge
+(squash) on every Dependabot pull request except major version bumps, which
+wait for a maintainer. The ruleset stays the gate: nothing merges until every
+required check passes on a branch that is up to date with `main`. The job
+reads only the pull request's commit metadata through the API; it never checks
+out or runs pull-request code, so its job-scoped write token is not exposed to
+it.
+
+Limits:
+
+- Auto-merge does not update a branch that falls behind `main`, and
+  `update-branch` would create unsigned commits. The two Dependabot ecosystems
+  are scheduled on different days so their pull requests rarely overlap. A
+  pull request left behind needs an `@dependabot rebase` comment.
+- Merges made this way are attributed to `github-actions[bot]`, so they do not
+  start `push` workflows: CI does not rerun on `main` after them. The strict
+  checks already ran on the same tree.
+- Allow auto-merge is not in the drift baseline. Turn it on with
+  `gh api -X PATCH repos/inxbit/pinghue -F allow_auto_merge=true`.
 
 ## Release Tag Ruleset
 

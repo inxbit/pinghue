@@ -1,9 +1,13 @@
 version: 2
 updates:
+  # The two ecosystems run on different days: with strict required checks,
+  # merging one Dependabot PR leaves any other open one behind main, and
+  # auto-merge does not update a branch.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
     open-pull-requests-limit: 5
     groups:
       github-actions:
@@ -14,6 +18,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+      day: thursday
     open-pull-requests-limit: 5
     groups:
       python-tooling:
